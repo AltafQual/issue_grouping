@@ -1,3 +1,5 @@
-issue_grouping
+venv
 test_data
 experiments
+models
+__pycache__
