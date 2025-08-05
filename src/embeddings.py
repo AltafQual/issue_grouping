@@ -1,6 +1,5 @@
 import abc
 
-import pandas as pd
 from sentence_transformers import SentenceTransformer
 
 from qgenie.integrations.langchain import QGenieEmbeddings

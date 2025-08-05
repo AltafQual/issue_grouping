@@ -8,8 +8,10 @@ import streamlit as st
 from sklearn.cluster import HDBSCAN
 
 from src import helpers
+from src.constants import DataFrameKeys
 from src.data_loader import ExcelLoader
 from src.embeddings import QGenieBGEM3Embedding
+from src.qgenie import qgenie_post_processing
 
 
 class FailureAnalyzer:
@@ -52,7 +54,6 @@ class FailureAnalyzer:
     ) -> pd.DataFrame:
         """Perform the complete analysis workflow."""
         # Load data
-        pre_processed_column_name = "preprocessed_reason"
         if file_path:
             dataframe = self.load_data(file_path)
         elif st_object:
@@ -64,24 +65,38 @@ class FailureAnalyzer:
             # Generate embeddings
             failure_texts = dataframe[failure_column].astype(str).tolist()
             failure_texts = [helpers.preprocess_error_log(text) for text in failure_texts]
-            failure_df = helpers.remove_empty_and_misc_rows(dataframe, failure_texts)
+            failure_df = helpers.remove_empty_and_misc_rows(
+                dataframe, failure_texts, DataFrameKeys.preprocessed_text_key
+            )
 
         with st.spinner("Generating embeddings"):
             start = time.time()
-            embeddings = self.generate_embeddings(failure_df[pre_processed_column_name].tolist())
-            failure_df["embeddings"] = list(embeddings)
-            st.info(f"Embeddings generated in {time.time() - start} seconds")
+            embeddings = self.generate_embeddings(failure_df[DataFrameKeys.preprocessed_text_key].tolist())
+            failure_df[DataFrameKeys.embeddings_key] = list(embeddings)
+            st.info(f"Embeddings generated in {round(time.time() - start,2)} seconds")
 
         # Cluster embeddings
-        clustering_col_label = "cluster"
-        failure_df[clustering_col_label] = self.cluster_embeddings(embeddings)
-        merged_groups = helpers.merge_similar_clusters(embeddings, list(failure_df[clustering_col_label].unique()))
-        failure_df = helpers.update_labels_with_merged_clusters(failure_df, merged_groups, clustering_col_label)
+        failure_df[DataFrameKeys.cluster_type_int] = self.cluster_embeddings(embeddings)
+        # save copy of cluster into new column later will be replaced with the actual names from Qgeneie
+        failure_df[DataFrameKeys.cluster_name] = failure_df[DataFrameKeys.cluster_type_int].copy()
+        failure_df[DataFrameKeys.cluster_name] = failure_df[DataFrameKeys.cluster_name].astype("object")
+
+        merged_groups = helpers.merge_similar_clusters(
+            embeddings, list(failure_df[DataFrameKeys.cluster_type_int].unique())
+        )
+        failure_df = helpers.update_labels_with_merged_clusters(
+            failure_df, merged_groups, DataFrameKeys.cluster_type_int
+        )
 
         # Log cluster statistics
-        cluster_counts = failure_df["cluster"].value_counts()
+        cluster_counts = failure_df[DataFrameKeys.cluster_type_int].value_counts()
         self.logger.info(f"Found {len(cluster_counts) - (1 if -1 in cluster_counts else 0)} clusters")
         self.logger.info(f"Noise points: {cluster_counts.get(-1, 0)}")
+
+        with st.spinner("QGenie Post Processing Cluster"):
+            start = time.time()
+            failure_df = qgenie_post_processing(failure_df)
+            st.info(f"QGenie post processing completed in {round(time.time() - start,2)} seconds")
         return failure_df
 
     def save_results(self, data: pd.DataFrame, output_path: Optional[str] = None) -> None:

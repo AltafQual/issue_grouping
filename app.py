@@ -1,5 +1,8 @@
-import streamlit as st
 import os
+
+import streamlit as st
+
+from src.constants import DataFrameKeys
 from src.failure_analyzer import FailureAnalyzer
 
 analyzer = FailureAnalyzer()
@@ -21,17 +24,16 @@ if uploaded_file is not None:
             # Display the clustered data
             st.subheader("Clustered Data")
 
-            cluster_column = "cluster"  # Change this to your actual column name
             COL_TO_SHOW = ["tc_uuid", "soc_name", "reason", "log"]
-            clusters = clustered_df[cluster_column].unique()
+            clusters = clustered_df[DataFrameKeys.cluster_name].unique()
             st.info(f"Total clusters created: {len(clusters)}")
-            
+
             # Create a tab for each cluster
-            tabs = st.tabs([f"Cluster {c}" for c in clusters])
+            tabs = st.tabs([f"{c}" for c in clusters])
             for tab, cluster in zip(tabs, clusters):
                 with tab:
-                    _sub_cluster = clustered_df[clustered_df[cluster_column] == cluster][COL_TO_SHOW]
-                    st.subheader(f"Cluster {cluster} - Total Rows {_sub_cluster.shape[0]}")
+                    _sub_cluster = clustered_df[clustered_df[DataFrameKeys.cluster_name] == cluster][COL_TO_SHOW]
+                    st.subheader(f"{cluster} - Total Rows {_sub_cluster.shape[0]}")
                     st.dataframe(_sub_cluster)
 
             # # Download the clustered data as CSV

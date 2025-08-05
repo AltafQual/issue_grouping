@@ -60,7 +60,7 @@ def load_cached_model(model_name="BAAI/bge-m3", models_dir="models"):
         return None
 
 
-def remove_empty_and_misc_rows(df: pd.DataFrame, errors: list, error_column_name="preprocessed_reason"):
+def remove_empty_and_misc_rows(df: pd.DataFrame, errors: list, error_column_name: str):
     def has_alphabets(s):
         return bool(re.search(r"[a-zA-Z]", s))
 

@@ -1,34 +1,36 @@
 CLUSTERING_SYS_MESSAGE = """
+
 You are an expert in log analysis and clustering. You will be given a list of error logs from a cluster.
 
-Think step-by-step:
-1. Carefully read and understand the nature of each error log.
-2. Identify common patterns or themes across the logs.
-3. Based on these patterns, suggest a short, meaningful name for the cluster that reflects the error type or context.
-4. Use PascalCase (no spaces, each word capitalized) for all cluster names to maintain consistency.
-5. Review each log and determine if any are unrelated or wrongly grouped in the cluster.
+Your task is to:
+- Analyze the logs and identify a common theme or pattern.
+- Suggest a short, meaningful cluster name that reflects the error type or context.
+- Use PascalCase formatting for the cluster name (no spaces, each word capitalized).
+- Identify any logs that appear misclassified or unrelated to the cluster.
 
-Respond in JSON format with two keys:
-    key1 - "cluster_name":  value1 - "<name>",
-    key2 -"misclassified_ids": value2 - [<list of log IDs>]
+Return the result strictly as a JSON as shown below. Do not include any explanation or extra text:
+
+  {{
+  "cluster_name": "<name in PascalCase>",
+    "misclassified_ids": [<list of log IDs that are misclassified otherwise empty list>]
+    }}
 """
 CLUSTERING_LOG_MESSAGE = """Here is the data:
 {error_logs}
 """
 
 MERGE_PROMPT_TEMPLATE = """
-You are an expert in log clustering. Below are two clusters with similar names and sample error logs.
+You are an expert in log clustering. You will be given two clusters with similar names and sample error logs.
 
-Think step-by-step:
-1. Carefully read and understand each error log in both clusters.
-2. Identify common patterns, keywords, or themes that suggest the clusters are related.
-3. Based on these patterns, suggest a short, meaningful name for the merged cluster that reflects the nature of the grouped errors.
-4. Use PascalCase (no spaces, each word capitalized) for all cluster names to maintain consistency.
-5. Analyze each log thoroughly and determine if any are unrelated or wrongly grouped in the merged cluster. These should be flagged as outliers.
+Your task is to:
+- Analyze the logs in both clusters and identify common patterns or themes.
+- Suggest a short, meaningful name for the merged cluster that reflects the nature of the grouped errors.
+- Use PascalCase formatting for the cluster name (no spaces, each word capitalized).
+- Identify any logs that appear unrelated or wrongly grouped in the merged cluster. These should be flagged as outliers.
 
-Respond in JSON format:
+Return the result strictly as a JSON as shown below. Do not include any explanation or extra text:
 {{
-  "merged_name": "<name>",
+  "merged_name": "<name in PascalCase>",
   "outlier_indices": [<list of indices>]
 }}
 
@@ -43,20 +45,15 @@ Cluster B (ID: {id_b}):
 """
 
 RECLUSTERING_PROMPT = """
-You are an expert in log clustering. Follow these steps to accurately group the unclustered error logs:
 
-Step 1: Understand the Logs
-- Carefully read each error log and identify its key components such as:
-  - Error type
-  - Affected service/module
-  - Common keywords or patterns
+You are an expert in log clustering. You will be given a list of unclustered error logs.
 
-Step 2: Create New Clusters
-- Group similar logs together based on shared characteristics.
-- Assign a short, meaningful name to the new cluster that reflects the nature of the errors in PascalCase
+Your task is to:
+- Group similar logs together based on shared characteristics such as error type, affected module, or common keywords.
+- Assign a short, meaningful name to each new cluster using PascalCase formatting (no spaces, each word capitalized).
+- Return the result strictly as a JSON list. Do not include any explanation or extra text
 
-Step 3: Output Format
-- Return the results as a List of JSONs ALWAYS, where each json is for each cluster:
+Each JSON object must follow this format:
 - "cluster_name": New cluster name in PascalCase
 - "log_indices": list of indices belonging to that cluster
 
