@@ -41,9 +41,10 @@ def generate_cluster_name(grouped_cluster: list):
     prompt_template = ChatPromptTemplate.from_messages(
         [("system", prompts.CLUSTER_NAMING_SYS_MESSAGE), ("human", prompts.CLUSTER_NAMING_LOG_MESSAGE)]
     )
-
+    logs = grouped_cluster[DataFrameKeys.preprocessed_text_key].tolist()
+    logs = logs[:5] if len(logs) > 5 else logs
     chain = prompt_template | model | nameparser
-    response = chain.invoke({"logs": grouped_cluster[:5] if len(grouped_cluster) > 5 else grouped_cluster})
+    response = chain.invoke({"logs": logs})
     return response
 
 
@@ -143,7 +144,7 @@ def merge_duplicate_clusters(
 
             # Move outliers to cluster -1
             outlier_indices = [int(index) for index in response.get("outlier_indices")]
-            df.loc[df.index.isin(outlier_indices), DataFrameKeys.cluster_type_int] = ClusterSpecificKeys.non_grouped_key
+            df.loc[outlier_indices, DataFrameKeys.cluster_type_int] = ClusterSpecificKeys.non_grouped_key
 
             # Remove next_cluster from results
             if next_cluster_id in cluster_results:
@@ -183,7 +184,10 @@ def recluster_with_context(df: pd.DataFrame) -> pd.DataFrame:
                 indices = [int(index) for index in indices]
 
         if name and indices:
-            df.loc[df.index.isin(indices), DataFrameKeys.cluster_name] = name
+            df.loc[indices, DataFrameKeys.cluster_name] = name
+            # 200 specifies the reclustered grouped using gpt in which each cluster doesn't belong to new cluster id
+            # instead same cluster id is defined but cluster names will be different
+            df.loc[indices, DataFrameKeys.cluster_type_int] = ClusterSpecificKeys.default_cluster_key
 
     return df
 
@@ -200,13 +204,15 @@ def qgenie_post_processing(df: pd.DataFrame) -> pd.DataFrame:
     Returns:
     - pd.DataFrame: The dataframe with post-processed data.
     """
-
+    # import pdb; pdb.set_trace()
     analyzed_results = get_clusters_name_and_misclassified_errors(df)
     duplicate_clusters = get_duplicate_clusters(analyzed_results)
     df, analyzed_results = merge_duplicate_clusters(df, duplicate_clusters, analyzed_results)
     df = give_cluster_names_and_reassign_misc_clusters(df, analyzed_results)
-    # df = recluster_with_context(df)
+    df = recluster_with_context(df)
 
     # rename -1 cluster to be as Others
-    df.loc[df.index.isin([str(ClusterSpecificKeys.non_grouped_key)]), DataFrameKeys.cluster_name] = "Others"
+    df.loc[df[DataFrameKeys.cluster_type_int] == ClusterSpecificKeys.non_grouped_key, DataFrameKeys.cluster_name] = (
+        "Others"
+    )
     return df

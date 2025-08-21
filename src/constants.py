@@ -12,3 +12,4 @@ class DataFrameKeys:
 
 class ClusterSpecificKeys:
     non_grouped_key: int = -1
+    default_cluster_key: int = 200

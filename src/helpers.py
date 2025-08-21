@@ -90,7 +90,7 @@ def remove_empty_and_misc_rows(df: pd.DataFrame, errors: list, error_column_name
     return df
 
 
-def merge_similar_clusters(embeddings, labels, threshold=0.90):
+def merge_similar_clusters(embeddings, labels, threshold=0.95):
     unique_labels = set(labels) - {-1}
     centroids = {
         label: np.mean([embeddings[i] for i in range(len(labels)) if labels[i] == label], axis=0)
@@ -168,7 +168,7 @@ def group_similar_errors(df: pd.DataFrame, column: str, threshold):
     return groups
 
 
-def fuzzy_cluster_grouping(failures_dataframe, threshold=95, bin_intervals=[[0, 50], [50, 100]]):
+def fuzzy_cluster_grouping(failures_dataframe, threshold=100, bin_intervals=[[0, 50], [50, 100]]):
     failures_dataframe.loc[:, DataFrameKeys.error_logs_length] = failures_dataframe[
         DataFrameKeys.preprocessed_text_key
     ].apply(len)

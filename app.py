@@ -47,26 +47,37 @@ if uploaded_file is not None and not st.session_state.processed:
 
 # Show results only if processed
 if st.session_state.processed and st.session_state.clustered_df is not None:
-    clustered_df = st.session_state.clustered_df
+    try:
+        clustered_df = st.session_state.clustered_df
 
-    st.subheader("Clustered Data")
-    COL_TO_SHOW = ["tc_uuid", "soc_name", "reason", "log", DataFrameKeys.cluster_name]
-    clusters = clustered_df[DataFrameKeys.cluster_name].unique()
-    st.info(f"Total clusters created: {len(clusters)}")
+        st.subheader("Clustered Data")
+        COL_TO_SHOW = [
+            "tc_uuid",
+            "soc_name",
+            "reason",
+            DataFrameKeys.preprocessed_text_key,
+            "log",
+            DataFrameKeys.cluster_name,
+        ]
+        clusters = clustered_df[DataFrameKeys.cluster_name].unique()
+        st.info(f"Total clusters created: {len(clusters)}")
 
-    tabs = st.tabs([f"{c}" for c in clusters])
-    for tab, cluster in zip(tabs, clusters):
-        with tab:
-            _sub_cluster = clustered_df[clustered_df[DataFrameKeys.cluster_name] == cluster][COL_TO_SHOW]
-            st.subheader(f"{cluster} - Total Rows {_sub_cluster.shape[0]}")
-            st.dataframe(_sub_cluster)
+        tabs = st.tabs([f"{c}" for c in clusters])
+        for tab, cluster in zip(tabs, clusters):
+            with tab:
+                _sub_cluster = clustered_df[clustered_df[DataFrameKeys.cluster_name] == cluster][COL_TO_SHOW]
+                st.subheader(f"{cluster} - Total Rows {_sub_cluster.shape[0]}")
+                st.dataframe(_sub_cluster)
 
-    # Create Excel with multiple sheets
-    excel_data = create_excel_with_clusters(clustered_df, DataFrameKeys.cluster_name, COL_TO_SHOW)
+        # Create Excel with multiple sheets
+        excel_data = create_excel_with_clusters(clustered_df, DataFrameKeys.cluster_name, COL_TO_SHOW)
 
-    st.download_button(
-        label="Download clustered data as Excel",
-        data=excel_data,
-        file_name="clustered_output.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    )
+        st.write("**Please wait for few seconds after clicking Download button** 🙏")
+        st.download_button(
+            label="Download clustered data as Excel",
+            data=excel_data,
+            file_name=f"{uploaded_file.name}_clustered.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+    except Exception as e:
+        st.error(e)
