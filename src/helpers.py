@@ -83,8 +83,8 @@ def remove_empty_and_misc_rows(df: pd.DataFrame, errors: list, error_column_name
         return -1
 
     def mask_numbers(text):
-        # Replace floating point numbers and integers with a placeholder
-        return re.sub(r"\d+(\.\d+)?", "<NUM>", text)
+        # Match standalone numbers (not part of a word)
+        return re.sub(r"(?<!\w)(\d+(\.\d+)?)(?!\w)", "<NUM>", text)
 
     df[error_column_name] = errors
     # Apply filters
@@ -184,7 +184,7 @@ def group_similar_errors(df: pd.DataFrame, column: str, threshold):
 
 
 @execution_timer
-async def fuzzy_cluster_grouping(failures_dataframe, threshold=100, bin_intervals=[[0, 50], [50, 100]]):
+async def fuzzy_cluster_grouping(failures_dataframe, threshold=100, bin_intervals=[[0, 50], [50, 100], [100, 150]]):
     failures_dataframe.loc[:, DataFrameKeys.error_logs_length] = failures_dataframe[
         DataFrameKeys.preprocessed_text_key
     ].apply(len)

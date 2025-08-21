@@ -8,6 +8,11 @@ from src.constants import DataFrameKeys
 from src.failure_analyzer import FailureAnalyzer
 from src.helpers import create_excel_with_clusters, get_tc_ids_from_sql
 
+# To avoid any asyncio loop, concurrent blocking operations/issues
+import nest_asyncio
+
+nest_asyncio.apply()
+
 ################################## Configurations and Global Streamlit Sessions ####################################
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("Issue Grouping")
@@ -17,7 +22,7 @@ st.set_page_config(page_title="Issue Grouping", page_icon=":material/group:", la
 # Initialize session state variables
 if "tc_ids_options" not in st.session_state:
     try:
-        with st.spinner("Let me Cook... 🧑‍🍳"):
+        with st.spinner("Getting TC IDS for tests from SQL ..."):
             st.session_state.tc_ids_options = get_tc_ids_from_sql()
     except Exception as e:
         logger.info(f"Failed to load test case IDs: {str(e)}")
@@ -55,9 +60,7 @@ with st.form("input_form"):
                 tc_options = st.session_state.tc_ids_options["testplan_id"].tolist()
             except Exception:
                 pass
-        selected_tc_id_form = st.selectbox(
-            "Select a Test Case ID", options=tc_options, index=None
-        )
+        selected_tc_id_form = st.selectbox("Select a Test Case ID", options=tc_options, index=None)
 
     process_button = st.form_submit_button("Process Data")
 

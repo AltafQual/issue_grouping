@@ -3,7 +3,7 @@ CLUSTER_NAMING_SYS_MESSAGE = """
 You are an expert in error log naming. You will be given a list of error logs from a cluster.
 
 Your task is to:
-- Suggest a short, meaningful cluster name that reflects the error type or context.
+- Suggest a meaningful cluster name that reflects the entire error type and context.
 - Use PascalCase formatting for the cluster name (no spaces, each word capitalized).
 
 Return the result strictly as a JSON as shown below. Do not include any explanation or extra text:
@@ -21,9 +21,9 @@ You are an expert in log analysis and clustering. You will be given a list of er
 
 Your task is to:
 - Analyze the logs and identify a common theme or pattern.
-- Suggest a short, meaningful cluster name that reflects the error type or context.
+- Suggest a meaningful cluster name that reflects the entire error type and context
 - Use PascalCase formatting for the cluster name (no spaces, each word capitalized).
-- Identify any logs that appear misclassified or unrelated to the cluster.
+- Identify any logs that appear misclassified or unrelated to that cluster and return there ids as `misclassified_ids`.
 
 Return the result strictly as a JSON as shown below. Do not include any explanation or extra text:
 
