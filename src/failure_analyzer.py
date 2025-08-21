@@ -82,7 +82,7 @@ class FailureAnalyzer:
             )
             # Apply to your dataframe
             failure_df = helpers.trim_error_logs(failure_df)
-            failure_df = await helpers.fuzzy_cluster_grouping(failure_df)
+            failure_df = helpers.fuzzy_cluster_grouping(failure_df)
             already_clustered_df = failure_df[failure_df[DataFrameKeys.cluster_name] != -1]
             failure_df = failure_df[failure_df[DataFrameKeys.cluster_name] == -1]
             self.logger.info(
@@ -114,7 +114,7 @@ class FailureAnalyzer:
 
             with st.spinner("QGenie Post Processing Cluster"):
                 start = time.time()
-                failure_df = await qgenie_post_processing(failure_df)
+                failure_df = qgenie_post_processing(failure_df)
                 st.info(f"QGenie post processing completed in {round(time.time() - start,2)} seconds")
 
         # Merge the already clustered and newly clustered DataFrames

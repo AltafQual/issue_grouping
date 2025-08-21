@@ -4,3 +4,4 @@ experiments
 models
 __pycache__
 issue_grouping_hosting/
+*.parquet

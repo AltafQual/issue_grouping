@@ -1,12 +1,11 @@
-import asyncio
 import logging
 import os
 import re
-import time
 from io import BytesIO
 
 import numpy as np
 import pandas as pd
+from apscheduler.schedulers.background import BackgroundScheduler
 from rapidfuzz import fuzz
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -184,7 +183,7 @@ def group_similar_errors(df: pd.DataFrame, column: str, threshold):
 
 
 @execution_timer
-async def fuzzy_cluster_grouping(failures_dataframe, threshold=100, bin_intervals=[[0, 50], [50, 100], [100, 150]]):
+def fuzzy_cluster_grouping(failures_dataframe, threshold=100, bin_intervals=[[0, 50], [50, 100], [100, 150]]):
     failures_dataframe.loc[:, DataFrameKeys.error_logs_length] = failures_dataframe[
         DataFrameKeys.preprocessed_text_key
     ].apply(len)
@@ -205,11 +204,10 @@ async def fuzzy_cluster_grouping(failures_dataframe, threshold=100, bin_interval
             threshold,
         )
 
-        results_list = await asyncio.gather(
-            *[generate_cluster_name(failures_dataframe.iloc[group]) for group in grouped_indices]
-        )
-        for grp_index, result in enumerate(results_list):
-            failures_dataframe.loc[grouped_indices[grp_index], DataFrameKeys.cluster_name] = result["cluster_name"]
+        # Replace async gather with synchronous processing
+        for group in grouped_indices:
+            result = generate_cluster_name(failures_dataframe.iloc[group])
+            failures_dataframe.loc[group, DataFrameKeys.cluster_name] = result["cluster_name"]
 
     return failures_dataframe
 
@@ -228,10 +226,28 @@ def create_excel_with_clusters(df, cluster_column, columns_to_include):
 
 @execution_timer
 def get_tc_ids_from_sql():
-    run_ids = sql_connection.fetch_runids()
-    return run_ids
+    parquet_file = "run_ids.parquet"
+    if os.path.exists(parquet_file):
+        df = pd.read_parquet(parquet_file)
+        return df
+    else:
+        run_ids = sql_connection.fetch_runids()
+        run_ids.to_parquet(parquet_file)
+        return run_ids
 
 
 @execution_timer
 def get_tc_id_df(tc_id: str):
     return sql_connection.fetch_result_based_on_runid(tc_id)
+
+
+def tc_id_scheduler():
+    def update_tc_ids():
+        logger.info("Running tc ids updation background job")
+        run_ids = sql_connection.fetch_runids()
+        run_ids.to_parquet("tc_ids.parquet")
+        logger.info("Background task updated Parquet file")
+
+    scheduler = BackgroundScheduler()
+    scheduler.add_job(update_tc_ids, "interval", hours=6)
+    scheduler.start()

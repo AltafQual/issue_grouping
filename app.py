@@ -1,20 +1,21 @@
 import asyncio
 import logging
+import traceback
 
+# To avoid any asyncio loop, concurrent blocking operations/issues
+import nest_asyncio
 import pandas as pd
 import streamlit as st
 
 from src.constants import DataFrameKeys
 from src.failure_analyzer import FailureAnalyzer
-from src.helpers import create_excel_with_clusters, get_tc_ids_from_sql
-
-# To avoid any asyncio loop, concurrent blocking operations/issues
-import nest_asyncio
+from src.helpers import create_excel_with_clusters, get_tc_ids_from_sql, tc_id_scheduler
 
 nest_asyncio.apply()
 
 ################################## Configurations and Global Streamlit Sessions ####################################
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+tc_id_scheduler()
 logger = logging.getLogger("Issue Grouping")
 
 st.set_page_config(page_title="Issue Grouping", page_icon=":material/group:", layout="wide")
@@ -25,6 +26,7 @@ if "tc_ids_options" not in st.session_state:
         with st.spinner("Getting TC IDS for tests from SQL ..."):
             st.session_state.tc_ids_options = get_tc_ids_from_sql()
     except Exception as e:
+        traceback.print_exc()
         logger.info(f"Failed to load test case IDs: {str(e)}")
         st.session_state.tc_ids_options = pd.DataFrame()
 
@@ -59,6 +61,7 @@ with st.form("input_form"):
             try:
                 tc_options = st.session_state.tc_ids_options["testplan_id"].tolist()
             except Exception:
+                traceback.print_exc()
                 pass
         selected_tc_id_form = st.selectbox("Select a Test Case ID", options=tc_options, index=None)
 
@@ -114,6 +117,7 @@ if process_button:
                     st.session_state.processed_data = True
                     st.session_state.last_processed_source = {"type": current_input_type, "value": current_input_value}
                 except Exception as e:
+                    traceback.print_exc()
                     st.error(f"Error during analysis: {str(e)}")
                     st.session_state.processed_data = False
                     st.session_state.clustered_df = None
@@ -135,7 +139,7 @@ if (
         COL_TO_SHOW = [
             "tc_uuid",
             "soc_name",
-            "reason"
+            "reason",
             "log",
             DataFrameKeys.cluster_name,
         ]
@@ -178,7 +182,9 @@ if (
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 )
             except Exception as e:
+                traceback.print_exc()
                 st.error(f"Error creating Excel file: {str(e)}")
 
     except Exception as e:
+        traceback.print_exc()
         st.error(f"Error displaying results: {str(e)}")

@@ -67,7 +67,8 @@ You are an expert in log clustering. You will be given a list of unclustered err
 
 Your task is to:
 - Group similar logs together based on shared characteristics such as error type, affected module, or common keywords.
-- Assign a short, meaningful name to each new cluster using PascalCase formatting (no spaces, each word capitalized).
+- Retun the correct index of the error logs to group together as `log_indices` (INDEX SHOULD BE CORRECT IT IS VERY CRITICAL)
+- Suggest a meaningful cluster name that reflects the entire error type and context.
 - Return the result strictly as a JSON list. Do not include any explanation or extra text
 
 Each JSON object must follow this format:

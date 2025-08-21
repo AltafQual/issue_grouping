@@ -1,4 +1,6 @@
-import asyncio
+import logging
+import time
+import traceback
 from collections import defaultdict
 
 import pandas as pd
@@ -7,9 +9,11 @@ from langchain_core.output_parsers import JsonOutputParser
 from pydantic import BaseModel, Field
 
 from qgenie.integrations.langchain import QGenieChat
-from src import helpers, prompts
+from src import prompts
 from src.constants import QGENEIE_API_KEY, ClusterSpecificKeys, DataFrameKeys
 from src.execution_timer_log import execution_timer
+
+logger = logging.getLogger(__name__)
 
 model = QGenieChat(model="Pro", api_key=QGENEIE_API_KEY, temperature=0.3)
 
@@ -39,19 +43,19 @@ nameparser = JsonOutputParser(pydantic_object=NameClusteringResult)
 
 
 @execution_timer
-async def generate_cluster_name(grouped_cluster: list) -> dict:
+def generate_cluster_name(grouped_cluster: list) -> dict:
     prompt_template = ChatPromptTemplate.from_messages(
         [("system", prompts.CLUSTER_NAMING_SYS_MESSAGE), ("human", prompts.CLUSTER_NAMING_LOG_MESSAGE)]
     )
     logs = grouped_cluster[DataFrameKeys.preprocessed_text_key].tolist()
     logs = logs[:5] if len(logs) > 5 else logs
     chain = prompt_template | model | nameparser
-    response = await chain.ainvoke({"logs": logs})
+    response = chain.invoke({"logs": logs})
     return response
 
 
 @execution_timer
-async def analyze_cluster(cluster_df: pd.DataFrame) -> dict:
+def analyze_cluster(cluster_df: pd.DataFrame) -> dict:
     # Prepare input text
     error_logs = [
         {"id": int(idx), "error log": row[DataFrameKeys.preprocessed_text_key]} for idx, row in cluster_df.iterrows()
@@ -62,12 +66,12 @@ async def analyze_cluster(cluster_df: pd.DataFrame) -> dict:
     )
 
     chain = prompt_template | model | parser
-    response = await chain.ainvoke({"error_logs": error_logs})
+    response = chain.invoke({"error_logs": error_logs})
     return response
 
 
 @execution_timer
-async def merge_clusters(df: pd.DataFrame, cluster_id_a: int, cluster_id_b: int) -> MergeResult:
+def merge_clusters(df: pd.DataFrame, cluster_id_a: int, cluster_id_b: int) -> MergeResult:
     df_a = df[df[DataFrameKeys.cluster_type_int] == cluster_id_a]
     df_b = df[df[DataFrameKeys.cluster_type_int] == cluster_id_b]
 
@@ -79,27 +83,22 @@ async def merge_clusters(df: pd.DataFrame, cluster_id_a: int, cluster_id_b: int)
     ]
 
     chain = ChatPromptTemplate.from_template(prompts.MERGE_PROMPT_TEMPLATE) | model | merge_parser
-    response = await chain.ainvoke({"id_a": cluster_id_a, "logs_a": logs_a, "id_b": cluster_id_b, "logs_b": logs_b})
+    response = chain.invoke({"id_a": cluster_id_a, "logs_a": logs_a, "id_b": cluster_id_b, "logs_b": logs_b})
 
     return response
 
 
 @execution_timer
-async def get_clusters_name_and_misclassified_errors(df: pd.DataFrame) -> dict:
-    tasks = []
-    cluster_ids = []
-
+def get_clusters_name_and_misclassified_errors(df: pd.DataFrame) -> dict:
+    results = {}
     for cluster_id in df[DataFrameKeys.cluster_type_int].unique():
         # avoid the miscellaneous cluster, that will be dealt with later
         if cluster_id == ClusterSpecificKeys.non_grouped_key:
             continue
 
         cluster_df = df[df[DataFrameKeys.cluster_type_int] == cluster_id]
-        tasks.append(analyze_cluster(cluster_df))
-        cluster_ids.append(int(cluster_id))
-
-    results_list = await asyncio.gather(*tasks)
-    results = {cluster_id: result for cluster_id, result in zip(cluster_ids, results_list)}
+        result = analyze_cluster(cluster_df)
+        results[int(cluster_id)] = result
     return results
 
 
@@ -115,21 +114,17 @@ def get_duplicate_clusters(results: dict) -> dict:
 
 
 @execution_timer
-async def merge_duplicate_clusters(
+def merge_duplicate_clusters(
     df: pd.DataFrame, duplicate_clusters: dict, cluster_results: dict
 ) -> tuple[pd.DataFrame, dict]:
     for duplicate_name, cluster_ids in duplicate_clusters.items():
         # Start with the first cluster as base
         base_cluster_id = cluster_ids[0]
 
-        merge_tasks = []
         for next_cluster_id in cluster_ids[1:]:
             print(f"Merging {base_cluster_id} and {next_cluster_id} for name '{duplicate_name}'")
-            merge_tasks.append((next_cluster_id, merge_clusters(df, base_cluster_id, next_cluster_id)))
+            response = merge_clusters(df, base_cluster_id, next_cluster_id)
 
-        merge_results = await asyncio.gather(*[task[1] for task in merge_tasks])
-
-        for (next_cluster_id, _), response in zip(merge_tasks, merge_results):
             # Update base cluster name
             cluster_results[base_cluster_id]["cluster_name"] = response["merged_name"]
 
@@ -165,33 +160,51 @@ def give_cluster_names_and_reassign_misc_clusters(df: pd.DataFrame, cluster_resu
 
 
 @execution_timer
-async def recluster_with_context(df: pd.DataFrame) -> pd.DataFrame:
+def recluster_with_context(df: pd.DataFrame) -> pd.DataFrame:
     unclustered_df = df[df[DataFrameKeys.cluster_type_int] == ClusterSpecificKeys.non_grouped_key]
     error_logs = [
         {"index": int(idx), "error log": row[DataFrameKeys.preprocessed_text_key]}
         for idx, row in unclustered_df.iterrows()
     ]
     chain = ChatPromptTemplate.from_template(prompts.RECLUSTERING_PROMPT) | model | recluster_parser
-    outliers_recluster_results = await chain.ainvoke({"error_logs": error_logs})
+    outliers_recluster_results = chain.invoke({"error_logs": error_logs})
+    # Create a set of valid indices from the DataFrame for efficient lookup
+    df_index_set = set(df.index)
+
     for result in outliers_recluster_results:
         name, indices = result.get("cluster_name"), result.get("log_indices")
         if name and indices:
-            if not type(indices) == list:
-                indices = [int(indices)]
+            if not isinstance(indices, list):
+                # If it's a single value, ensure it's convertible to int and put in a list
+                try:
+                    indices = [int(indices)]
+                except (ValueError, TypeError):
+                    logger.warning(f"Invalid single index received: {indices}")
+                    continue
             else:
-                indices = [int(index) for index in indices]
+                # Filter out non-integer values and convert to int
+                indices = [
+                    int(idx) for idx in indices if isinstance(idx, (int, float))
+                ]  # ensure is int or float before conversion
 
-        if name and indices:
-            df.loc[indices, DataFrameKeys.cluster_name] = name
-            # 200 specifies the reclustered grouped using gpt in which each cluster doesn't belong to new cluster id
-            # instead same cluster id is defined but cluster names will be different
-            df.loc[indices, DataFrameKeys.cluster_type_int] = ClusterSpecificKeys.default_cluster_key
+            # Filter out indices that are not present in the DataFrame's current index
+            valid_indices = [idx for idx in indices if idx in df_index_set]
+
+            if valid_indices:  # Only proceed if there are valid indices to update
+                df.loc[valid_indices, DataFrameKeys.cluster_name] = name
+                # 200 specifies the reclustered grouped using gpt in which each cluster doesn't belong to new cluster id
+                # instead same cluster id is defined but cluster names will be different
+                df.loc[valid_indices, DataFrameKeys.cluster_type_int] = ClusterSpecificKeys.default_cluster_key
+            else:
+                logger.warning(f"No valid indices found in DataFrame for recluster result: {result}")
+        else:
+            logger.warning(f"Missing name or indices in recluster result: {result}")
 
     return df
 
 
 @execution_timer
-async def qgenie_post_processing(df: pd.DataFrame) -> pd.DataFrame:
+def qgenie_post_processing(df: pd.DataFrame) -> pd.DataFrame:
     """Perform post-processing on the dataframe to handle outlier clusters.
 
     This function identifies outlier clusters, retrieves GPT responses for them,
@@ -203,14 +216,18 @@ async def qgenie_post_processing(df: pd.DataFrame) -> pd.DataFrame:
     Returns:
     - pd.DataFrame: The dataframe with post-processed data.
     """
-    analyzed_results = await get_clusters_name_and_misclassified_errors(df)
-    duplicate_clusters = get_duplicate_clusters(analyzed_results)
-    df, analyzed_results = await merge_duplicate_clusters(df, duplicate_clusters, analyzed_results)
-    df = give_cluster_names_and_reassign_misc_clusters(df, analyzed_results)
-    df = await recluster_with_context(df)
+    try:
+        analyzed_results = get_clusters_name_and_misclassified_errors(df)
+        duplicate_clusters = get_duplicate_clusters(analyzed_results)
+        df, analyzed_results = merge_duplicate_clusters(df, duplicate_clusters, analyzed_results)
+        df = give_cluster_names_and_reassign_misc_clusters(df, analyzed_results)
+        df = recluster_with_context(df)
 
-    # rename -1 cluster to be as Others
-    df.loc[df[DataFrameKeys.cluster_type_int] == ClusterSpecificKeys.non_grouped_key, DataFrameKeys.cluster_name] = (
-        "Others"
-    )
+        # rename -1 cluster to be as Others
+        df.loc[
+            df[DataFrameKeys.cluster_type_int] == ClusterSpecificKeys.non_grouped_key, DataFrameKeys.cluster_name
+        ] = "Others"
+    except Exception as e:
+        logger.error(f"Exception in Qgenie post processing: {e}")
+        traceback.print_exc()
     return df

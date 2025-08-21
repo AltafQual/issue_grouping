@@ -3,3 +3,4 @@ openpyxl==3.1.5
 sentence-transformers==4.1.0
 streamlit==1.47.0
 mysql-connector-python=9.4.0
+apscheduler==3.11.0
