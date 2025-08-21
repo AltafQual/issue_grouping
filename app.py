@@ -71,22 +71,23 @@ if process_button:
     current_input_value = None
     df_to_process = None
 
-    if uploaded_file_form:
-        current_input_type = "file"
-        current_input_value = uploaded_file_form.name  # Use file name as identifier for checking change
-        st.write("✅ File uploaded.")
-        df_to_process = analyzer.load_data(st_obj=uploaded_file_form)
-    elif selected_tc_id_form and selected_tc_id_form != "":
-        current_input_type = "tc_id"
-        current_input_value = selected_tc_id_form
-        st.write(f"✅ Selected Test Case ID: {selected_tc_id_form}")
-        df_to_process = analyzer.load_data(tc_id=selected_tc_id_form)
-    else:
-        st.warning("Please upload a file or select a Test Case ID to continue.")
-        st.session_state.processed_data = False  # Ensure not processed if no valid input
-        st.session_state.clustered_df = None
-        current_input_type = None  # Reset input type if no valid input
-        current_input_value = None
+    with st.spinner("loading data"):
+        if uploaded_file_form:
+            current_input_type = "file"
+            current_input_value = uploaded_file_form.name  # Use file name as identifier for checking change
+            st.write("✅ File uploaded.")
+            df_to_process = analyzer.load_data(st_obj=uploaded_file_form)
+        elif selected_tc_id_form and selected_tc_id_form != "":
+            current_input_type = "tc_id"
+            current_input_value = selected_tc_id_form
+            st.write(f"✅ Selected Test Case ID: {selected_tc_id_form}")
+            df_to_process = analyzer.load_data(tc_id=selected_tc_id_form)
+        else:
+            st.warning("Please upload a file or select a Test Case ID to continue.")
+            st.session_state.processed_data = False  # Ensure not processed if no valid input
+            st.session_state.clustered_df = None
+            current_input_type = None  # Reset input type if no valid input
+            current_input_value = None
 
     uploaded_file_form, selected_tc_id_form = None, None  # clear forms inputs after submission
 
@@ -134,8 +135,7 @@ if (
         COL_TO_SHOW = [
             "tc_uuid",
             "soc_name",
-            "reason",
-            DataFrameKeys.preprocessed_text_key,
+            "reason"
             "log",
             DataFrameKeys.cluster_name,
         ]
