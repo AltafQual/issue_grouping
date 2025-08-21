@@ -32,10 +32,13 @@ class FailureAnalyzer:
             logger.setLevel(logging.INFO)
         return logger
 
-    def load_data(self, file_path: str = None, st_obj=None) -> pd.DataFrame:
+    def load_data(self, file_path: str = None, st_obj=None, tc_id=None) -> pd.DataFrame:
         """Load data from the specified Excel file."""
         self.logger.info(f"Loading data")
-        return ExcelLoader.load(path=file_path, st_obj=st_obj)
+        if not tc_id:
+            return ExcelLoader.load(path=file_path, st_obj=st_obj)
+
+        return helpers.get_tc_id_df(tc_id)
 
     def generate_embeddings(self, texts: List[str]) -> np.ndarray:
         """Generate embeddings for the provided texts."""
@@ -67,6 +70,10 @@ class FailureAnalyzer:
 
         self.logger.info(f"Loaded {len(dataframe)} rows")
 
+        if dataframe.shape[0] <= 10:
+            st.warning("The Data should have more than 10 rows !!!")
+            return dataframe
+
         with st.spinner("Pre processing Error logs"):
             failure_texts = dataframe[failure_column].astype(str).tolist()
             failure_texts = [helpers.preprocess_error_log(text) for text in failure_texts]
@@ -75,39 +82,40 @@ class FailureAnalyzer:
             )
             # Apply to your dataframe
             failure_df = helpers.trim_error_logs(failure_df)
-            failure_df = helpers.fuzzy_cluster_grouping(failure_df)
+            failure_df = await helpers.fuzzy_cluster_grouping(failure_df)
             already_clustered_df = failure_df[failure_df[DataFrameKeys.cluster_name] != -1]
             failure_df = failure_df[failure_df[DataFrameKeys.cluster_name] == -1]
             self.logger.info(
                 f"{already_clustered_df.shape} already clustered logs and failure df size: {failure_df.shape}"
             )
 
-        with st.spinner("Generating embeddings"):
-            start = time.time()
-            embeddings = await self.agenerate_embeddings(failure_df[DataFrameKeys.preprocessed_text_key].tolist())
-            failure_df.loc[:, DataFrameKeys.embeddings_key] = list(embeddings)
-            st.info(f"Embeddings generated in {round(time.time() - start,2)} seconds")
+        if failure_df.shape[0] != 0:
+            with st.spinner("Generating embeddings"):
+                start = time.time()
+                embeddings = await self.agenerate_embeddings(failure_df[DataFrameKeys.preprocessed_text_key].tolist())
+                failure_df.loc[:, DataFrameKeys.embeddings_key] = list(embeddings)
+                st.info(f"Embeddings generated in {round(time.time() - start,2)} seconds")
 
-        # Cluster embeddings
-        failure_df.loc[:, DataFrameKeys.cluster_type_int] = self.cluster_embeddings(embeddings)
-        failure_df.loc[:, DataFrameKeys.cluster_name] = failure_df[DataFrameKeys.cluster_name].astype("object")
+            # Cluster embeddings
+            failure_df.loc[:, DataFrameKeys.cluster_type_int] = self.cluster_embeddings(embeddings)
+            failure_df.loc[:, DataFrameKeys.cluster_name] = failure_df[DataFrameKeys.cluster_name].astype("object")
 
-        merged_groups = helpers.merge_similar_clusters(
-            embeddings, list(failure_df[DataFrameKeys.cluster_type_int].unique())
-        )
-        failure_df = helpers.update_labels_with_merged_clusters(
-            failure_df, merged_groups, DataFrameKeys.cluster_type_int
-        )
+            merged_groups = helpers.merge_similar_clusters(
+                embeddings, list(failure_df[DataFrameKeys.cluster_type_int].unique())
+            )
+            failure_df = helpers.update_labels_with_merged_clusters(
+                failure_df, merged_groups, DataFrameKeys.cluster_type_int
+            )
 
-        # Log cluster statistics
-        cluster_counts = failure_df[DataFrameKeys.cluster_type_int].value_counts()
-        self.logger.info(f"Found {len(cluster_counts) - (1 if -1 in cluster_counts else 0)} clusters")
-        self.logger.info(f"Noise points: {cluster_counts.get(-1, 0)}")
+            # Log cluster statistics
+            cluster_counts = failure_df[DataFrameKeys.cluster_type_int].value_counts()
+            self.logger.info(f"Found {len(cluster_counts) - (1 if -1 in cluster_counts else 0)} clusters")
+            self.logger.info(f"Noise points: {cluster_counts.get(-1, 0)}")
 
-        with st.spinner("QGenie Post Processing Cluster"):
-            start = time.time()
-            failure_df = qgenie_post_processing(failure_df)
-            st.info(f"QGenie post processing completed in {round(time.time() - start,2)} seconds")
+            with st.spinner("QGenie Post Processing Cluster"):
+                start = time.time()
+                failure_df = await qgenie_post_processing(failure_df)
+                st.info(f"QGenie post processing completed in {round(time.time() - start,2)} seconds")
 
         # Merge the already clustered and newly clustered DataFrames
         final_df = pd.concat([already_clustered_df, failure_df], axis=0)

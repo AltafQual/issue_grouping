@@ -1,5 +1,8 @@
+import asyncio
+import logging
 import os
 import re
+import time
 from io import BytesIO
 
 import numpy as np
@@ -9,9 +12,15 @@ from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 
 from src.constants import DataFrameKeys
+from src.db_connections import ConnectToMySql
+from src.execution_timer_log import execution_timer
 from src.qgenie import generate_cluster_name
 
+logger = logging.getLogger(__name__)
+sql_connection = ConnectToMySql()
 
+
+@execution_timer
 def preprocess_error_log(log: str) -> str:
     # Step 1: Remove timestamps like "1077.9ms"
     log = re.sub(r"\b\d{1,4}(\.\d+)?ms\b", "", log)
@@ -39,6 +48,7 @@ def preprocess_error_log(log: str) -> str:
     return log.lower()
 
 
+@execution_timer
 def load_cached_model(model_name="BAAI/bge-m3", models_dir="models"):
     try:
         # Convert model name to Hugging Face cache format
@@ -65,6 +75,7 @@ def load_cached_model(model_name="BAAI/bge-m3", models_dir="models"):
         return None
 
 
+@execution_timer
 def remove_empty_and_misc_rows(df: pd.DataFrame, errors: list, error_column_name: str):
     def has_alphabets(s):
         if not bool(re.search(r"[a-zA-Z]", s)):
@@ -90,7 +101,8 @@ def remove_empty_and_misc_rows(df: pd.DataFrame, errors: list, error_column_name
     return df
 
 
-def merge_similar_clusters(embeddings, labels, threshold=0.95):
+@execution_timer
+def merge_similar_clusters(embeddings, labels, threshold=0.90):
     unique_labels = set(labels) - {-1}
     centroids = {
         label: np.mean([embeddings[i] for i in range(len(labels)) if labels[i] == label], axis=0)
@@ -113,6 +125,7 @@ def merge_similar_clusters(embeddings, labels, threshold=0.95):
     return merged
 
 
+@execution_timer
 def update_labels_with_merged_clusters(df, merged_clusters, label_col):
     # Create a mapping from old label to new (parent) label
     label_map = {}
@@ -125,6 +138,7 @@ def update_labels_with_merged_clusters(df, merged_clusters, label_col):
     return df
 
 
+@execution_timer
 def trim_error_logs(df: pd.DataFrame, column=DataFrameKeys.preprocessed_text_key, max_length=1000):
     def trim(log):
         try:
@@ -138,6 +152,7 @@ def trim_error_logs(df: pd.DataFrame, column=DataFrameKeys.preprocessed_text_key
     return df
 
 
+@execution_timer
 def group_similar_errors(df: pd.DataFrame, column: str, threshold):
     groups = []
     assigned = set()
@@ -168,7 +183,8 @@ def group_similar_errors(df: pd.DataFrame, column: str, threshold):
     return groups
 
 
-def fuzzy_cluster_grouping(failures_dataframe, threshold=100, bin_intervals=[[0, 50], [50, 100]]):
+@execution_timer
+async def fuzzy_cluster_grouping(failures_dataframe, threshold=100, bin_intervals=[[0, 50], [50, 100]]):
     failures_dataframe.loc[:, DataFrameKeys.error_logs_length] = failures_dataframe[
         DataFrameKeys.preprocessed_text_key
     ].apply(len)
@@ -189,14 +205,16 @@ def fuzzy_cluster_grouping(failures_dataframe, threshold=100, bin_intervals=[[0,
             threshold,
         )
 
-        # Assign cluster names
-        for group in grouped_indices:
-            cluster_details_dict = generate_cluster_name(failures_dataframe.iloc[group])
-            failures_dataframe.loc[group, DataFrameKeys.cluster_name] = cluster_details_dict["cluster_name"]
+        results_list = await asyncio.gather(
+            *[generate_cluster_name(failures_dataframe.iloc[group]) for group in grouped_indices]
+        )
+        for grp_index, result in enumerate(results_list):
+            failures_dataframe.loc[grouped_indices[grp_index], DataFrameKeys.cluster_name] = result["cluster_name"]
 
     return failures_dataframe
 
 
+@execution_timer
 def create_excel_with_clusters(df, cluster_column, columns_to_include):
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
@@ -206,3 +224,14 @@ def create_excel_with_clusters(df, cluster_column, columns_to_include):
             cluster_df.to_excel(writer, sheet_name=sheet_name, index=False)
     output.seek(0)
     return output
+
+
+@execution_timer
+def get_tc_ids_from_sql():
+    run_ids = sql_connection.fetch_runids()
+    return run_ids
+
+
+@execution_timer
+def get_tc_id_df(tc_id: str):
+    return sql_connection.fetch_result_based_on_runid(tc_id)

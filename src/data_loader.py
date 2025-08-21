@@ -24,5 +24,5 @@ class ExcelLoader(BaseDataLoader):
         if "result" not in dataframe.columns:
             raise KeyError("`result` key is not present in the dataframe, which is used to filter failed test cases")
 
-        failure_filtered_df = dataframe[dataframe["result"] == "FAIL"]
+        failure_filtered_df = dataframe[dataframe["result"] != "PASS"]
         return failure_filtered_df if not failure_filtered_df.empty else None
