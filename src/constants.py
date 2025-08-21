@@ -6,3 +6,9 @@ class DataFrameKeys:
     preprocessed_text_key: str = "preprocessed_reason"
     cluster_type_int: str = "int_cluster"
     cluster_name: str = "clusters"
+    bins: str = "bins"
+    error_logs_length: str = "logs_length"
+
+
+class ClusterSpecificKeys:
+    non_grouped_key: int = -1

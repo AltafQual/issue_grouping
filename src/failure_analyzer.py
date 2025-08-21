@@ -43,13 +43,19 @@ class FailureAnalyzer:
         embeddings = self.embedding_model.embed(texts)
         return np.array(embeddings)
 
+    async def agenerate_embeddings(self, texts: List[str]) -> np.ndarray:
+        """Generate embeddings for the provided texts."""
+        self.logger.info(f"Generating embeddings for {len(texts)} texts")
+        embeddings = await self.embedding_model.aembed(texts)
+        return np.array(embeddings)
+
     def cluster_embeddings(self, embeddings: np.ndarray) -> np.ndarray:
         """Cluster the embeddings using HDBSCAN."""
         self.logger.info("Clustering embeddings")
         cluster = HDBSCAN(min_cluster_size=2, min_samples=10, metric="cosine", n_jobs=-1)
         return cluster.fit_predict(embeddings)
 
-    def analyze(
+    async def analyze(
         self, file_path: str = None, st_object=None, dataframe=None, failure_column: str = "reason"
     ) -> pd.DataFrame:
         """Perform the complete analysis workflow."""
@@ -62,24 +68,29 @@ class FailureAnalyzer:
         self.logger.info(f"Loaded {len(dataframe)} rows")
 
         with st.spinner("Pre processing Error logs"):
-            # Generate embeddings
             failure_texts = dataframe[failure_column].astype(str).tolist()
             failure_texts = [helpers.preprocess_error_log(text) for text in failure_texts]
             failure_df = helpers.remove_empty_and_misc_rows(
                 dataframe, failure_texts, DataFrameKeys.preprocessed_text_key
             )
+            # Apply to your dataframe
+            failure_df = helpers.trim_error_logs(failure_df)
+            failure_df = helpers.fuzzy_cluster_grouping(failure_df)
+            already_clustered_df = failure_df[failure_df[DataFrameKeys.cluster_name] != -1]
+            failure_df = failure_df[failure_df[DataFrameKeys.cluster_name] == -1]
+            self.logger.info(
+                f"{already_clustered_df.shape} already clustered logs and failure df size: {failure_df.shape}"
+            )
 
         with st.spinner("Generating embeddings"):
             start = time.time()
-            embeddings = self.generate_embeddings(failure_df[DataFrameKeys.preprocessed_text_key].tolist())
-            failure_df[DataFrameKeys.embeddings_key] = list(embeddings)
+            embeddings = await self.agenerate_embeddings(failure_df[DataFrameKeys.preprocessed_text_key].tolist())
+            failure_df.loc[:, DataFrameKeys.embeddings_key] = list(embeddings)
             st.info(f"Embeddings generated in {round(time.time() - start,2)} seconds")
 
         # Cluster embeddings
-        failure_df[DataFrameKeys.cluster_type_int] = self.cluster_embeddings(embeddings)
-        # save copy of cluster into new column later will be replaced with the actual names from Qgeneie
-        failure_df[DataFrameKeys.cluster_name] = failure_df[DataFrameKeys.cluster_type_int].copy()
-        failure_df[DataFrameKeys.cluster_name] = failure_df[DataFrameKeys.cluster_name].astype("object")
+        failure_df.loc[:, DataFrameKeys.cluster_type_int] = self.cluster_embeddings(embeddings)
+        failure_df.loc[:, DataFrameKeys.cluster_name] = failure_df[DataFrameKeys.cluster_name].astype("object")
 
         merged_groups = helpers.merge_similar_clusters(
             embeddings, list(failure_df[DataFrameKeys.cluster_type_int].unique())
@@ -97,7 +108,14 @@ class FailureAnalyzer:
             start = time.time()
             failure_df = qgenie_post_processing(failure_df)
             st.info(f"QGenie post processing completed in {round(time.time() - start,2)} seconds")
-        return failure_df
+
+        # Merge the already clustered and newly clustered DataFrames
+        final_df = pd.concat([already_clustered_df, failure_df], axis=0)
+
+        # Reset the index to avoid duplicate or misaligned indices
+        final_df = final_df.reset_index(drop=True)
+
+        return final_df
 
     def save_results(self, data: pd.DataFrame, output_path: Optional[str] = None) -> None:
         """Save the analysis results to a file."""

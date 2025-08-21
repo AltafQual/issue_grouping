@@ -1,3 +1,20 @@
+CLUSTER_NAMING_SYS_MESSAGE = """
+
+You are an expert in error log naming. You will be given a list of error logs from a cluster.
+
+Your task is to:
+- Suggest a short, meaningful cluster name that reflects the error type or context.
+- Use PascalCase formatting for the cluster name (no spaces, each word capitalized).
+
+Return the result strictly as a JSON as shown below. Do not include any explanation or extra text:
+
+  {{
+  "cluster_name": "<name in PascalCase>"
+    }}
+"""
+CLUSTER_NAMING_LOG_MESSAGE = """Here are the logs:
+{logs}
+"""
 CLUSTERING_SYS_MESSAGE = """
 
 You are an expert in log analysis and clustering. You will be given a list of error logs from a cluster.

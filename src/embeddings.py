@@ -42,11 +42,14 @@ class ALLMiniLMV6(BaseEmbeddings):
 
 
 class QGenieBGEM3Embedding(BaseEmbeddings):
-    name = "QGenie/bge-m3"
+    name = "qgenie_embedd"
 
     def __init__(self):
-        self.model = QGenieEmbeddings(model="bge-large", api_key=QGENEIE_API_KEY)
+        self.model = QGenieEmbeddings(model=self.name, api_key=QGENEIE_API_KEY)
         super().__init__()
 
     def embed(self, data: list):
         return self.model.embed_documents(data)
+
+    async def aembed(self, data: list):
+        return await self.model.aembed_documents(data)

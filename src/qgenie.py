@@ -1,3 +1,4 @@
+import asyncio
 from collections import defaultdict
 
 import pandas as pd
@@ -7,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from qgenie.integrations.langchain import QGenieChat
 from src import prompts
-from src.constants import QGENEIE_API_KEY, DataFrameKeys
+from src.constants import QGENEIE_API_KEY, ClusterSpecificKeys, DataFrameKeys
 
 model = QGenieChat(model="Pro", api_key=QGENEIE_API_KEY, temperature=0.3)
 
@@ -15,6 +16,10 @@ model = QGenieChat(model="Pro", api_key=QGENEIE_API_KEY, temperature=0.3)
 class ClusteringResult(BaseModel):
     cluster_name: str = Field(description="Name to the whole cluster")
     misclassified_ids: str = Field(description="Misclassified erros ids in that cluster")
+
+
+class NameClusteringResult(BaseModel):
+    cluster_name: str = Field(description="Name to the whole cluster")
 
 
 class MergeResult(BaseModel):
@@ -29,6 +34,17 @@ class ReclusterResult(BaseModel):
 parser = JsonOutputParser(pydantic_object=ClusteringResult)
 merge_parser = JsonOutputParser(pydantic_object=MergeResult)
 recluster_parser = JsonOutputParser(pydantic_object=ReclusterResult)
+nameparser = JsonOutputParser(pydantic_object=NameClusteringResult)
+
+
+def generate_cluster_name(grouped_cluster: list):
+    prompt_template = ChatPromptTemplate.from_messages(
+        [("system", prompts.CLUSTER_NAMING_SYS_MESSAGE), ("human", prompts.CLUSTER_NAMING_LOG_MESSAGE)]
+    )
+
+    chain = prompt_template | model | nameparser
+    response = chain.invoke({"logs": grouped_cluster[:5] if len(grouped_cluster) > 5 else grouped_cluster})
+    return response
 
 
 def analyze_cluster(cluster_df: pd.DataFrame) -> ClusteringResult:
@@ -36,12 +52,11 @@ def analyze_cluster(cluster_df: pd.DataFrame) -> ClusteringResult:
     error_logs = [
         {"id": int(idx), "error log": row[DataFrameKeys.preprocessed_text_key]} for idx, row in cluster_df.iterrows()
     ]
-    # Sample prompt template
+
     prompt_template = ChatPromptTemplate.from_messages(
         [("system", prompts.CLUSTERING_SYS_MESSAGE), ("human", prompts.CLUSTERING_LOG_MESSAGE)]
     )
 
-    # Get response
     chain = prompt_template | model | parser
     response = chain.invoke({"error_logs": error_logs})
     return response
@@ -68,12 +83,29 @@ def get_clusters_name_and_misclassified_errors(df: pd.DataFrame) -> dict:
     results = {}
     for cluster_id in df[DataFrameKeys.cluster_type_int].unique():
         # avoid the miscellaneous cluster, that will be dealt with later
-        if cluster_id == "-1":
+        if cluster_id == ClusterSpecificKeys.non_grouped_key:
             continue
+
         cluster_df = df[df[DataFrameKeys.cluster_type_int] == cluster_id]
 
         result_json = analyze_cluster(cluster_df)
         results[int(cluster_id)] = result_json
+    return results
+
+
+async def async_get_clusters_name_and_misclassified_errors(df: pd.DataFrame) -> dict:
+    tasks = []
+    cluster_ids = []
+
+    for cluster_id in df[DataFrameKeys.cluster_type_int].unique():
+        if cluster_id == "-1":
+            continue
+        cluster_df = df[df[DataFrameKeys.cluster_type_int] == cluster_id]
+        tasks.append(analyze_cluster(cluster_df))
+        cluster_ids.append(int(cluster_id))
+
+    results_list = await asyncio.gather(*tasks)
+    results = {cluster_id: result for cluster_id, result in zip(cluster_ids, results_list)}
     return results
 
 
@@ -88,12 +120,14 @@ def get_duplicate_clusters(results: dict) -> dict:
     return duplicate_names
 
 
-def merge_duplicate_clusters(df: pd.DataFrame, duplicate_clusters: dict, cluster_results: dict) -> tuple[pd.DataFrame, dict]:
+def merge_duplicate_clusters(
+    df: pd.DataFrame, duplicate_clusters: dict, cluster_results: dict
+) -> tuple[pd.DataFrame, dict]:
     for duplicate_name, cluster_ids in duplicate_clusters.items():
         # Start with the first cluster as base
-        base_cluster_id = str(cluster_ids[0])
+        base_cluster_id = cluster_ids[0]
+
         for next_cluster_id in cluster_ids[1:]:
-            next_cluster_id = str(next_cluster_id)
             print(f"Merging {base_cluster_id} and {next_cluster_id} for name '{duplicate_name}'")
 
             # Get GPT response
@@ -104,12 +138,12 @@ def merge_duplicate_clusters(df: pd.DataFrame, duplicate_clusters: dict, cluster
 
             # Move all rows from next_cluster to base_cluster
             df.loc[df[DataFrameKeys.cluster_type_int] == next_cluster_id, DataFrameKeys.cluster_type_int] = (
-                str(base_cluster_id)
+                base_cluster_id
             )
 
             # Move outliers to cluster -1
-            outlier_indices = response["outlier_indices"]
-            df.loc[df.index.isin(outlier_indices), DataFrameKeys.cluster_type_int] = "-1"
+            outlier_indices = [int(index) for index in response.get("outlier_indices")]
+            df.loc[df.index.isin(outlier_indices), DataFrameKeys.cluster_type_int] = ClusterSpecificKeys.non_grouped_key
 
             # Remove next_cluster from results
             if next_cluster_id in cluster_results:
@@ -122,7 +156,9 @@ def give_cluster_names_and_reassign_misc_clusters(df: pd.DataFrame, cluster_resu
     for cluster_id, result in cluster_results.items():
         misclassified_ids = result.get("misclassified_ids", [])
         if misclassified_ids:
-            df.loc[df.index.isin(misclassified_ids), DataFrameKeys.cluster_type_int] = -1
+            df.loc[df.index.isin(misclassified_ids), DataFrameKeys.cluster_type_int] = (
+                ClusterSpecificKeys.non_grouped_key
+            )
 
         cluster_name = result.get("cluster_name")
         if cluster_name:
@@ -131,7 +167,7 @@ def give_cluster_names_and_reassign_misc_clusters(df: pd.DataFrame, cluster_resu
 
 
 def recluster_with_context(df: pd.DataFrame) -> pd.DataFrame:
-    unclustered_df = df[df[DataFrameKeys.cluster_type_int] == "-1"]
+    unclustered_df = df[df[DataFrameKeys.cluster_type_int] == ClusterSpecificKeys.non_grouped_key]
     error_logs = [
         {"index": int(idx), "error log": row[DataFrameKeys.preprocessed_text_key]}
         for idx, row in unclustered_df.iterrows()
@@ -139,8 +175,14 @@ def recluster_with_context(df: pd.DataFrame) -> pd.DataFrame:
     chain = ChatPromptTemplate.from_template(prompts.RECLUSTERING_PROMPT) | model | recluster_parser
     outliers_recluster_results = chain.invoke({"error_logs": error_logs})
     for result in outliers_recluster_results:
-        name, indices = result["cluster_name"], result["log_indices"]
-        if indices:
+        name, indices = result.get("cluster_name"), result.get("log_indices")
+        if name and indices:
+            if not type(indices) == list:
+                indices = [int(indices)]
+            else:
+                indices = [int(index) for index in indices]
+
+        if name and indices:
             df.loc[df.index.isin(indices), DataFrameKeys.cluster_name] = name
 
     return df
@@ -163,8 +205,8 @@ def qgenie_post_processing(df: pd.DataFrame) -> pd.DataFrame:
     duplicate_clusters = get_duplicate_clusters(analyzed_results)
     df, analyzed_results = merge_duplicate_clusters(df, duplicate_clusters, analyzed_results)
     df = give_cluster_names_and_reassign_misc_clusters(df, analyzed_results)
-    df = recluster_with_context(df)
+    # df = recluster_with_context(df)
 
     # rename -1 cluster to be as Others
-    df.loc[df.index.isin(["-1"]), DataFrameKeys.cluster_name] = "Others"
+    df.loc[df.index.isin([str(ClusterSpecificKeys.non_grouped_key)]), DataFrameKeys.cluster_name] = "Others"
     return df
