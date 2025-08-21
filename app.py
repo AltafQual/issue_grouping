@@ -6,8 +6,9 @@ from src.constants import DataFrameKeys
 from src.failure_analyzer import FailureAnalyzer
 from src.helpers import create_excel_with_clusters
 
+st.set_page_config(page_title="Issue Grouping", page_icon=":material/group:", layout="wide")
 analyzer = FailureAnalyzer()
-st.title("Issue Grouping App 🫂")
+st.title("Issue Grouping App 🫂", )
 
 # File upload
 uploaded_file = st.file_uploader("Upload your Excel file", type=["xlsx", "xls"])
