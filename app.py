@@ -144,7 +144,8 @@ if (
         ]
 
         # Get unique clusters and sort them
-        clusters = sorted(clustered_df[DataFrameKeys.cluster_name].unique())
+        unique_clusters = [str(c) for c in clustered_df[DataFrameKeys.cluster_name].unique().tolist()]
+        clusters = sorted(unique_clusters)
 
         if not clusters:
             st.warning("No clusters were created. The data might be too similar or too different.")

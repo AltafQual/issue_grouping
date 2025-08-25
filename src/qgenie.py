@@ -14,7 +14,7 @@ from src.execution_timer_log import execution_timer
 
 logger = logging.getLogger(__name__)
 
-model = QGenieChat(model="Pro", api_key=QGENEIE_API_KEY, temperature=0.3)
+model = QGenieChat(model="Pro", api_key=QGENEIE_API_KEY, temperature=0.2)
 
 
 class ClusteringResult(BaseModel):
