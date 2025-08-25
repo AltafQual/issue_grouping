@@ -9,7 +9,6 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from rapidfuzz import fuzz
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
-
 from src.constants import DataFrameKeys
 from src.db_connections import ConnectToMySql
 from src.execution_timer_log import execution_timer
@@ -139,7 +138,7 @@ def update_labels_with_merged_clusters(df, merged_clusters, label_col):
 
 @execution_timer
 def trim_error_logs(df: pd.DataFrame, column=DataFrameKeys.preprocessed_text_key, max_length=1000):
-    def trim(log, head_ratio = 0.3):
+    def trim(log, head_ratio=0.3):
         try:
             log_str = str(log)
             if len(log_str) > max_length:

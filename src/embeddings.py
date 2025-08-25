@@ -1,8 +1,7 @@
 import abc
 
-from sentence_transformers import SentenceTransformer
-
 from qgenie.integrations.langchain import QGenieEmbeddings
+from sentence_transformers import SentenceTransformer
 from src.constants import QGENEIE_API_KEY
 from src.helpers import load_cached_model
 

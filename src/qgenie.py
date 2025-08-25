@@ -7,7 +7,6 @@ import pandas as pd
 from langchain.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 from pydantic import BaseModel, Field
-
 from qgenie.integrations.langchain import QGenieChat
 from src import prompts
 from src.constants import QGENEIE_API_KEY, ClusterSpecificKeys, DataFrameKeys
