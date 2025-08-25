@@ -139,10 +139,17 @@ def update_labels_with_merged_clusters(df, merged_clusters, label_col):
 
 @execution_timer
 def trim_error_logs(df: pd.DataFrame, column=DataFrameKeys.preprocessed_text_key, max_length=1000):
-    def trim(log):
+    def trim(log, head_ratio = 0.3):
         try:
             log_str = str(log)
-            return log_str[-max_length:] if len(log_str) > max_length else log_str
+            if len(log_str) > max_length:
+                head_length = int(max_length * head_ratio)
+                tail_length = max_length - head_length
+                head = log_str[:head_length]
+                tail = log_str[-tail_length:]
+                return head + tail
+            else:
+                return log_str
         except Exception as e:
             print(f"Error processing log: {log}, Error: {e}")
             return ""
