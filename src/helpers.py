@@ -1,6 +1,7 @@
 import logging
 import os
 import re
+from functools import wraps
 from io import BytesIO
 
 import numpy as np
@@ -9,13 +10,17 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from rapidfuzz import fuzz
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
-from src.constants import DataFrameKeys
+
+from src.constants import ClusterSpecificKeys, DataFrameKeys
 from src.db_connections import ConnectToMySql
 from src.execution_timer_log import execution_timer
 from src.qgenie import generate_cluster_name
 
 logger = logging.getLogger(__name__)
 sql_connection = ConnectToMySql()
+
+# in-memory tc id data cache
+_tc_id_cache = {}
 
 
 @execution_timer
@@ -75,9 +80,13 @@ def load_cached_model(model_name="BAAI/bge-m3", models_dir="models"):
 
 @execution_timer
 def remove_empty_and_misc_rows(df: pd.DataFrame, errors: list, error_column_name: str):
-    def has_alphabets(s):
+    def is_empty_error_log(s):
         if not bool(re.search(r"[a-zA-Z]", s)):
+            return "EmptyErrorLog"
+
+        elif s is None or pd.isna(s) or s in {"null", "nan"}:
             return "NoErrorLog"
+
         return -1
 
     def mask_numbers(text):
@@ -93,14 +102,14 @@ def remove_empty_and_misc_rows(df: pd.DataFrame, errors: list, error_column_name
         .str.startswith("limiting reason to 3000 chars")  # not starting with that phrase
     ]
     # add
-    df.loc[:, DataFrameKeys.cluster_name] = df[error_column_name].apply(has_alphabets)
+    df.loc[:, DataFrameKeys.cluster_name] = df[error_column_name].apply(is_empty_error_log)
     df.loc[:, error_column_name] = df[error_column_name].apply(mask_numbers)
     df = df.reset_index(drop=True)
     return df
 
 
 @execution_timer
-def merge_similar_clusters(embeddings, labels, threshold=0.90):
+def merge_similar_clusters(embeddings, labels, threshold=0.95):
     unique_labels = set(labels) - {-1}
     centroids = {
         label: np.mean([embeddings[i] for i in range(len(labels)) if labels[i] == label], axis=0)
@@ -121,6 +130,35 @@ def merge_similar_clusters(embeddings, labels, threshold=0.90):
                     used.add(label2)
         used.add(label1)
     return merged
+
+
+@execution_timer
+def reassign_unclustered_logs(df: pd.DataFrame, threshold=0.95):
+    # Step 1: Compute centroids for all valid clusters
+    valid_clusters = set(df[DataFrameKeys.cluster_name]) - {-1}
+    logger.info(f"Valid clusters for reassigning: {valid_clusters}")
+    if valid_clusters:
+        centroids = {
+            label: np.mean(
+                np.stack(df[df[DataFrameKeys.cluster_name] == label][DataFrameKeys.embeddings_key].values), axis=0
+            )
+            for label in valid_clusters
+        }
+        # Step 2: Reassign -1 cluster logs based on highest similarity
+        for idx, row in df[df[DataFrameKeys.cluster_name] == ClusterSpecificKeys.non_grouped_key].iterrows():
+            log_embedding = row[DataFrameKeys.embeddings_key].reshape(1, -1)
+            best_label = None
+            best_similarity = -1
+            for label, centroid in centroids.items():
+                similarity = cosine_similarity(log_embedding, centroid.reshape(1, -1))[0][0]
+                if similarity > best_similarity:
+                    best_similarity = similarity
+                    best_label = label
+            if best_similarity >= threshold:
+                logger.info(f"Best label: {best_label}  Best Similarity: {best_similarity}")
+                df.at[idx, DataFrameKeys.cluster_name] = best_label
+
+    return df
 
 
 @execution_timer
@@ -242,7 +280,20 @@ def get_tc_ids_from_sql():
         return run_ids
 
 
+def cache_tc_id(func):
+    @wraps(func)
+    def wrapper(tc_id: str):
+        if tc_id in _tc_id_cache:
+            return _tc_id_cache[tc_id]
+        result = func(tc_id)
+        _tc_id_cache[tc_id] = result
+        return result
+
+    return wrapper
+
+
 @execution_timer
+@cache_tc_id
 def get_tc_id_df(tc_id: str):
     return sql_connection.fetch_result_based_on_runid(tc_id)
 

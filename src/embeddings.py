@@ -1,7 +1,8 @@
 import abc
 
-from qgenie.integrations.langchain import QGenieEmbeddings
 from sentence_transformers import SentenceTransformer
+
+from qgenie.integrations.langchain import QGenieEmbeddings
 from src.constants import QGENEIE_API_KEY
 from src.helpers import load_cached_model
 
@@ -52,3 +53,6 @@ class QGenieBGEM3Embedding(BaseEmbeddings):
 
     async def aembed(self, data: list):
         return await self.model.aembed_documents(data)
+
+    async def aembed_query(self, text: str):
+        return await self.model.aembed_query(text)

@@ -7,8 +7,9 @@ import pandas as pd
 from langchain.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 from pydantic import BaseModel, Field
+
 from qgenie.integrations.langchain import QGenieChat
-from src import prompts
+from src import helpers, prompts
 from src.constants import QGENEIE_API_KEY, ClusterSpecificKeys, DataFrameKeys
 from src.execution_timer_log import execution_timer
 
@@ -217,15 +218,12 @@ def qgenie_post_processing(df: pd.DataFrame) -> pd.DataFrame:
     """
     try:
         analyzed_results = get_clusters_name_and_misclassified_errors(df)
-        duplicate_clusters = get_duplicate_clusters(analyzed_results)
-        df, analyzed_results = merge_duplicate_clusters(df, duplicate_clusters, analyzed_results)
-        df = give_cluster_names_and_reassign_misc_clusters(df, analyzed_results)
+        if analyzed_results:
+            duplicate_clusters = get_duplicate_clusters(analyzed_results)
+            df, analyzed_results = merge_duplicate_clusters(df, duplicate_clusters, analyzed_results)
+            df = give_cluster_names_and_reassign_misc_clusters(df, analyzed_results)
+        df = helpers.reassign_unclustered_logs(df)
         df = recluster_with_context(df)
-
-        # rename -1 cluster to be as Others
-        df.loc[
-            df[DataFrameKeys.cluster_type_int] == ClusterSpecificKeys.non_grouped_key, DataFrameKeys.cluster_name
-        ] = "Others"
     except Exception as e:
         logger.error(f"Exception in Qgenie post processing: {e}")
         traceback.print_exc()

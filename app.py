@@ -6,6 +6,7 @@ import traceback
 import nest_asyncio
 import pandas as pd
 import streamlit as st
+
 from src.constants import DataFrameKeys
 from src.failure_analyzer import FailureAnalyzer
 from src.helpers import create_excel_with_clusters, get_tc_ids_from_sql, tc_id_scheduler
@@ -15,7 +16,22 @@ nest_asyncio.apply()
 ################################## Configurations and Global Streamlit Sessions ####################################
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 tc_id_scheduler()
-logger = logging.getLogger("Issue Grouping")
+logger = logging.getLogger(__name__)
+
+
+async def process_by_type(df, analyzer):
+    results = {}
+
+    async def process_group(t, group_df):
+        group_df = group_df.reset_index(drop=True)
+        result = await analyzer.analyze(dataframe=group_df)
+        results[t] = result
+
+    logger.info(f"All types in data: {df.type.unique()}")
+    tasks = [process_group(t, group_df) for t, group_df in df.groupby("type")]
+    await asyncio.gather(*tasks)
+    return results
+
 
 st.set_page_config(page_title="Issue Grouping", page_icon=":material/group:", layout="wide")
 
@@ -32,8 +48,8 @@ if "tc_ids_options" not in st.session_state:
 if "processed_data" not in st.session_state:
     st.session_state.processed_data = False
 
-if "clustered_df" not in st.session_state:
-    st.session_state.clustered_df = None
+if "clustered_df_grouped" not in st.session_state:
+    st.session_state.clustered_df_grouped = None
 
 if "last_processed_source" not in st.session_state:
     st.session_state.last_processed_source = {
@@ -87,7 +103,7 @@ if process_button:
         else:
             st.warning("Please upload a file or select a Test Case ID to continue.")
             st.session_state.processed_data = False  # Ensure not processed if no valid input
-            st.session_state.clustered_df = None
+            st.session_state.clustered_df_grouped = None
             current_input_type = None  # Reset input type if no valid input
             current_input_value = None
 
@@ -102,7 +118,7 @@ if process_button:
         if df_to_process is None or df_to_process.empty:
             st.error("No failure test cases found in the data source.")
             st.session_state.processed_data = False
-            st.session_state.clustered_df = None
+            st.session_state.clustered_df_grouped = None
             st.session_state.last_processed_source = {"type": None, "value": None}
         else:
             st.subheader("Preview of loaded data: ")
@@ -111,79 +127,57 @@ if process_button:
 
             with st.spinner("Analyzing and grouping data... This may take a moment."):
                 try:
-                    clustered_df_new = asyncio.run(analyzer.analyze(dataframe=df_to_process))
-                    st.session_state.clustered_df = clustered_df_new
+                    clustered_results = asyncio.run(process_by_type(df_to_process, analyzer))
+                    st.session_state.clustered_df_grouped = clustered_results
                     st.session_state.processed_data = True
                     st.session_state.last_processed_source = {"type": current_input_type, "value": current_input_value}
                 except Exception as e:
                     traceback.print_exc()
                     st.error(f"Error during analysis: {str(e)}")
                     st.session_state.processed_data = False
-                    st.session_state.clustered_df = None
+                    st.session_state.clustered_df_grouped = None
                     st.session_state.last_processed_source = {"type": None, "value": None}
     elif current_input_type:  # Valid input, but same as last processed, or already processed
         st.info("Data already processed for this input. Displaying results.")
 
-# Display results if processing is complete and clustered_df is available
-if (
-    st.session_state.processed_data
-    and st.session_state.clustered_df is not None
-    and DataFrameKeys.cluster_name in st.session_state.clustered_df
-):
+# Display results if processing is complete and clustered_df_grouped is available
+if st.session_state.processed_data and st.session_state.clustered_df_grouped is not None:
     st.success("Grouping completed successfully!")
+    st.subheader("Clustered Data")
+
     try:
-        clustered_df = st.session_state.clustered_df
+        grouped_dfs = st.session_state.clustered_df_grouped  # Dictionary: {type: DataFrame}
+        group_names = list(grouped_dfs.keys())
 
-        st.subheader("Clustered Data")
-        COL_TO_SHOW = [
-            "tc_uuid",
-            "soc_name",
-            "reason",
-            "log",
-            DataFrameKeys.cluster_name,
-        ]
+        for name in group_names:
+            clustered_df = grouped_dfs[name]
 
-        # Get unique clusters and sort them
-        unique_clusters = [str(c) for c in clustered_df[DataFrameKeys.cluster_name].unique().tolist()]
-        clusters = sorted(unique_clusters)
+            st.markdown(f"## Type: {name}")
+            if not clustered_df[clustered_df["result"] != "PASS"].empty:
+                COL_TO_SHOW = [
+                    "tc_uuid",
+                    "soc_name",
+                    "reason",
+                    "log",
+                    DataFrameKeys.cluster_name,
+                ]
 
-        if not clusters:
-            st.warning("No clusters were created. The data might be too similar or too different.")
-        else:
-            st.info(f"Total clusters created: {len(clusters)}")
-
-            # Create tabs for each cluster
-            tabs = st.tabs([c for c in clusters])
-            for tab, cluster in zip(tabs, clusters):
-                with tab:
-                    _sub_cluster = clustered_df[clustered_df[DataFrameKeys.cluster_name] == cluster][COL_TO_SHOW]
-                    st.subheader(f"{cluster} - Total Rows: {_sub_cluster.shape[0]}")
-                    st.dataframe(_sub_cluster)
-
-            # Create Excel with multiple sheets
-            try:
-                excel_data = create_excel_with_clusters(clustered_df, DataFrameKeys.cluster_name, COL_TO_SHOW)
-
-                # Determine filename for download
-                # Use the last processed source info for file naming
-                if st.session_state.last_processed_source["type"] == "file":
-                    # We store the original file name in last_processed_source["value"]
-                    file_name = f"{st.session_state.last_processed_source['value'].replace('.xlsx', '').replace('.xls', '')}_clustered.xlsx"
-                elif st.session_state.last_processed_source["type"] == "tc_id":
-                    file_name = f"{st.session_state.last_processed_source['value']}_clustered.xlsx"
+                clusters = [c for c in clustered_df[DataFrameKeys.cluster_name].unique().tolist()]
+                if not clusters:
+                    st.warning("No clusters were created.")
                 else:
-                    file_name = "clustered_data.xlsx"  # Fallback
+                    st.info(f"Clusters: {len(clusters)}")
 
-                st.write("**Please wait for a few seconds after clicking the Download button** 🙏")
-                st.download_button(
-                    label="Download clustered data as Excel",
-                    data=excel_data,
-                    file_name=file_name,
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                )
-            except Exception as e:
-                traceback.print_exc()
-                st.error(f"Error creating Excel file: {str(e)}")
+                    tabs = st.tabs([str(c) for c in clusters])
+                    for tab, cluster in zip(tabs, clusters):
+                        _sub_cluster = clustered_df[clustered_df[DataFrameKeys.cluster_name] == cluster][COL_TO_SHOW]
+                        if _sub_cluster.shape[0] != 0:
+                            with tab:
+                                st.subheader(f"{cluster} - Total Rows: {_sub_cluster.shape[0]}")
+                                st.dataframe(_sub_cluster)
+            else:
+                st.status("No failures found in the data.")
+                st.subheader("All tests passed.")
 
     except Exception as e:
         traceback.print_exc()
