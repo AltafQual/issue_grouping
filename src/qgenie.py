@@ -1,5 +1,4 @@
 import logging
-import time
 import traceback
 from collections import defaultdict
 

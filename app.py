@@ -154,13 +154,7 @@ if st.session_state.processed_data and st.session_state.clustered_df_grouped is 
 
             st.markdown(f"## Type: {name}")
             if not clustered_df[clustered_df["result"] != "PASS"].empty:
-                COL_TO_SHOW = [
-                    "tc_uuid",
-                    "soc_name",
-                    "reason",
-                    "log",
-                    DataFrameKeys.cluster_name,
-                ]
+                COL_TO_SHOW = ["tc_uuid", "soc_name", "reason", "log"]
 
                 clusters = [c for c in clustered_df[DataFrameKeys.cluster_name].unique().tolist()]
                 if not clusters:
@@ -182,3 +176,30 @@ if st.session_state.processed_data and st.session_state.clustered_df_grouped is 
     except Exception as e:
         traceback.print_exc()
         st.error(f"Error displaying results: {str(e)}")
+
+if st.session_state.clustered_df_grouped:
+    clustered_df = pd.concat(
+        [df.assign(cluster_type=cluster_name) for cluster_name, df in st.session_state.clustered_df_grouped.items()],
+        ignore_index=True,
+    )
+
+    excel_data = create_excel_with_clusters(clustered_df, DataFrameKeys.cluster_name, COL_TO_SHOW)
+    # Determine filename for download
+    # Use the last processed source info for file naming
+    if st.session_state.last_processed_source["type"] == "file":
+        # We store the original file name in last_processed_source["value"]
+        file_name = (
+            f"{st.session_state.last_processed_source['value'].replace('.xlsx', '').replace('.xls', '')}_clustered.xlsx"
+        )
+    elif st.session_state.last_processed_source["type"] == "tc_id":
+        file_name = f"{st.session_state.last_processed_source['value']}_clustered.xlsx"
+    else:
+        file_name = "clustered_data.xlsx"  # Fallback
+
+    st.write("**Please wait for a few seconds after clicking the Download button** 🙏")
+    st.download_button(
+        label="Download clustered data as Excel",
+        data=excel_data,
+        file_name=file_name,
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )

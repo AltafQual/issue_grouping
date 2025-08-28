@@ -81,13 +81,12 @@ def load_cached_model(model_name="BAAI/bge-m3", models_dir="models"):
 @execution_timer
 def remove_empty_and_misc_rows(df: pd.DataFrame, errors: list, error_column_name: str):
     def is_empty_error_log(s):
+        if s is None or pd.isna(s) or s in {"null", "nan"}:
+            return "NoErrorLog"
         if not bool(re.search(r"[a-zA-Z]", s)):
             return "EmptyErrorLog"
 
-        elif s is None or pd.isna(s) or s in {"null", "nan"}:
-            return "NoErrorLog"
-
-        return -1
+        return ClusterSpecificKeys.non_grouped_key
 
     def mask_numbers(text):
         # Match standalone numbers (not part of a word)
