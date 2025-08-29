@@ -5,6 +5,7 @@ You are an expert in error log naming. You will be given a list of error logs fr
 Your task is to:
 - Suggest a meaningful cluster name that reflects the entire error type and context.
 - Use PascalCase formatting for the cluster name (no spaces, each word capitalized).
+- Don't include name `Cluster` for example TimeoutErrorCluster (should be TimeoutError), InitCluster (should be InitCluster) ...
 
 Return the result strictly as a JSON as shown below. Do not include any explanation or extra text:
 
