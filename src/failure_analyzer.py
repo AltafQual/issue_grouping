@@ -138,6 +138,7 @@ class FailureAnalyzer:
 
             # Cluster embeddings
             non_clustered_df.loc[:, DataFrameKeys.cluster_type_int] = self.cluster_embeddings(embeddings)
+
             # Merge similar clusters
             merged_groups = helpers.merge_similar_clusters(
                 embeddings, list(non_clustered_df[DataFrameKeys.cluster_type_int].unique())

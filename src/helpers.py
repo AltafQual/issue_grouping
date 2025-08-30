@@ -10,6 +10,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from rapidfuzz import fuzz
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.neighbors import LocalOutlierFactor
 
 from src.constants import ClusterSpecificKeys, DataFrameKeys
 from src.db_connections import ConnectToMySql
@@ -226,7 +227,7 @@ def group_similar_errors(df: pd.DataFrame, column: str, threshold):
 
 
 @execution_timer
-def fuzzy_cluster_grouping(failures_dataframe, threshold=100, bin_intervals=[[0, 50], [50, 100], [100, 150]]):
+def fuzzy_cluster_grouping(failures_dataframe, threshold=100, bin_intervals=[[0, 50], [50, 100]]):
     failures_dataframe.loc[:, DataFrameKeys.error_logs_length] = failures_dataframe[
         DataFrameKeys.preprocessed_text_key
     ].apply(len)
@@ -307,3 +308,37 @@ def tc_id_scheduler():
     scheduler = BackgroundScheduler()
     scheduler.add_job(update_tc_ids, "interval", hours=6)
     scheduler.start()
+
+
+def detect_cluster_outlier(df):
+    import pdb
+
+    pdb.set_trace()
+    clusters = set(df[DataFrameKeys.cluster_name]) - {-1}
+    for cluster in clusters:
+        # avoid the miscellaneous cluster, because there are outliers themselves
+        if cluster == ClusterSpecificKeys.non_grouped_key:
+            continue
+
+        cluster_df = cluster_df[cluster_df[DataFrameKeys.cluster_name] == cluster]
+        embedding_matrix = np.vstack(cluster_df[DataFrameKeys.embeddings_key].values)
+
+        # Step 1: Compute cosine similarity to cluster centroid
+        centroid = np.mean(embedding_matrix, axis=0).reshape(1, -1)
+        similarities = cosine_similarity(embedding_matrix, centroid).flatten()
+        df["cosine_similarity_to_centroid"] = similarities
+
+        # Step 2: Apply Local Outlier Factor
+        lof = LocalOutlierFactor(n_neighbors=15, metric="cosine", n_jobs=-1)
+        outlier_flags = lof.fit_predict(embedding_matrix)
+        df["lof_outlier"] = outlier_flags  # -1 indicates outlier
+
+        # Step 3: Combine both metrics to identify strong outliers
+        # Criteria: low cosine similarity and flagged by LOF
+        similarity_threshold = 0.7
+        outliers = cluster_df[
+            (cluster_df["cosine_similarity_to_centroid"] < similarity_threshold) & (df["lof_outlier"] == -1)
+        ]
+
+        # Output the IDs of the outlier logs
+        logger.info(f"For {cluster} Outlier log IDs: {outliers['reason'].tolist()}")

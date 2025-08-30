@@ -1,4 +1,7 @@
 venv
+.venv
+*.pyc
+.uv-cache
 test_data
 experiments
 models

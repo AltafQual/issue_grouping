@@ -1,0 +1,20 @@
+[project]
+name = "issue-grouping"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "apscheduler==3.11.0",
+    "black>=25.1.0",
+    "isort>=6.0.1",
+    "mysql-connector-python==9.4.0",
+    "openpyxl==3.1.5",
+    "qgenie-sdk[all]>=0.2.2",
+    "rapidfuzz===3.14.0",
+    "streamlit==1.47.0",
+]
+
+[[tool.uv.index]]
+url = "https://devpi.qualcomm.com/qcom/dev/+simple"
+default = true

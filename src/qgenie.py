@@ -221,6 +221,8 @@ def qgenie_post_processing(df: pd.DataFrame) -> pd.DataFrame:
             duplicate_clusters = get_duplicate_clusters(analyzed_results)
             df, analyzed_results = merge_duplicate_clusters(df, duplicate_clusters, analyzed_results)
             df = give_cluster_names_and_reassign_misc_clusters(df, analyzed_results)
+        # TODO: test below
+        # helpers.detect_cluster_outlier(df.copy())
         df = helpers.reassign_unclustered_logs(df)
         df = recluster_with_context(df)
     except Exception as e:
