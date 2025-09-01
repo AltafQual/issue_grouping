@@ -21,6 +21,7 @@ sql_connection = ConnectToMySql()
 
 # in-memory tc id data cache
 _tc_id_cache = {}
+parquet_file = "run_ids.parquet"
 
 
 @execution_timer
@@ -239,10 +240,39 @@ def create_excel_with_clusters(df, cluster_column, columns_to_include):
     output.seek(0)
     return output
 
+def detect_cluster_outlier(df):
+    clusters = set(df[DataFrameKeys.cluster_name]) - {-1}
+    for cluster in clusters:
+        cluster_df = df[df[DataFrameKeys.cluster_name] == cluster]
+        embedding_matrix = np.vstack(cluster_df[DataFrameKeys.embeddings_key].values)
+
+        # Step 1: Compute cosine similarity to cluster centroid
+        centroid = np.mean(embedding_matrix, axis=0).reshape(1, -1)
+        similarities = cosine_similarity(embedding_matrix, centroid).flatten()
+        cluster_df["cosine_similarity_to_centroid"] = similarities
+
+        # Step 2: Apply Local Outlier Factor
+        lof = LocalOutlierFactor(n_neighbors=15, metric="cosine", n_jobs=-1)
+        outlier_flags = lof.fit_predict(embedding_matrix)
+        cluster_df["lof_outlier"] = outlier_flags  # -1 indicates outlier
+
+        # Step 3: Combine both metrics to identify strong outliers
+        # Criteria: low cosine similarity and flagged by LOF
+        similarity_threshold = 0.7
+        outliers = cluster_df[
+            (cluster_df["cosine_similarity_to_centroid"] < similarity_threshold) & (cluster_df["lof_outlier"] == -1)
+        ]
+
+        # Output the IDs of the outlier logs
+        logger.info(f"For {cluster} Outlier log IDs: {outliers['reason'].tolist()}")
+        if not outliers.empty:
+            df.loc[outliers.index, DataFrameKeys.cluster_name] = ClusterSpecificKeys.non_grouped_key
+
+    return df
+
 
 @execution_timer
 def get_tc_ids_from_sql():
-    parquet_file = "run_ids.parquet"
     if os.path.exists(parquet_file):
         df = pd.read_parquet(parquet_file)
         return df
@@ -274,40 +304,10 @@ def tc_id_scheduler():
     def update_tc_ids():
         logger.info("Running tc ids updation background job")
         run_ids = sql_connection.fetch_runids()
-        run_ids.to_parquet("tc_ids.parquet")
+        run_ids.to_parquet(parquet_file)
         logger.info("Background task updated Parquet file")
 
     scheduler = BackgroundScheduler()
     scheduler.add_job(update_tc_ids, "interval", hours=6)
     scheduler.start()
 
-
-def detect_cluster_outlier(df):
-    clusters = set(df[DataFrameKeys.cluster_name]) - {-1}
-    for cluster in clusters:
-        cluster_df = df[df[DataFrameKeys.cluster_name] == cluster]
-        embedding_matrix = np.vstack(cluster_df[DataFrameKeys.embeddings_key].values)
-
-        # Step 1: Compute cosine similarity to cluster centroid
-        centroid = np.mean(embedding_matrix, axis=0).reshape(1, -1)
-        similarities = cosine_similarity(embedding_matrix, centroid).flatten()
-        cluster_df["cosine_similarity_to_centroid"] = similarities
-
-        # Step 2: Apply Local Outlier Factor
-        lof = LocalOutlierFactor(n_neighbors=15, metric="cosine", n_jobs=-1)
-        outlier_flags = lof.fit_predict(embedding_matrix)
-        cluster_df["lof_outlier"] = outlier_flags  # -1 indicates outlier
-
-        # Step 3: Combine both metrics to identify strong outliers
-        # Criteria: low cosine similarity and flagged by LOF
-        similarity_threshold = 0.7
-        outliers = cluster_df[
-            (cluster_df["cosine_similarity_to_centroid"] < similarity_threshold) & (cluster_df["lof_outlier"] == -1)
-        ]
-
-        # Output the IDs of the outlier logs
-        logger.info(f"For {cluster} Outlier log IDs: {outliers['reason'].tolist()}")
-        if not outliers.empty:
-            df.loc[outliers.index, DataFrameKeys.cluster_name] = ClusterSpecificKeys.non_grouped_key
-
-    return df

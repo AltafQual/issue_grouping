@@ -122,7 +122,7 @@ class ConnectToMySql(DatabaseConnection):
                 SELECT table_name as TABLE_NAME
                 FROM information_schema.tables
                     WHERE table_schema = 'mlg-qa' and
-                        table_name like "result_20%"
+                        table_name like "result"
                         order by table_name desc limit 2;
                 """
                 table_df = pd.read_sql(query, cnx)
@@ -153,7 +153,9 @@ class ConnectToMySql(DatabaseConnection):
         if overall_df.empty:
             return pd.DataFrame()
 
-        return overall_df.sort_values(by=["testplan_id"], ascending=False)
+        tc_ids = overall_df.sort_values(by=["testplan_id"], ascending=False)
+        return tc_ids[~tc_ids["testplan_id"].str.contains("gerritsanity", case=False, na=False)]
+
 
     def fetch_result_based_on_runid(self, runid: str) -> pd.DataFrame:
         """
