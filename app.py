@@ -154,7 +154,7 @@ if st.session_state.processed_data and st.session_state.clustered_df_grouped is 
 
             st.markdown(f"## Type: {name}")
             if not clustered_df[clustered_df["result"] != "PASS"].empty:
-                COL_TO_SHOW = ["tc_uuid", "soc_name", "reason", "log", DataFrameKeys.preprocessed_text_key]
+                COL_TO_SHOW = ["tc_uuid", "soc_name", "reason", "log"]
 
                 clusters = [c for c in clustered_df[DataFrameKeys.cluster_name].unique().tolist()]
                 if not clusters:

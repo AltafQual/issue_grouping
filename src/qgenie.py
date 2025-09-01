@@ -70,9 +70,19 @@ def analyze_cluster(cluster_df: pd.DataFrame) -> dict:
 
 
 @execution_timer
-def merge_clusters(df: pd.DataFrame, cluster_id_a: int, cluster_id_b: int) -> MergeResult:
-    df_a = df[df[DataFrameKeys.cluster_type_int] == cluster_id_a]
-    df_b = df[df[DataFrameKeys.cluster_type_int] == cluster_id_b]
+def merge_clusters(
+    df: pd.DataFrame,
+    cluster_id_a: int = None,
+    cluster_id_b: int = None,
+    cluster_name_a: str = None,
+    cluster_name_b: str = None,
+) -> MergeResult:
+    if cluster_id_a and cluster_id_b:
+        df_a = df[df[DataFrameKeys.cluster_type_int] == cluster_id_a]
+        df_b = df[df[DataFrameKeys.cluster_type_int] == cluster_id_b]
+    else:
+        df_a = df[df[DataFrameKeys.cluster_name] == cluster_name_a]
+        df_b = df[df[DataFrameKeys.cluster_name] == cluster_name_b]
 
     logs_a = [
         {"index": int(idx), "error log": row[DataFrameKeys.preprocessed_text_key]} for idx, row in df_a.iterrows()
@@ -122,7 +132,7 @@ def merge_duplicate_clusters(
 
         for next_cluster_id in cluster_ids[1:]:
             print(f"Merging {base_cluster_id} and {next_cluster_id} for name '{duplicate_name}'")
-            response = merge_clusters(df, base_cluster_id, next_cluster_id)
+            response = merge_clusters(df, cluster_id_a=base_cluster_id, cluster_id_b=next_cluster_id)
 
             # Update base cluster name
             cluster_results[base_cluster_id]["cluster_name"] = response["merged_name"]
@@ -202,6 +212,83 @@ def recluster_with_context(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+# TODO: Test this and fix the input token exceed issue as well
+@execution_timer
+def inter_cluster_merging(df: pd.DataFrame) -> pd.DataFrame:
+    unique_clusters = df[DataFrameKeys.cluster_name].unique()
+    clusters_to_consider = [c for c in unique_clusters if c != ClusterSpecificKeys.non_grouped_key]
+
+    # Build cluster dictionary with top logs
+    cluster_dict = {
+        cluster_name: {
+            "name": cluster_name,
+            "logs": df[df[DataFrameKeys.cluster_name] == cluster_name][DataFrameKeys.preprocessed_text_key]
+            .head()
+            .tolist(),
+        }
+        for cluster_name in clusters_to_consider
+    }
+
+    processed_clusters = set()
+
+    for current_cluster_name in list(cluster_dict.keys()):
+        if current_cluster_name in processed_clusters:
+            continue
+
+        # Prepare other clusters excluding the current one
+        other_clusters = {
+            name: data
+            for name, data in cluster_dict.items()
+            if name != current_cluster_name and name not in processed_clusters
+        }
+
+        if not other_clusters:
+            continue
+
+        try:
+            # Call external function to decide merge target
+            response = cluster_merge_qgenie(current_cluster_name=current_cluster_name, other_clusters=other_clusters)
+
+            merge_target_name = response.get("cluster_name")
+
+            if merge_target_name and merge_target_name != current_cluster_name:
+                print(f"Merging '{current_cluster_name}' into '{merge_target_name}'")
+
+                # Perform the merge
+                merge_response = merge_clusters(df, current_cluster_name, merge_target_name)
+
+                # Update cluster labels in df
+                df.loc[df[DataFrameKeys.cluster_name] == current_cluster_name, DataFrameKeys.cluster_name] = (
+                    merge_response["merged_name"]
+                )
+
+                # Handle outliers
+                outlier_indices = merge_response.get("outlier_indices", [])
+                if outlier_indices:
+                    df.loc[outlier_indices, DataFrameKeys.cluster_name] = ClusterSpecificKeys.non_grouped_key
+
+                # Update merged cluster info
+                updated_logs = (
+                    df[df[DataFrameKeys.cluster_name] == merge_target_name][DataFrameKeys.preprocessed_text_key]
+                    .head()
+                    .tolist()
+                )
+                cluster_dict[merge_target_name]["logs"] = updated_logs
+                cluster_dict[merge_target_name]["name"] = merge_response.get("merged_name", merge_target_name)
+
+                # Mark both clusters as processed
+                processed_clusters.update({current_cluster_name, merge_target_name})
+
+                # Remove merged-from cluster
+                cluster_dict.pop(current_cluster_name, None)
+
+        except Exception as e:
+            logger.error(f"Error merging cluster '{current_cluster_name}': {e}")
+            traceback.print_exc()
+
+    return df
+
+
 @execution_timer
 def qgenie_post_processing(df: pd.DataFrame) -> pd.DataFrame:
     """Perform post-processing on the dataframe to handle outlier clusters.
@@ -221,8 +308,8 @@ def qgenie_post_processing(df: pd.DataFrame) -> pd.DataFrame:
             duplicate_clusters = get_duplicate_clusters(analyzed_results)
             df, analyzed_results = merge_duplicate_clusters(df, duplicate_clusters, analyzed_results)
             df = give_cluster_names_and_reassign_misc_clusters(df, analyzed_results)
-        # TODO: test below
-        # helpers.detect_cluster_outlier(df.copy())
+
+        df = helpers.detect_cluster_outlier(df)
         df = helpers.reassign_unclustered_logs(df)
         df = recluster_with_context(df)
     except Exception as e:

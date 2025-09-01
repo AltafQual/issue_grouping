@@ -8,10 +8,13 @@ dependencies = [
     "apscheduler==3.11.0",
     "black>=25.1.0",
     "isort>=6.0.1",
+    "langchain>=0.3.27",
     "mysql-connector-python==9.4.0",
+    "nest-asyncio>=1.6.0",
     "openpyxl==3.1.5",
     "qgenie-sdk[all]>=0.2.2",
     "rapidfuzz===3.14.0",
+    "scikit-learn>=1.7.1",
     "streamlit==1.47.0",
 ]
 

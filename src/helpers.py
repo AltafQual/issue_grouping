@@ -8,7 +8,6 @@ import numpy as np
 import pandas as pd
 from apscheduler.schedulers.background import BackgroundScheduler
 from rapidfuzz import fuzz
-from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.neighbors import LocalOutlierFactor
 
@@ -50,33 +49,6 @@ def preprocess_error_log(log: str) -> str:
 
     # Step 8: Lowercase for consistency
     return log.lower()
-
-
-@execution_timer
-def load_cached_model(model_name="BAAI/bge-m3", models_dir="models"):
-    try:
-        # Convert model name to Hugging Face cache format
-        model_folder_name = f"models--{model_name.replace('/', '--')}"
-
-        # Construct full path to the model cache
-        cwd = os.getcwd()
-        model_base_path = os.path.join(cwd, models_dir, model_folder_name, "snapshots")
-
-        if not os.path.exists(model_base_path):
-            raise FileNotFoundError(f"No cached model found at {model_base_path}")
-
-        # Get the first snapshot folder
-        snapshots = os.listdir(model_base_path)
-        if not snapshots:
-            raise FileNotFoundError(f"No snapshot folders found in {model_base_path}")
-
-        model_path = os.path.join(model_base_path, snapshots[0])
-        print(f"Loading model from: {model_path}")
-
-        return SentenceTransformer(model_path)
-    except Exception as e:
-        print(f"Exception occured while loading cached model: {e}")
-        return None
 
 
 @execution_timer
@@ -227,7 +199,7 @@ def group_similar_errors(df: pd.DataFrame, column: str, threshold):
 
 
 @execution_timer
-def fuzzy_cluster_grouping(failures_dataframe, threshold=100, bin_intervals=[[0, 50], [50, 100]]):
+def fuzzy_cluster_grouping(failures_dataframe, threshold=100, bin_intervals=[[0, 50], [50, 110]]):
     failures_dataframe.loc[:, DataFrameKeys.error_logs_length] = failures_dataframe[
         DataFrameKeys.preprocessed_text_key
     ].apply(len)
@@ -311,34 +283,31 @@ def tc_id_scheduler():
 
 
 def detect_cluster_outlier(df):
-    import pdb
-
-    pdb.set_trace()
     clusters = set(df[DataFrameKeys.cluster_name]) - {-1}
     for cluster in clusters:
-        # avoid the miscellaneous cluster, because there are outliers themselves
-        if cluster == ClusterSpecificKeys.non_grouped_key:
-            continue
-
-        cluster_df = cluster_df[cluster_df[DataFrameKeys.cluster_name] == cluster]
+        cluster_df = df[df[DataFrameKeys.cluster_name] == cluster]
         embedding_matrix = np.vstack(cluster_df[DataFrameKeys.embeddings_key].values)
 
         # Step 1: Compute cosine similarity to cluster centroid
         centroid = np.mean(embedding_matrix, axis=0).reshape(1, -1)
         similarities = cosine_similarity(embedding_matrix, centroid).flatten()
-        df["cosine_similarity_to_centroid"] = similarities
+        cluster_df["cosine_similarity_to_centroid"] = similarities
 
         # Step 2: Apply Local Outlier Factor
         lof = LocalOutlierFactor(n_neighbors=15, metric="cosine", n_jobs=-1)
         outlier_flags = lof.fit_predict(embedding_matrix)
-        df["lof_outlier"] = outlier_flags  # -1 indicates outlier
+        cluster_df["lof_outlier"] = outlier_flags  # -1 indicates outlier
 
         # Step 3: Combine both metrics to identify strong outliers
         # Criteria: low cosine similarity and flagged by LOF
         similarity_threshold = 0.7
         outliers = cluster_df[
-            (cluster_df["cosine_similarity_to_centroid"] < similarity_threshold) & (df["lof_outlier"] == -1)
+            (cluster_df["cosine_similarity_to_centroid"] < similarity_threshold) & (cluster_df["lof_outlier"] == -1)
         ]
 
         # Output the IDs of the outlier logs
         logger.info(f"For {cluster} Outlier log IDs: {outliers['reason'].tolist()}")
+        if not outliers.empty:
+            df.loc[outliers.index, DataFrameKeys.cluster_name] = ClusterSpecificKeys.non_grouped_key
+
+    return df
