@@ -5,6 +5,7 @@ from typing import List, Optional
 import numpy as np
 import pandas as pd
 from sklearn.cluster import HDBSCAN
+import streamlit as st
 
 from src import helpers
 from src.constants import ClusterSpecificKeys, DataFrameKeys
@@ -35,9 +36,12 @@ class FailureAnalyzer:
         """Load data from the specified Excel file."""
         self.logger.info(f"Loading data")
         if not tc_id:
-            return ExcelLoader.load(path=file_path, st_obj=st_obj)
-
-        return helpers.get_tc_id_df(tc_id)
+            dataframe = ExcelLoader.load(path=file_path, st_obj=st_obj)
+        else:
+            dataframe = helpers.get_tc_id_df(tc_id)
+            
+        st.write(f"Total number of test cases: {dataframe.shape[0]}")
+        return dataframe[dataframe["result"] != "PASS"]
 
     def generate_embeddings(self, texts: List[str]) -> np.ndarray:
         """Generate embeddings for the provided texts."""
@@ -94,8 +98,9 @@ class FailureAnalyzer:
         empty_log_df = failure_df[
             failure_df[DataFrameKeys.cluster_name] != ClusterSpecificKeys.non_grouped_key
         ].reset_index(drop=True)
-        non_clustered_df = helpers.fuzzy_cluster_grouping(non_clustered_df)
+        non_clustered_df = helpers.fuzzy_cluster_grouping(non_clustered_df).reset_index(drop=True)
         failure_df = pd.concat([empty_log_df, non_clustered_df], axis=0).reset_index(drop=True)
+        self.logger.info(f"Initial Clusters: {failure_df[DataFrameKeys.cluster_name].unique()}")
 
         # Handle small datasets (10 or fewer rows)
         if failure_df.shape[0] <= 10:

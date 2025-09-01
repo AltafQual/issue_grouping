@@ -315,4 +315,6 @@ def qgenie_post_processing(df: pd.DataFrame) -> pd.DataFrame:
     except Exception as e:
         logger.error(f"Exception in Qgenie post processing: {e}")
         traceback.print_exc()
+    
+    logger.info(f"Qgenie Post Processing clusters: {df[DataFrameKeys.cluster_name].unique()}")
     return df

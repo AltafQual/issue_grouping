@@ -230,12 +230,14 @@ def fuzzy_cluster_grouping(failures_dataframe, threshold=100, bin_intervals=[[0,
 
 
 @execution_timer
-def create_excel_with_clusters(df, cluster_column, columns_to_include):
+def create_excel_with_clusters(df, cluster_column, columns_to_include = None):
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         for cluster in df[cluster_column].unique():
             sheet_name = str(cluster)[:31]
-            cluster_df = df[df[cluster_column] == cluster][columns_to_include]
+            cluster_df = df[df[cluster_column] == cluster]
+            if columns_to_include:
+                cluster_df = cluster_df[columns_to_include]
             cluster_df.to_excel(writer, sheet_name=sheet_name, index=False)
     output.seek(0)
     return output
