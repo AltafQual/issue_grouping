@@ -154,7 +154,7 @@ if st.session_state.processed_data and st.session_state.clustered_df_grouped is 
 
             st.markdown(f"## Type: {name}")
             if not clustered_df[clustered_df["result"] != "PASS"].empty:
-                COL_TO_SHOW = ["tc_uuid", "soc_name", "reason","model_name", "tags", "feature_name"]
+                COL_TO_SHOW = ["tc_uuid", "soc_name", "reason", "model_name", "tags", "feature_name"]
                 COL_TO_SHOW = [c for c in COL_TO_SHOW if c in clustered_df.columns]
 
                 clusters = [c for c in clustered_df[DataFrameKeys.cluster_name].unique().tolist()]
@@ -184,6 +184,7 @@ if st.session_state.clustered_df_grouped:
         ignore_index=True,
     )
 
+    analyzer.save_as_faiss(clustered_df, st.session_state.last_processed_source["value"])
     excel_data = create_excel_with_clusters(clustered_df, DataFrameKeys.cluster_name)
     # Determine filename for download
     # Use the last processed source info for file naming

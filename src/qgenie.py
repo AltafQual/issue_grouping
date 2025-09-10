@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import traceback
 from collections import defaultdict
@@ -54,8 +55,17 @@ def generate_cluster_name(grouped_cluster: list) -> dict:
 
 
 @execution_timer
-def analyze_cluster(cluster_df: pd.DataFrame) -> dict:
-    # Prepare input text
+async def analyze_cluster(cluster_df: pd.DataFrame) -> dict:
+    def chunk_logs(logs, chunk_size=30, overlap=10):
+        start = 0
+        while start < len(logs):
+            end = start + chunk_size
+            yield logs[start:end]
+            start = end - overlap  # move back by `overlap` logs
+
+    async def process_chunk(chunk):
+        return await chain.ainvoke({"error_logs": chunk})
+
     error_logs = [
         {"id": int(idx), "error log": row[DataFrameKeys.preprocessed_text_key]} for idx, row in cluster_df.iterrows()
     ]
@@ -65,8 +75,22 @@ def analyze_cluster(cluster_df: pd.DataFrame) -> dict:
     )
 
     chain = prompt_template | model | parser
-    response = chain.invoke({"error_logs": error_logs})
-    return response
+
+    tasks = [process_chunk(chunk) for chunk in chunk_logs(error_logs)]
+    responses = await asyncio.gather(*tasks)
+    logger.info(f"Analyze clusters response: {responses}")
+    if not responses:
+        responses = [{}]
+
+    # due to overlap there can be duplicate ids, so using set of list to get only unique of those ids
+
+    misclassified_ids = [
+        id_ for response in responses if response.get("misclassified_ids") for id_ in response["misclassified_ids"]
+    ]
+
+    responses = {"cluster_name": responses[0].get("cluster_name"), "misclassified_ids": list(set(misclassified_ids))}
+
+    return responses
 
 
 @execution_timer
@@ -98,7 +122,7 @@ def merge_clusters(
 
 
 @execution_timer
-def get_clusters_name_and_misclassified_errors(df: pd.DataFrame) -> dict:
+async def get_clusters_name_and_misclassified_errors(df: pd.DataFrame) -> dict:
     results = {}
     for cluster_id in df[DataFrameKeys.cluster_type_int].unique():
         # avoid the miscellaneous cluster, that will be dealt with later
@@ -106,7 +130,7 @@ def get_clusters_name_and_misclassified_errors(df: pd.DataFrame) -> dict:
             continue
 
         cluster_df = df[df[DataFrameKeys.cluster_type_int] == cluster_id]
-        result = analyze_cluster(cluster_df)
+        result = await analyze_cluster(cluster_df)
         results[int(cluster_id)] = result
     return results
 
@@ -290,7 +314,7 @@ def inter_cluster_merging(df: pd.DataFrame) -> pd.DataFrame:
 
 
 @execution_timer
-def qgenie_post_processing(df: pd.DataFrame) -> pd.DataFrame:
+async def qgenie_post_processing(df: pd.DataFrame) -> pd.DataFrame:
     """Perform post-processing on the dataframe to handle outlier clusters.
 
     This function identifies outlier clusters, retrieves GPT responses for them,
@@ -303,7 +327,7 @@ def qgenie_post_processing(df: pd.DataFrame) -> pd.DataFrame:
     - pd.DataFrame: The dataframe with post-processed data.
     """
     try:
-        analyzed_results = get_clusters_name_and_misclassified_errors(df)
+        analyzed_results = await get_clusters_name_and_misclassified_errors(df)
         if analyzed_results:
             duplicate_clusters = get_duplicate_clusters(analyzed_results)
             df, analyzed_results = merge_duplicate_clusters(df, duplicate_clusters, analyzed_results)
@@ -315,6 +339,6 @@ def qgenie_post_processing(df: pd.DataFrame) -> pd.DataFrame:
     except Exception as e:
         logger.error(f"Exception in Qgenie post processing: {e}")
         traceback.print_exc()
-    
+
     logger.info(f"Qgenie Post Processing clusters: {df[DataFrameKeys.cluster_name].unique()}")
     return df

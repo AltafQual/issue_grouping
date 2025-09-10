@@ -1,0 +1,10 @@
+.venv
+*.pyc
+.uv-cache
+test_data
+experiments
+models
+__pycache__
+issue_grouping_hosting/
+*.parquet
+.gitignore

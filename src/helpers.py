@@ -55,7 +55,7 @@ def preprocess_error_log(log: str) -> str:
 @execution_timer
 def remove_empty_and_misc_rows(df: pd.DataFrame, errors: list, error_column_name: str):
     def is_empty_error_log(s):
-        if s is None or pd.isna(s) or s in {"null", "nan"}:
+        if s is None or pd.isna(s) or s in {"null", "nan", "None"}:
             return "NoErrorLog"
         if not bool(re.search(r"[a-zA-Z]", s)):
             return "EmptyErrorLog"
@@ -135,7 +135,7 @@ def reassign_unclustered_logs(df: pd.DataFrame, threshold=0.95):
 
 
 @execution_timer
-def update_labels_with_merged_clusters(df, merged_clusters, label_col):
+def update_labels_with_merged_clusters(df: pd.DataFrame, merged_clusters: dict, label_col: str) -> pd.DataFrame:
     # Create a mapping from old label to new (parent) label
     label_map = {}
     for parent, children in merged_clusters.items():
@@ -148,7 +148,7 @@ def update_labels_with_merged_clusters(df, merged_clusters, label_col):
 
 
 @execution_timer
-def trim_error_logs(df: pd.DataFrame, column=DataFrameKeys.preprocessed_text_key, max_length=1000):
+def trim_error_logs(df: pd.DataFrame, column=DataFrameKeys.preprocessed_text_key, max_length=1000) -> pd.DataFrame:
     def trim(log, head_ratio=0.3):
         try:
             log_str = str(log)
@@ -169,7 +169,7 @@ def trim_error_logs(df: pd.DataFrame, column=DataFrameKeys.preprocessed_text_key
 
 
 @execution_timer
-def group_similar_errors(df: pd.DataFrame, column: str, threshold):
+def group_similar_errors(df: pd.DataFrame, column: str, threshold) -> list:
     groups = []
     assigned = set()
 
@@ -200,7 +200,9 @@ def group_similar_errors(df: pd.DataFrame, column: str, threshold):
 
 
 @execution_timer
-def fuzzy_cluster_grouping(failures_dataframe, threshold=100, bin_intervals=[[0, 50], [50, 110]]):
+def fuzzy_cluster_grouping(
+    failures_dataframe: pd.DataFrame, threshold=100, bin_intervals=[[0, 50], [50, 110]]
+) -> pd.DataFrame:
     failures_dataframe.loc[:, DataFrameKeys.error_logs_length] = failures_dataframe[
         DataFrameKeys.preprocessed_text_key
     ].apply(len)
@@ -230,7 +232,7 @@ def fuzzy_cluster_grouping(failures_dataframe, threshold=100, bin_intervals=[[0,
 
 
 @execution_timer
-def create_excel_with_clusters(df, cluster_column, columns_to_include = None):
+def create_excel_with_clusters(df: pd.DataFrame, cluster_column: str, columns_to_include=None) -> pd.ExcelFile:
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         for cluster in df[cluster_column].unique():
@@ -242,7 +244,8 @@ def create_excel_with_clusters(df, cluster_column, columns_to_include = None):
     output.seek(0)
     return output
 
-def detect_cluster_outlier(df):
+
+def detect_cluster_outlier(df: pd.DataFrame) -> pd.DataFrame:
     clusters = set(df[DataFrameKeys.cluster_name]) - {-1}
     for cluster in clusters:
         cluster_df = df[df[DataFrameKeys.cluster_name] == cluster]
@@ -312,4 +315,3 @@ def tc_id_scheduler():
     scheduler = BackgroundScheduler()
     scheduler.add_job(update_tc_ids, "interval", hours=6)
     scheduler.start()
-

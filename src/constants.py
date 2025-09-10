@@ -13,3 +13,8 @@ class DataFrameKeys:
 class ClusterSpecificKeys:
     non_grouped_key: int = -1
     default_cluster_key: int = 200
+
+
+class FaissConfigurations:
+    base_path: str = "faiss_issue_grouping_db/"
+    default_db_name: str = "issue_grouping_db"

@@ -156,7 +156,6 @@ class ConnectToMySql(DatabaseConnection):
         tc_ids = overall_df.sort_values(by=["testplan_id"], ascending=False)
         return tc_ids[~tc_ids["testplan_id"].str.contains("gerritsanity", case=False, na=False)]
 
-
     def fetch_result_based_on_runid(self, runid: str) -> pd.DataFrame:
         """
         Fetch test plan results from the database based on testplan_id.

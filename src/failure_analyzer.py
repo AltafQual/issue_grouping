@@ -4,13 +4,14 @@ from typing import List, Optional
 
 import numpy as np
 import pandas as pd
-from sklearn.cluster import HDBSCAN
 import streamlit as st
+from sklearn.cluster import HDBSCAN
 
 from src import helpers
 from src.constants import ClusterSpecificKeys, DataFrameKeys
 from src.data_loader import ExcelLoader
 from src.embeddings import QGenieBGEM3Embedding
+from src.faiss_db import save_to_faiss
 from src.qgenie import qgenie_post_processing
 
 
@@ -39,7 +40,7 @@ class FailureAnalyzer:
             dataframe = ExcelLoader.load(path=file_path, st_obj=st_obj)
         else:
             dataframe = helpers.get_tc_id_df(tc_id)
-            
+
         st.write(f"Total number of test cases: {dataframe.shape[0]}")
         return dataframe[dataframe["result"] != "PASS"]
 
@@ -52,10 +53,16 @@ class FailureAnalyzer:
     async def agenerate_embeddings(self, texts: List[str]) -> np.ndarray:
         """Generate embeddings for the provided texts."""
         self.logger.info(f"Generating embeddings for {len(texts)} texts")
-        embeddings = await self.embedding_model.aembed(texts)
+        if not texts:
+            return []
+
+        if len(texts) > 10:
+            embeddings = await self.embedding_model.aembed(texts)
+        else:
+            return await self._agenerate_single_embeddings(texts)
         return list(np.array(embeddings))
 
-    async def agenerate_single_embeddings(self, texts: List[str]) -> np.ndarray:
+    async def _agenerate_single_embeddings(self, texts: List[str]) -> np.ndarray:
         """Generate embeddings for the provided texts."""
         if not isinstance(texts, list):
             texts = [texts]
@@ -85,20 +92,28 @@ class FailureAnalyzer:
         # Initialize all rows as non-grouped
         dataframe.loc[:, DataFrameKeys.cluster_name] = ClusterSpecificKeys.non_grouped_key
         dataframe.loc[:, DataFrameKeys.cluster_type_int] = ClusterSpecificKeys.non_grouped_key
-
         # Preprocess failure texts
         failure_texts = dataframe[failure_column].astype(str).tolist()
         failure_texts = [helpers.preprocess_error_log(text) for text in failure_texts]
         # Apply preprocessing steps
         failure_df = helpers.remove_empty_and_misc_rows(dataframe, failure_texts, DataFrameKeys.preprocessed_text_key)
         failure_df = helpers.trim_error_logs(failure_df)
-        non_clustered_df = failure_df[
-            failure_df[DataFrameKeys.cluster_name] == ClusterSpecificKeys.non_grouped_key
-        ].reset_index(drop=True)
+
+        # dataframe with empty/no logs
         empty_log_df = failure_df[
             failure_df[DataFrameKeys.cluster_name] != ClusterSpecificKeys.non_grouped_key
         ].reset_index(drop=True)
+        if not empty_log_df.empty:
+            empty_log_df.loc[:, DataFrameKeys.embeddings_key] = pd.Series(
+                await self.agenerate_embeddings(empty_log_df[DataFrameKeys.preprocessed_text_key].tolist()),
+                index=empty_log_df.index,
+            )
+
+        non_clustered_df = failure_df[
+            failure_df[DataFrameKeys.cluster_name] == ClusterSpecificKeys.non_grouped_key
+        ].reset_index(drop=True)
         non_clustered_df = helpers.fuzzy_cluster_grouping(non_clustered_df).reset_index(drop=True)
+
         failure_df = pd.concat([empty_log_df, non_clustered_df], axis=0).reset_index(drop=True)
         self.logger.info(f"Initial Clusters: {failure_df[DataFrameKeys.cluster_name].unique()}")
 
@@ -112,11 +127,13 @@ class FailureAnalyzer:
                 non_clustered_df = failure_df[
                     failure_df[DataFrameKeys.cluster_name] == ClusterSpecificKeys.non_grouped_key
                 ]
-                embeddings = await self.agenerate_single_embeddings(
+                embeddings = await self.agenerate_embeddings(
                     non_clustered_df[DataFrameKeys.preprocessed_text_key].tolist()
                 )
-                non_clustered_df.loc[:, DataFrameKeys.embeddings_key] = embeddings
-                non_clustered_df = qgenie_post_processing(non_clustered_df)
+                non_clustered_df.loc[:, DataFrameKeys.embeddings_key] = pd.Series(
+                    embeddings, index=non_clustered_df.index
+                )
+                non_clustered_df = await qgenie_post_processing(non_clustered_df)
 
             if non_clustered_df is not None:
                 failure_df = pd.concat([empty_log_df, non_clustered_df], axis=0).reset_index(drop=True)
@@ -135,11 +152,11 @@ class FailureAnalyzer:
             f"{already_clustered_df.shape[0]} already clustered logs and {non_clustered_df.shape[0]} non-clustered logs"
         )
 
+        embeddings = await self.agenerate_embeddings(non_clustered_df[DataFrameKeys.preprocessed_text_key].tolist())
+        non_clustered_df.loc[:, DataFrameKeys.embeddings_key] = pd.Series(embeddings, index=non_clustered_df.index)
+
         # Process non-clustered data
         if non_clustered_df.shape[0] > 10:
-            # For larger datasets, use clustering
-            embeddings = await self.agenerate_embeddings(non_clustered_df[DataFrameKeys.preprocessed_text_key].tolist())
-            non_clustered_df.loc[:, DataFrameKeys.embeddings_key] = embeddings
 
             # Cluster embeddings
             non_clustered_df.loc[:, DataFrameKeys.cluster_type_int] = self.cluster_embeddings(embeddings)
@@ -157,15 +174,9 @@ class FailureAnalyzer:
             num_clusters = len(cluster_counts) - (1 if -1 in cluster_counts else 0)
             self.logger.info(f"Found {num_clusters} clusters")
             self.logger.info(f"Noise points: {cluster_counts.get(-1, 0)}")
-        else:
-            # For smaller datasets, use single embeddings
-            embeddings = await self.agenerate_single_embeddings(
-                non_clustered_df[DataFrameKeys.preprocessed_text_key].tolist()
-            )
-            non_clustered_df.loc[:, DataFrameKeys.embeddings_key] = embeddings
 
         # Apply Qgenie post-processing
-        non_clustered_df = qgenie_post_processing(non_clustered_df)
+        non_clustered_df = await qgenie_post_processing(non_clustered_df)
         # Combine results and reset index
         final_df = pd.concat([already_clustered_df, non_clustered_df], axis=0).reset_index(drop=True)
         final_df.loc[
@@ -186,3 +197,6 @@ class FailureAnalyzer:
         save_data = data.drop(columns=["embeddings"])
         save_data.to_excel(output_path, index=False)
         self.logger.info(f"Results saved to {output_path}")
+
+    def save_as_faiss(self, data: pd.DataFrame, file_name: str = None):
+        save_to_faiss(data, file_name)
