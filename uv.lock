@@ -376,6 +376,20 @@ wheels = [
 ]
 
 [[package]]
+name = "fastapi"
+version = "0.116.1"
+source = { registry = "https://devpi.qualcomm.com/qcom/dev/+simple" }
+dependencies = [
+    { name = "pydantic" },
+    { name = "starlette" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://devpi.qualcomm.com/root/pypi/+f/ed5/2cbf946abfd70/fastapi-0.116.1.tar.gz", hash = "sha256:ed52cbf946abfd70c5a0dccb24673f0670deeb517a88b3544d03c2a6bf283143" }
+wheels = [
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/c46/ac7c312df840f/fastapi-0.116.1-py3-none-any.whl", hash = "sha256:c46ac7c312df840f0c9e220f7964bada936781bc4e2e6eb71f1c4d7553786565" },
+]
+
+[[package]]
 name = "frozenlist"
 version = "1.7.0"
 source = { registry = "https://devpi.qualcomm.com/qcom/dev/+simple" }
@@ -567,6 +581,42 @@ wheels = [
 ]
 
 [[package]]
+name = "httptools"
+version = "0.6.4"
+source = { registry = "https://devpi.qualcomm.com/qcom/dev/+simple" }
+sdist = { url = "https://devpi.qualcomm.com/root/pypi/+f/4e9/3eee4add6493b/httptools-0.6.4.tar.gz", hash = "sha256:4e93eee4add6493b59a5c514da98c939b244fce4a0d8879cd3f466562f4b7d5c" }
+wheels = [
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/3c7/3ce323711a6ff/httptools-0.6.4-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:3c73ce323711a6ffb0d247dcd5a550b8babf0f757e86a52558fe5b86d6fefcc0" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/345/c288418f0944a/httptools-0.6.4-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:345c288418f0944a6fe67be8e6afa9262b18c7626c3ef3c28adc5eabc06a68da" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/dee/e0e3343f98ee8/httptools-0.6.4-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:deee0e3343f98ee8047e9f4c5bc7cedbf69f5734454a94c38ee829fb2d5fa3c1" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/ca8/0b7485c76f768/httptools-0.6.4-cp310-cp310-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:ca80b7485c76f768a3bc83ea58373f8db7b015551117375e4918e2aa77ea9b50" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/90d/96a385fa94128/httptools-0.6.4-cp310-cp310-musllinux_1_2_aarch64.whl", hash = "sha256:90d96a385fa941283ebd231464045187a31ad932ebfa541be8edf5b3c2328959" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/59e/724f8b332319e/httptools-0.6.4-cp310-cp310-musllinux_1_2_x86_64.whl", hash = "sha256:59e724f8b332319e2875efd360e61ac07f33b492889284a3e05e6d13746876f4" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/c26/f313951f6e261/httptools-0.6.4-cp310-cp310-win_amd64.whl", hash = "sha256:c26f313951f6e26147833fc923f78f95604bbec812a43e5ee37f26dc9e5a686c" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/f47/f8ed67cc0ff86/httptools-0.6.4-cp311-cp311-macosx_10_9_universal2.whl", hash = "sha256:f47f8ed67cc0ff862b84a1189831d1d33c963fb3ce1ee0c65d3b0cbe7b711069" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/061/4154d5454c21b/httptools-0.6.4-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:0614154d5454c21b6410fdf5262b4a3ddb0f53f1e1721cfd59d55f32138c578a" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/f87/87367fbdfccae/httptools-0.6.4-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:f8787367fbdfccae38e35abf7641dafc5310310a5987b689f4c32cc8cc3ee975" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/40b/0f7fe4fd38e6a/httptools-0.6.4-cp311-cp311-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:40b0f7fe4fd38e6a507bdb751db0379df1e99120c65fbdc8ee6c1d044897a636" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/40a/5ec98d3f49904/httptools-0.6.4-cp311-cp311-musllinux_1_2_aarch64.whl", hash = "sha256:40a5ec98d3f49904b9fe36827dcf1aadfef3b89e2bd05b0e35e94f97c2b14721" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/dac/dd3d10ea1b4ca/httptools-0.6.4-cp311-cp311-musllinux_1_2_x86_64.whl", hash = "sha256:dacdd3d10ea1b4ca9df97a0a303cbacafc04b5cd375fa98732678151643d4988" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/288/cd628406cc53f/httptools-0.6.4-cp311-cp311-win_amd64.whl", hash = "sha256:288cd628406cc53f9a541cfaf06041b4c71d751856bab45e3702191f931ccd17" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/df0/17d6c780287d5/httptools-0.6.4-cp312-cp312-macosx_10_13_universal2.whl", hash = "sha256:df017d6c780287d5c80601dafa31f17bddb170232d85c066604d8558683711a2" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/850/71a1e8c2d051b/httptools-0.6.4-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:85071a1e8c2d051b507161f6c3e26155b5c790e4e28d7f236422dbacc2a9cc44" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/694/22b7f458c5af8/httptools-0.6.4-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:69422b7f458c5af875922cdb5bd586cc1f1033295aa9ff63ee196a87519ac8e1" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/16e/603a3bff50db0/httptools-0.6.4-cp312-cp312-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:16e603a3bff50db08cd578d54f07032ca1631450ceb972c2f834c2b860c28ea2" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/ec4/f178901fa1834/httptools-0.6.4-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:ec4f178901fa1834d4a060320d2f3abc5c9e39766953d038f1458cb885f47e81" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/f9e/b89ecf8b290f2/httptools-0.6.4-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:f9eb89ecf8b290f2e293325c646a211ff1c2493222798bb80a530c5e7502494f" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/db7/8cb9ca56b59b0/httptools-0.6.4-cp312-cp312-win_amd64.whl", hash = "sha256:db78cb9ca56b59b016e64b6031eda5653be0589dba2b1b43453f6e8b405a0970" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/ade/273d7e767d5fa/httptools-0.6.4-cp313-cp313-macosx_10_13_universal2.whl", hash = "sha256:ade273d7e767d5fae13fa637f4d53b6e961fb7fd93c7797562663f0171c26660" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/856/f4bc0478ae143/httptools-0.6.4-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:856f4bc0478ae143bad54a4242fccb1f3f86a6e1be5548fecfd4102061b3a083" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/322/d20ea9cdd1fa9/httptools-0.6.4-cp313-cp313-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:322d20ea9cdd1fa98bd6a74b77e2ec5b818abdc3d36695ab402a0de8ef2865a3" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/4d8/7b29bd4486c00/httptools-0.6.4-cp313-cp313-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:4d87b29bd4486c0093fc64dea80231f7c7f7eb4dc70ae394d70a495ab8436071" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/342/dd6946aa6bda4/httptools-0.6.4-cp313-cp313-musllinux_1_2_aarch64.whl", hash = "sha256:342dd6946aa6bda4b8f18c734576106b8a31f2fe31492881a9a160ec84ff4bd5" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/4b3/6913ba5200824/httptools-0.6.4-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:4b36913ba52008249223042dca46e69967985fb4051951f94357ea681e1f5dc0" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/289/08df1b9bb8187/httptools-0.6.4-cp313-cp313-win_amd64.whl", hash = "sha256:28908df1b9bb8187393d5b5db91435ccc9c8e891657f9cbb42a2541b44c82fc8" },
+]
+
+[[package]]
 name = "httpx"
 version = "0.28.1"
 source = { registry = "https://devpi.qualcomm.com/qcom/dev/+simple" }
@@ -615,6 +665,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "apscheduler" },
     { name = "black" },
+    { name = "fastapi" },
     { name = "isort" },
     { name = "langchain" },
     { name = "langchain-community" },
@@ -625,12 +676,14 @@ dependencies = [
     { name = "rapidfuzz" },
     { name = "scikit-learn" },
     { name = "streamlit" },
+    { name = "uvicorn", extra = ["standard"] },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "apscheduler", specifier = "==3.11.0" },
     { name = "black", specifier = ">=25.1.0" },
+    { name = "fastapi", specifier = ">=0.116.1" },
     { name = "isort", specifier = ">=6.0.1" },
     { name = "langchain", specifier = ">=0.3.27" },
     { name = "langchain-community", specifier = ">=0.3.29" },
@@ -641,6 +694,7 @@ requires-dist = [
     { name = "rapidfuzz", specifier = "===3.14.0" },
     { name = "scikit-learn", specifier = ">=1.7.1" },
     { name = "streamlit", specifier = "==1.47.0" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.35.0" },
 ]
 
 [[package]]
@@ -2516,6 +2570,19 @@ wheels = [
 ]
 
 [[package]]
+name = "starlette"
+version = "0.47.3"
+source = { registry = "https://devpi.qualcomm.com/qcom/dev/+simple" }
+dependencies = [
+    { name = "anyio" },
+    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
+]
+sdist = { url = "https://devpi.qualcomm.com/root/pypi/+f/6bc/94f839cc176c4/starlette-0.47.3.tar.gz", hash = "sha256:6bc94f839cc176c4858894f1f8908f0ab79dfec1a6b8402f6da9be26ebea52e9" }
+wheels = [
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/89c/0778ca62a76b8/starlette-0.47.3-py3-none-any.whl", hash = "sha256:89c0778ca62a76b826101e7c709e70680a1699ca7da6b44d38eb0a7e61fe4b51" },
+]
+
+[[package]]
 name = "streamlit"
 version = "1.47.0"
 source = { registry = "https://devpi.qualcomm.com/qcom/dev/+simple" }
@@ -2695,6 +2762,63 @@ wheels = [
 ]
 
 [[package]]
+name = "uvicorn"
+version = "0.35.0"
+source = { registry = "https://devpi.qualcomm.com/qcom/dev/+simple" }
+dependencies = [
+    { name = "click" },
+    { name = "h11" },
+    { name = "typing-extensions", marker = "python_full_version < '3.11'" },
+]
+sdist = { url = "https://devpi.qualcomm.com/root/pypi/+f/bc6/62f087f7cf2ce/uvicorn-0.35.0.tar.gz", hash = "sha256:bc662f087f7cf2ce11a1d7fd70b90c9f98ef2e2831556dd078d131b96cc94a01" }
+wheels = [
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/197/535216b25ff9b/uvicorn-0.35.0-py3-none-any.whl", hash = "sha256:197535216b25ff9b785e29a0b79199f55222193d47f820816e7da751e9bc8d4a" },
+]
+
+[package.optional-dependencies]
+standard = [
+    { name = "colorama", marker = "sys_platform == 'win32'" },
+    { name = "httptools" },
+    { name = "python-dotenv" },
+    { name = "pyyaml" },
+    { name = "uvloop", marker = "platform_python_implementation != 'PyPy' and sys_platform != 'cygwin' and sys_platform != 'win32'" },
+    { name = "watchfiles" },
+    { name = "websockets" },
+]
+
+[[package]]
+name = "uvloop"
+version = "0.21.0"
+source = { registry = "https://devpi.qualcomm.com/qcom/dev/+simple" }
+sdist = { url = "https://devpi.qualcomm.com/root/pypi/+f/3bf/12b0fda684478/uvloop-0.21.0.tar.gz", hash = "sha256:3bf12b0fda68447806a7ad847bfa591613177275d35b6724b1ee573faa3704e3" }
+wheels = [
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/ec7/e6b09a6fdded4/uvloop-0.21.0-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:ec7e6b09a6fdded42403182ab6b832b71f4edaf7f37a9a0e371a01db5f0cb45f" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/196/274f2adb9689a/uvloop-0.21.0-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:196274f2adb9689a289ad7d65700d37df0c0930fd8e4e743fa4834e850d7719d" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/f38/b2e090258d051/uvloop-0.21.0-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:f38b2e090258d051d68a5b14d1da7203a3c3677321cf32a95a6f4db4dd8b6f26" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/87c/43e0f13022b99/uvloop-0.21.0-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:87c43e0f13022b998eb9b973b5e97200c8b90823454d4bc06ab33829e09fb9bb" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/10d/66943def5fcb6/uvloop-0.21.0-cp310-cp310-musllinux_1_2_aarch64.whl", hash = "sha256:10d66943def5fcb6e7b37310eb6b5639fd2ccbc38df1177262b0640c3ca68c1f" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/67d/d654b8ca23aed/uvloop-0.21.0-cp310-cp310-musllinux_1_2_x86_64.whl", hash = "sha256:67dd654b8ca23aed0a8e99010b4c34aca62f4b7fce88f39d452ed7622c94845c" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/c0f/3fa6200b31089/uvloop-0.21.0-cp311-cp311-macosx_10_9_universal2.whl", hash = "sha256:c0f3fa6200b3108919f8bdabb9a7f87f20e7097ea3c543754cabc7d717d95cf8" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/087/8c2640cf341b2/uvloop-0.21.0-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:0878c2640cf341b269b7e128b1a5fed890adc4455513ca710d77d5e93aa6d6a0" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/b9f/b766bb57b7388/uvloop-0.21.0-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:b9fb766bb57b7388745d8bcc53a359b116b8a04c83a2288069809d2b3466c37e" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/8a3/75441696e2eda/uvloop-0.21.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:8a375441696e2eda1c43c44ccb66e04d61ceeffcd76e4929e527b7fa401b90fb" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/baa/0e6291d91649c/uvloop-0.21.0-cp311-cp311-musllinux_1_2_aarch64.whl", hash = "sha256:baa0e6291d91649c6ba4ed4b2f982f9fa165b5bbd50a9e203c416a2797bab3c6" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/450/9360fcc4c3bd2/uvloop-0.21.0-cp311-cp311-musllinux_1_2_x86_64.whl", hash = "sha256:4509360fcc4c3bd2c70d87573ad472de40c13387f5fda8cb58350a1d7475e58d" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/359/ec2c888397b9e/uvloop-0.21.0-cp312-cp312-macosx_10_13_universal2.whl", hash = "sha256:359ec2c888397b9e592a889c4d72ba3d6befba8b2bb01743f72fffbde663b59c" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/f70/89d2dc73179ce/uvloop-0.21.0-cp312-cp312-macosx_10_13_x86_64.whl", hash = "sha256:f7089d2dc73179ce5ac255bdf37c236a9f914b264825fdaacaded6990a7fb4c2" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/baa/4dcdbd9ae0a37/uvloop-0.21.0-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:baa4dcdbd9ae0a372f2167a207cd98c9f9a1ea1188a8a526431eef2f8116cc8d" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/869/75dca1c773a2c/uvloop-0.21.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:86975dca1c773a2c9864f4c52c5a55631038e387b47eaf56210f873887b6c8dc" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/461/d9ae6660fbbaf/uvloop-0.21.0-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:461d9ae6660fbbafedd07559c6a2e57cd553b34b0065b6550685f6653a98c1cb" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/183/aef7c8730e54c/uvloop-0.21.0-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:183aef7c8730e54c9a3ee3227464daed66e37ba13040bb3f350bc2ddc040f22f" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/bfd/55dfcc2a51231/uvloop-0.21.0-cp313-cp313-macosx_10_13_universal2.whl", hash = "sha256:bfd55dfcc2a512316e65f16e503e9e450cab148ef11df4e4e679b5e8253a5281" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/787/ae31ad8a2856f/uvloop-0.21.0-cp313-cp313-macosx_10_13_x86_64.whl", hash = "sha256:787ae31ad8a2856fc4e7c095341cccc7209bd657d0e71ad0dc2ea83c4a6fa8af" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/5ee/4d4ef48036ff6/uvloop-0.21.0-cp313-cp313-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:5ee4d4ef48036ff6e5cfffb09dd192c7a5027153948d85b8da7ff705065bacc6" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/f3d/f876acd7ec037/uvloop-0.21.0-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:f3df876acd7ec037a3d005b3ab85a7e4110422e4d9c1571d4fc89b0fc41b6816" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/bd5/3ecc9a0f3d87a/uvloop-0.21.0-cp313-cp313-musllinux_1_2_aarch64.whl", hash = "sha256:bd53ecc9a0f3d87ab847503c2e1552b690362e005ab54e8a48ba97da3924c0dc" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/a5c/39f217ab3c663/uvloop-0.21.0-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:a5c39f217ab3c663dc699c04cbd50c13813e31d917642d459fdcec07555cc553" },
+]
+
+[[package]]
 name = "watchdog"
 version = "6.0.0"
 source = { registry = "https://devpi.qualcomm.com/qcom/dev/+simple" }
@@ -2713,12 +2837,171 @@ wheels = [
 ]
 
 [[package]]
+name = "watchfiles"
+version = "1.1.0"
+source = { registry = "https://devpi.qualcomm.com/qcom/dev/+simple" }
+dependencies = [
+    { name = "anyio" },
+]
+sdist = { url = "https://devpi.qualcomm.com/root/pypi/+f/693/ed7ec72cbfcee/watchfiles-1.1.0.tar.gz", hash = "sha256:693ed7ec72cbfcee399e92c895362b6e66d63dac6b91e2c11ae03d10d503e575" }
+wheels = [
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/27f/30e14aa1c1e91/watchfiles-1.1.0-cp310-cp310-macosx_10_12_x86_64.whl", hash = "sha256:27f30e14aa1c1e91cb653f03a63445739919aef84c8d2517997a83155e7a2fcc" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/336/6f56c27223286/watchfiles-1.1.0-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:3366f56c272232860ab45c77c3ca7b74ee819c8e1f6f35a7125556b198bbc6df" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/841/2eacef34cae28/watchfiles-1.1.0-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:8412eacef34cae2836d891836a7fff7b754d6bcac61f6c12ba5ca9bc7e427b68" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/df6/70918eb7dd719/watchfiles-1.1.0-cp310-cp310-manylinux_2_17_armv7l.manylinux2014_armv7l.whl", hash = "sha256:df670918eb7dd719642e05979fc84704af913d563fd17ed636f7c4783003fdcc" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/d76/42b9bc4827b55/watchfiles-1.1.0-cp310-cp310-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:d7642b9bc4827b5518ebdb3b82698ada8c14c7661ddec5fe719f3e56ccd13c97" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/199/207b2d3eeaeb8/watchfiles-1.1.0-cp310-cp310-manylinux_2_17_ppc64le.manylinux2014_ppc64le.whl", hash = "sha256:199207b2d3eeaeb80ef4411875a6243d9ad8bc35b07fc42daa6b801cc39cc41c" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/a47/9466da6db5c1e/watchfiles-1.1.0-cp310-cp310-manylinux_2_17_s390x.manylinux2014_s390x.whl", hash = "sha256:a479466da6db5c1e8754caee6c262cd373e6e6c363172d74394f4bff3d84d7b5" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/935/f9edd022ec13e/watchfiles-1.1.0-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:935f9edd022ec13e447e5723a7d14456c8af254544cefbc533f6dd276c9aa0d9" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/807/6a5769d6bdf5f/watchfiles-1.1.0-cp310-cp310-musllinux_1_1_aarch64.whl", hash = "sha256:8076a5769d6bdf5f673a19d51da05fc79e2bbf25e9fe755c47595785c06a8c72" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/86b/1e28d4c37e892/watchfiles-1.1.0-cp310-cp310-musllinux_1_1_x86_64.whl", hash = "sha256:86b1e28d4c37e89220e924305cd9f82866bb0ace666943a6e4196c5df4d58dcc" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/d1c/af40c1c657b27/watchfiles-1.1.0-cp310-cp310-win32.whl", hash = "sha256:d1caf40c1c657b27858f9774d5c0e232089bca9cb8ee17ce7478c6e9264d2587" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/a89/c75a5b9bc3291/watchfiles-1.1.0-cp310-cp310-win_amd64.whl", hash = "sha256:a89c75a5b9bc329131115a409d0acc16e8da8dfd5867ba59f1dd66ae7ea8fa82" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/c96/49dfc57cc1f98/watchfiles-1.1.0-cp311-cp311-macosx_10_12_x86_64.whl", hash = "sha256:c9649dfc57cc1f9835551deb17689e8d44666315f2e82d337b9f07bd76ae3aa2" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/406/520216186b993/watchfiles-1.1.0-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:406520216186b99374cdb58bc48e34bb74535adec160c8459894884c983a149c" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/cb4/5350fd1dc75cd/watchfiles-1.1.0-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:cb45350fd1dc75cd68d3d72c47f5b513cb0578da716df5fba02fff31c69d5f2d" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/11e/e4444250fcbeb/watchfiles-1.1.0-cp311-cp311-manylinux_2_17_armv7l.manylinux2014_armv7l.whl", hash = "sha256:11ee4444250fcbeb47459a877e5e80ed994ce8e8d20283857fc128be1715dac7" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/bda/8136e6a80bdea/watchfiles-1.1.0-cp311-cp311-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:bda8136e6a80bdea23e5e74e09df0362744d24ffb8cd59c4a95a6ce3d142f79c" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/b91/5daeb2d8c1f5c/watchfiles-1.1.0-cp311-cp311-manylinux_2_17_ppc64le.manylinux2014_ppc64le.whl", hash = "sha256:b915daeb2d8c1f5cee4b970f2e2c988ce6514aace3c9296e58dd64dc9aa5d575" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/ed8/fc66786de8d03/watchfiles-1.1.0-cp311-cp311-manylinux_2_17_s390x.manylinux2014_s390x.whl", hash = "sha256:ed8fc66786de8d0376f9f913c09e963c66e90ced9aa11997f93bdb30f7c872a8" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/fe4/371595edf78c4/watchfiles-1.1.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:fe4371595edf78c41ef8ac8df20df3943e13defd0efcb732b2e393b5a8a7a71f" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/b7c/5f6fe273291f4/watchfiles-1.1.0-cp311-cp311-musllinux_1_1_aarch64.whl", hash = "sha256:b7c5f6fe273291f4d414d55b2c80d33c457b8a42677ad14b4b47ff025d0893e4" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/773/8027989881e70/watchfiles-1.1.0-cp311-cp311-musllinux_1_1_x86_64.whl", hash = "sha256:7738027989881e70e3723c75921f1efa45225084228788fc59ea8c6d732eb30d" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/622/d6b2c06be19f6/watchfiles-1.1.0-cp311-cp311-win32.whl", hash = "sha256:622d6b2c06be19f6e89b1d951485a232e3b59618def88dbeda575ed8f0d8dbf2" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/48a/a25e5992b61de/watchfiles-1.1.0-cp311-cp311-win_amd64.whl", hash = "sha256:48aa25e5992b61debc908a61ab4d3f216b64f44fdaa71eb082d8b2de846b7d12" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/006/45eb79a3faa70/watchfiles-1.1.0-cp311-cp311-win_arm64.whl", hash = "sha256:00645eb79a3faa70d9cb15c8d4187bb72970b2470e938670240c7998dad9f13a" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/9dc/001c3e10de472/watchfiles-1.1.0-cp312-cp312-macosx_10_12_x86_64.whl", hash = "sha256:9dc001c3e10de4725c749d4c2f2bdc6ae24de5a88a339c4bce32300a31ede179" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/d9b/a68ec283153de/watchfiles-1.1.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:d9ba68ec283153dead62cbe81872d28e053745f12335d037de9cbd14bd1877f5" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/130/fc497b8ee68dc/watchfiles-1.1.0-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:130fc497b8ee68dce163e4254d9b0356411d1490e868bd8790028bc46c5cc297" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/50a/51a90610d0845/watchfiles-1.1.0-cp312-cp312-manylinux_2_17_armv7l.manylinux2014_armv7l.whl", hash = "sha256:50a51a90610d0845a5931a780d8e51d7bd7f309ebc25132ba975aca016b576a0" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/dc4/4678a72ac0910/watchfiles-1.1.0-cp312-cp312-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:dc44678a72ac0910bac46fa6a0de6af9ba1355669b3dfaf1ce5f05ca7a74364e" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/a54/3492513a93b00/watchfiles-1.1.0-cp312-cp312-manylinux_2_17_ppc64le.manylinux2014_ppc64le.whl", hash = "sha256:a543492513a93b001975ae283a51f4b67973662a375a403ae82f420d2c7205ee" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/8ac/164e20d17cc28/watchfiles-1.1.0-cp312-cp312-manylinux_2_17_s390x.manylinux2014_s390x.whl", hash = "sha256:8ac164e20d17cc285f2b94dc31c384bc3aa3dd5e7490473b3db043dd70fbccfd" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/f75/90d5a455321e5/watchfiles-1.1.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:f7590d5a455321e53857892ab8879dce62d1f4b04748769f5adf2e707afb9d4f" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/37d/3d3f7defb13f6/watchfiles-1.1.0-cp312-cp312-musllinux_1_1_aarch64.whl", hash = "sha256:37d3d3f7defb13f62ece99e9be912afe9dd8a0077b7c45ee5a57c74811d581a4" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/708/0c4bb3efd70a0/watchfiles-1.1.0-cp312-cp312-musllinux_1_1_x86_64.whl", hash = "sha256:7080c4bb3efd70a07b1cc2df99a7aa51d98685be56be6038c3169199d0a1c69f" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/cbc/f8630ef4afb05/watchfiles-1.1.0-cp312-cp312-win32.whl", hash = "sha256:cbcf8630ef4afb05dc30107bfa17f16c0896bb30ee48fc24bf64c1f970f3b1fd" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/cbd/949bdd87567b0/watchfiles-1.1.0-cp312-cp312-win_amd64.whl", hash = "sha256:cbd949bdd87567b0ad183d7676feb98136cde5bb9025403794a4c0db28ed3a47" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/0a7/d40b77f07be87/watchfiles-1.1.0-cp312-cp312-win_arm64.whl", hash = "sha256:0a7d40b77f07be87c6faa93d0951a0fcd8cbca1ddff60a1b65d741bac6f3a9f6" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/500/7f860c7f1f8df/watchfiles-1.1.0-cp313-cp313-macosx_10_12_x86_64.whl", hash = "sha256:5007f860c7f1f8df471e4e04aaa8c43673429047d63205d1630880f7637bca30" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/20e/cc8abbd957046/watchfiles-1.1.0-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:20ecc8abbd957046f1fe9562757903f5eaf57c3bce70929fda6c7711bb58074a" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/f2f/0498b7d2a3c07/watchfiles-1.1.0-cp313-cp313-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:f2f0498b7d2a3c072766dba3274fe22a183dbea1f99d188f1c6c72209a1063dc" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/239/736577e848678/watchfiles-1.1.0-cp313-cp313-manylinux_2_17_armv7l.manylinux2014_armv7l.whl", hash = "sha256:239736577e848678e13b201bba14e89718f5c2133dfd6b1f7846fa1b58a8532b" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/eff/4b8d89f444f7e/watchfiles-1.1.0-cp313-cp313-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:eff4b8d89f444f7e49136dc695599a591ff769300734446c0a86cba2eb2f9895" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/12b/0a02a91762c08/watchfiles-1.1.0-cp313-cp313-manylinux_2_17_ppc64le.manylinux2014_ppc64le.whl", hash = "sha256:12b0a02a91762c08f7264e2e79542f76870c3040bbc847fb67410ab81474932a" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/29e/7bc2eee15cbb3/watchfiles-1.1.0-cp313-cp313-manylinux_2_17_s390x.manylinux2014_s390x.whl", hash = "sha256:29e7bc2eee15cbb339c68445959108803dc14ee0c7b4eea556400131a8de462b" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/d94/81174d3ed982e/watchfiles-1.1.0-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:d9481174d3ed982e269c090f780122fb59cee6c3796f74efe74e70f7780ed94c" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/80f/811146831c8c8/watchfiles-1.1.0-cp313-cp313-musllinux_1_1_aarch64.whl", hash = "sha256:80f811146831c8c86ab17b640801c25dc0a88c630e855e2bef3568f30434d52b" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/600/22527e71d1d1f/watchfiles-1.1.0-cp313-cp313-musllinux_1_1_x86_64.whl", hash = "sha256:60022527e71d1d1fda67a33150ee42869042bce3d0fcc9cc49be009a9cded3fb" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/32d/6d4e583593cb8/watchfiles-1.1.0-cp313-cp313-win32.whl", hash = "sha256:32d6d4e583593cb8576e129879ea0991660b935177c0f93c6681359b3654bfa9" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/f21/af781a4a6fbad/watchfiles-1.1.0-cp313-cp313-win_amd64.whl", hash = "sha256:f21af781a4a6fbad54f03c598ab620e3a77032c5878f3d780448421a6e1818c7" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/536/6164391873ed7/watchfiles-1.1.0-cp313-cp313-win_arm64.whl", hash = "sha256:5366164391873ed76bfdf618818c82084c9db7fac82b64a20c44d335eec9ced5" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/17a/b167cca6339c2/watchfiles-1.1.0-cp313-cp313t-macosx_10_12_x86_64.whl", hash = "sha256:17ab167cca6339c2b830b744eaf10803d2a5b6683be4d79d8475d88b4a8a4be1" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/328/dbc9bff7205c2/watchfiles-1.1.0-cp313-cp313t-macosx_11_0_arm64.whl", hash = "sha256:328dbc9bff7205c215a7807da7c18dce37da7da718e798356212d22696404339" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/f72/08ab6e009c627/watchfiles-1.1.0-cp313-cp313t-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:f7208ab6e009c627b7557ce55c465c98967e8caa8b11833531fdf95799372633" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/a8f/6f72974a19efe/watchfiles-1.1.0-cp313-cp313t-manylinux_2_17_armv7l.manylinux2014_armv7l.whl", hash = "sha256:a8f6f72974a19efead54195bc9bed4d850fc047bb7aa971268fd9a8387c89011" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/d18/1ef50923c29cf/watchfiles-1.1.0-cp313-cp313t-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:d181ef50923c29cf0450c3cd47e2f0557b62218c50b2ab8ce2ecaa02bd97e670" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/adb/4167043d3a782/watchfiles-1.1.0-cp313-cp313t-manylinux_2_17_ppc64le.manylinux2014_ppc64le.whl", hash = "sha256:adb4167043d3a78280d5d05ce0ba22055c266cf8655ce942f2fb881262ff3cdf" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/8c5/701dc474b041e/watchfiles-1.1.0-cp313-cp313t-manylinux_2_17_s390x.manylinux2014_s390x.whl", hash = "sha256:8c5701dc474b041e2934a26d31d39f90fac8a3dee2322b39f7729867f932b1d4" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/b06/7915e3c393696/watchfiles-1.1.0-cp313-cp313t-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:b067915e3c3936966a8607f6fe5487df0c9c4afb85226613b520890049deea20" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/9c7/33cda03b6d636/watchfiles-1.1.0-cp313-cp313t-musllinux_1_1_aarch64.whl", hash = "sha256:9c733cda03b6d636b4219625a4acb5c6ffb10803338e437fb614fef9516825ef" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/cc0/8ef8b90d78bfa/watchfiles-1.1.0-cp313-cp313t-musllinux_1_1_x86_64.whl", hash = "sha256:cc08ef8b90d78bfac66f0def80240b0197008e4852c9f285907377b2947ffdcb" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/997/4d2f7dc561cce/watchfiles-1.1.0-cp314-cp314-macosx_10_12_x86_64.whl", hash = "sha256:9974d2f7dc561cce3bb88dfa8eb309dab64c729de85fba32e98d75cf24b66297" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/c68/e9f1fcb4d4379/watchfiles-1.1.0-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:c68e9f1fcb4d43798ad8814c4c1b61547b014b667216cb754e606bfade587018" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/95a/b1594377effac/watchfiles-1.1.0-cp314-cp314-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:95ab1594377effac17110e1352989bdd7bdfca9ff0e5eeccd8c69c5389b826d0" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/fba/9b62da882c1be/watchfiles-1.1.0-cp314-cp314-manylinux_2_17_armv7l.manylinux2014_armv7l.whl", hash = "sha256:fba9b62da882c1be1280a7584ec4515d0a6006a94d6e5819730ec2eab60ffe12" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/343/4e401f3ce0ed6/watchfiles-1.1.0-cp314-cp314-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:3434e401f3ce0ed6b42569128b3d1e3af773d7ec18751b918b89cd49c14eaafb" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/fa2/57a4d0d21fcbc/watchfiles-1.1.0-cp314-cp314-manylinux_2_17_ppc64le.manylinux2014_ppc64le.whl", hash = "sha256:fa257a4d0d21fcbca5b5fcba9dca5a78011cb93c0323fb8855c6d2dfbc76eb77" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/7fd/1b3879a578a8e/watchfiles-1.1.0-cp314-cp314-manylinux_2_17_s390x.manylinux2014_s390x.whl", hash = "sha256:7fd1b3879a578a8ec2076c7961076df540b9af317123f84569f5a9ddee64ce92" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/62c/c7a30eeb0e20e/watchfiles-1.1.0-cp314-cp314-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:62cc7a30eeb0e20ecc5f4bd113cd69dcdb745a07c68c0370cea919f373f65d9e" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/891/c69e027748b4a/watchfiles-1.1.0-cp314-cp314-musllinux_1_1_aarch64.whl", hash = "sha256:891c69e027748b4a73847335d208e374ce54ca3c335907d381fde4e41661b13b" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/12f/e8eaffaf0faa7/watchfiles-1.1.0-cp314-cp314-musllinux_1_1_x86_64.whl", hash = "sha256:12fe8eaffaf0faa7906895b4f8bb88264035b3f0243275e0bf24af0436b27259" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/bfe/3c517c283e484/watchfiles-1.1.0-cp314-cp314t-macosx_10_12_x86_64.whl", hash = "sha256:bfe3c517c283e484843cb2e357dd57ba009cff351edf45fb455b5fbd1f45b15f" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/a9c/cbf1f129480ed/watchfiles-1.1.0-cp314-cp314t-macosx_11_0_arm64.whl", hash = "sha256:a9ccbf1f129480ed3044f540c0fdbc4ee556f7175e5ab40fe077ff6baf286d4e" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/ba0/e3255b0396cac/watchfiles-1.1.0-cp314-cp314t-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:ba0e3255b0396cac3cc7bbace76404dd72b5438bf0d8e7cefa2f79a7f3649caa" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/428/1cd9fce9fc0a9/watchfiles-1.1.0-cp314-cp314t-manylinux_2_17_armv7l.manylinux2014_armv7l.whl", hash = "sha256:4281cd9fce9fc0a9dbf0fc1217f39bf9cf2b4d315d9626ef1d4e87b84699e7e8" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/6d2/404af8db1329f/watchfiles-1.1.0-cp314-cp314t-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:6d2404af8db1329f9a3c9b79ff63e0ae7131986446901582067d9304ae8aaf7f" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/e78/b6ed816599601/watchfiles-1.1.0-cp314-cp314t-manylinux_2_17_ppc64le.manylinux2014_ppc64le.whl", hash = "sha256:e78b6ed8165996013165eeabd875c5dfc19d41b54f94b40e9fff0eb3193e5e8e" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/249/590eb75ccc117/watchfiles-1.1.0-cp314-cp314t-manylinux_2_17_s390x.manylinux2014_s390x.whl", hash = "sha256:249590eb75ccc117f488e2fabd1bfa33c580e24b96f00658ad88e38844a040bb" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/d05/686b5487cfa2e/watchfiles-1.1.0-cp314-cp314t-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:d05686b5487cfa2e2c28ff1aa370ea3e6c5accfe6435944ddea1e10d93872147" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/d0e/10e6f8f6dc576/watchfiles-1.1.0-cp314-cp314t-musllinux_1_1_aarch64.whl", hash = "sha256:d0e10e6f8f6dc5762adee7dece33b722282e1f59aa6a55da5d493a97282fedd8" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/af0/6c863f152005c/watchfiles-1.1.0-cp314-cp314t-musllinux_1_1_x86_64.whl", hash = "sha256:af06c863f152005c7592df1d6a7009c836a247c9d8adb78fef8575a5a98699db" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/3a6/fd40bbb50d249/watchfiles-1.1.0-pp310-pypy310_pp73-macosx_10_12_x86_64.whl", hash = "sha256:3a6fd40bbb50d24976eb275ccb55cd1951dfb63dbc27cae3066a6ca5f4beabd5" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/9f8/11079d2f9795b/watchfiles-1.1.0-pp310-pypy310_pp73-macosx_11_0_arm64.whl", hash = "sha256:9f811079d2f9795b5d48b55a37aa7773680a5659afe34b54cc1d86590a51507d" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/a27/26d7bfd9f7615/watchfiles-1.1.0-pp310-pypy310_pp73-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:a2726d7bfd9f76158c84c10a409b77a320426540df8c35be172444394b17f7ea" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/df3/2d59cb9780f66/watchfiles-1.1.0-pp310-pypy310_pp73-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:df32d59cb9780f66d165a9a7a26f19df2c7d24e3bd58713108b41d0ff4f929c6" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/0ec/e16b563b17ab2/watchfiles-1.1.0-pp311-pypy311_pp73-macosx_10_12_x86_64.whl", hash = "sha256:0ece16b563b17ab26eaa2d52230c9a7ae46cf01759621f4fbbca280e438267b3" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/51b/81e55d40c4b4a/watchfiles-1.1.0-pp311-pypy311_pp73-macosx_11_0_arm64.whl", hash = "sha256:51b81e55d40c4b4aa8658427a3ee7ea847c591ae9e8b81ef94a90b668999353c" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/f2b/cdc54ea267fe7/watchfiles-1.1.0-pp311-pypy311_pp73-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:f2bcdc54ea267fe72bfc7d83c041e4eb58d7d8dc6f578dfddb52f037ce62f432" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/923/fec6e5461c42b/watchfiles-1.1.0-pp311-pypy311_pp73-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:923fec6e5461c42bd7e3fd5ec37492c6f3468be0499bc0707b4bbbc16ac21792" },
+]
+
+[[package]]
 name = "websocket-client"
 version = "1.8.0"
 source = { registry = "https://devpi.qualcomm.com/qcom/dev/+simple" }
 sdist = { url = "https://devpi.qualcomm.com/root/pypi/+f/323/9df9f44da632f/websocket_client-1.8.0.tar.gz", hash = "sha256:3239df9f44da632f96012472805d40a23281a991027ce11d2f45a6f24ac4c3da" }
 wheels = [
     { url = "https://devpi.qualcomm.com/root/pypi/+f/17b/44cc997f5c498/websocket_client-1.8.0-py3-none-any.whl", hash = "sha256:17b44cc997f5c498e809b22cdf2d9c7a9e71c02c8cc2b6c56e7c2d1239bfa526" },
+]
+
+[[package]]
+name = "websockets"
+version = "15.0.1"
+source = { registry = "https://devpi.qualcomm.com/qcom/dev/+simple" }
+sdist = { url = "https://devpi.qualcomm.com/root/pypi/+f/825/44de02076bafb/websockets-15.0.1.tar.gz", hash = "sha256:82544de02076bafba038ce055ee6412d68da13ab47f0c60cab827346de828dee" }
+wheels = [
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/d63/efaa0cd96cf0c/websockets-15.0.1-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:d63efaa0cd96cf0c5fe4d581521d9fa87744540d4bc999ae6e08595a1014b45b" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/ac6/0e3b188ec7574/websockets-15.0.1-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:ac60e3b188ec7574cb761b08d50fcedf9d77f1530352db4eef1707fe9dee7205" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/575/6779642579d90/websockets-15.0.1-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:5756779642579d902eed757b21b0164cd6fe338506a8083eb58af5c372e39d9a" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/0fd/fe3e2a29e4db3/websockets-15.0.1-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:0fdfe3e2a29e4db3659dbd5bbf04560cea53dd9610273917799f1cde46aa725e" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/4c2/529b320eb9e35/websockets-15.0.1-cp310-cp310-manylinux_2_5_i686.manylinux1_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:4c2529b320eb9e35af0fa3016c187dffb84a3ecc572bcee7c3ce302bfeba52bf" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/ac1/e5c9054fe2322/websockets-15.0.1-cp310-cp310-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:ac1e5c9054fe23226fb11e05a6e630837f074174c4c2f0fe442996112a6de4fb" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/5df/592cd50349635/websockets-15.0.1-cp310-cp310-musllinux_1_2_aarch64.whl", hash = "sha256:5df592cd503496351d6dc14f7cdad49f268d8e618f80dce0cd5a36b93c3fc08d" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/0a3/4631031a8f056/websockets-15.0.1-cp310-cp310-musllinux_1_2_i686.whl", hash = "sha256:0a34631031a8f05657e8e90903e656959234f3a04552259458aac0b0f9ae6fd9" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/3d0/0075aa65772e7/websockets-15.0.1-cp310-cp310-musllinux_1_2_x86_64.whl", hash = "sha256:3d00075aa65772e7ce9e990cab3ff1de702aa09be3940d1dc88d5abf1ab8a09c" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/123/4d4ef35db82f5/websockets-15.0.1-cp310-cp310-win32.whl", hash = "sha256:1234d4ef35db82f5446dca8e35a7da7964d02c127b095e172e54397fb6a6c256" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/39c/1fec2c11dc8d8/websockets-15.0.1-cp310-cp310-win_amd64.whl", hash = "sha256:39c1fec2c11dc8d89bba6b2bf1556af381611a173ac2b511cf7231622058af41" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/823/c248b690b2fd9/websockets-15.0.1-cp311-cp311-macosx_10_9_universal2.whl", hash = "sha256:823c248b690b2fd9303ba00c4f66cd5e2d8c3ba4aa968b2779be9532a4dad431" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/678/999709e68425a/websockets-15.0.1-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:678999709e68425ae2593acf2e3ebcbcf2e69885a5ee78f9eb80e6e371f1bf57" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/d50/fd1ee42388dcf/websockets-15.0.1-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:d50fd1ee42388dcfb2b3676132c78116490976f1300da28eb629272d5d93e905" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/d99/e5546bf73dbad/websockets-15.0.1-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:d99e5546bf73dbad5bf3547174cd6cb8ba7273062a23808ffea025ecb1cf8562" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/66d/d88c918e3287e/websockets-15.0.1-cp311-cp311-manylinux_2_5_i686.manylinux1_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:66dd88c918e3287efc22409d426c8f729688d89a0c587c88971a0faa2c2f3792" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/8dd/8327c795b3e3f/websockets-15.0.1-cp311-cp311-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:8dd8327c795b3e3f219760fa603dcae1dcc148172290a8ab15158cf85a953413" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/8fd/c51055e6ff4ad/websockets-15.0.1-cp311-cp311-musllinux_1_2_aarch64.whl", hash = "sha256:8fdc51055e6ff4adeb88d58a11042ec9a5eae317a0a53d12c062c8a8865909e8" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/693/f0192126df6c2/websockets-15.0.1-cp311-cp311-musllinux_1_2_i686.whl", hash = "sha256:693f0192126df6c2327cce3baa7c06f2a117575e32ab2308f7f8216c29d9e2e3" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/544/79983bd5fb469/websockets-15.0.1-cp311-cp311-musllinux_1_2_x86_64.whl", hash = "sha256:54479983bd5fb469c38f2f5c7e3a24f9a4e70594cd68cd1fa6b9340dadaff7cf" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/16b/6c1b3e57799b9/websockets-15.0.1-cp311-cp311-win32.whl", hash = "sha256:16b6c1b3e57799b9d38427dda63edcbe4926352c47cf88588c0be4ace18dac85" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/27c/cee0071a0e75d/websockets-15.0.1-cp311-cp311-win_amd64.whl", hash = "sha256:27ccee0071a0e75d22cb35849b1db43f2ecd3e161041ac1ee9d2352ddf72f065" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/3e9/0baa811a5d73f/websockets-15.0.1-cp312-cp312-macosx_10_13_universal2.whl", hash = "sha256:3e90baa811a5d73f3ca0bcbf32064d663ed81318ab225ee4f427ad4e26e5aff3" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/592/f1a9fe869c778/websockets-15.0.1-cp312-cp312-macosx_10_13_x86_64.whl", hash = "sha256:592f1a9fe869c778694f0aa806ba0374e97648ab57936f092fd9d87f8bc03665" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/070/1bc3cfcb9164d/websockets-15.0.1-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:0701bc3cfcb9164d04a14b149fd74be7347a530ad3bbf15ab2c678a2cd3dd9a2" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/e8b/56bdcdb4505c8/websockets-15.0.1-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:e8b56bdcdb4505c8078cb6c7157d9811a85790f2f2b3632c7d1462ab5783d215" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/0af/68c55afbd5f07/websockets-15.0.1-cp312-cp312-manylinux_2_5_i686.manylinux1_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:0af68c55afbd5f07986df82831c7bff04846928ea8d1fd7f30052638788bc9b5" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/64d/ee438fed052b5/websockets-15.0.1-cp312-cp312-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:64dee438fed052b52e4f98f76c5790513235efaa1ef7f3f2192c392cd7c91b65" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/d5f/6b181bb38171a/websockets-15.0.1-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:d5f6b181bb38171a8ad1d6aa58a67a6aa9d4b38d0f8c5f496b9e42561dfc62fe" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/5d5/4b09eba2bada6/websockets-15.0.1-cp312-cp312-musllinux_1_2_i686.whl", hash = "sha256:5d54b09eba2bada6011aea5375542a157637b91029687eb4fdb2dab11059c1b4" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/3be/571a8b5afed34/websockets-15.0.1-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:3be571a8b5afed347da347bfcf27ba12b069d9d7f42cb8c7028b5e98bbb12597" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/c33/8ffa0520bdb12/websockets-15.0.1-cp312-cp312-win32.whl", hash = "sha256:c338ffa0520bdb12fbc527265235639fb76e7bc7faafbb93f6ba80d9c06578a9" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/fcd/5cf9e305d7b83/websockets-15.0.1-cp312-cp312-win_amd64.whl", hash = "sha256:fcd5cf9e305d7b8338754470cf69cf81f420459dbae8a3b40cee57417f4614a7" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/ee4/43ef070bb3b6e/websockets-15.0.1-cp313-cp313-macosx_10_13_universal2.whl", hash = "sha256:ee443ef070bb3b6ed74514f5efaa37a252af57c90eb33b956d35c8e9c10a1931" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/5a9/39de6b7b4e18c/websockets-15.0.1-cp313-cp313-macosx_10_13_x86_64.whl", hash = "sha256:5a939de6b7b4e18ca683218320fc67ea886038265fd1ed30173f5ce3f8e85675" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/746/ee8dba912cd6f/websockets-15.0.1-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:746ee8dba912cd6fc889a8147168991d50ed70447bf18bcda7039f7d2e3d9151" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/595/b6c3969023ecf/websockets-15.0.1-cp313-cp313-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:595b6c3969023ecf9041b2936ac3827e4623bfa3ccf007575f04c5a6aa318c22" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/3c7/14d2fc58b5ca3/websockets-15.0.1-cp313-cp313-manylinux_2_5_i686.manylinux1_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:3c714d2fc58b5ca3e285461a4cc0c9a66bd0e24c5da9911e30158286c9b5be7f" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/0f3/c1e2ab208db91/websockets-15.0.1-cp313-cp313-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:0f3c1e2ab208db911594ae5b4f79addeb3501604a165019dd221c0bdcabe4db8" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/229/cf1d3ca6c1804/websockets-15.0.1-cp313-cp313-musllinux_1_2_aarch64.whl", hash = "sha256:229cf1d3ca6c1804400b0a9790dc66528e08a6a1feec0d5040e8b9eb14422375" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/756/c56e867a90fb0/websockets-15.0.1-cp313-cp313-musllinux_1_2_i686.whl", hash = "sha256:756c56e867a90fb00177d530dca4b097dd753cde348448a1012ed6c5131f8b7d" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/558/d023b3df0bffe/websockets-15.0.1-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:558d023b3df0bffe50a04e710bc87742de35060580a293c2a984299ed83bc4e4" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/ba9/e56e8ceeeedb2/websockets-15.0.1-cp313-cp313-win32.whl", hash = "sha256:ba9e56e8ceeeedb2e080147ba85ffcd5cd0711b89576b83784d8605a7df455fa" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/e09/473f095a81904/websockets-15.0.1-cp313-cp313-win_amd64.whl", hash = "sha256:e09473f095a819042ecb2ab9465aee615bd9c2028e4ef7d933600a8401c79561" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/0c9/e74d766f2818b/websockets-15.0.1-pp310-pypy310_pp73-macosx_10_15_x86_64.whl", hash = "sha256:0c9e74d766f2818bb95f84c25be4dea09841ac0f734d1966f415e4edfc4ef1c3" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/100/9ee0c7739c08a/websockets-15.0.1-pp310-pypy310_pp73-macosx_11_0_arm64.whl", hash = "sha256:1009ee0c7739c08a0cd59de430d6de452a55e42d6b522de7aa15e6f67db0b8e1" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/76d/1f20b1c7a2fa8/websockets-15.0.1-pp310-pypy310_pp73-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:76d1f20b1c7a2fa82367e04982e708723ba0e7b8d43aa643d3dcd404d74f1475" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/f29/d80eb9a9263b8/websockets-15.0.1-pp310-pypy310_pp73-manylinux_2_5_i686.manylinux1_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:f29d80eb9a9263b8d109135351caf568cc3f80b9928bccde535c235de55c22d9" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/b35/9ed09954d7c18/websockets-15.0.1-pp310-pypy310_pp73-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:b359ed09954d7c18bbc1680f380c7301f92c60bf924171629c5db97febb12f04" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/cad/21560da69f4ce/websockets-15.0.1-pp310-pypy310_pp73-win_amd64.whl", hash = "sha256:cad21560da69f4ce7658ca2cb83138fb4cf695a2ba3e475e0559e05991aa8122" },
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/f7a/866fbc1e97b5c/websockets-15.0.1-py3-none-any.whl", hash = "sha256:f7a866fbc1e97b5c617ee4116daaa09b722101d4a3c170c787450ba409f9736f" },
 ]
 
 [[package]]
