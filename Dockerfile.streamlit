@@ -16,12 +16,9 @@ COPY . .
 
 ENV PATH="/app/.venv/bin:${PATH}" \
     STREAMLIT_SERVER_HEADLESS=true \
-    STREAMLIT_SERVER_PORT=8010
+    STREAMLIT_SERVER_PORT=8501
 
-EXPOSE 8010
+EXPOSE 8501
 
-ENV STREAMLIT_SERVER_HEADLESS=true \
-    STREAMLIT_SERVER_PORT=8010
-
-CMD ["streamlit", "run", "app.py", "--server.port=8010"]
+CMD ["streamlit", "run", "app.py", "--server.port=8501"]
  
