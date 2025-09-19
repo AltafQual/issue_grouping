@@ -9,28 +9,15 @@ import streamlit as st
 
 from src.constants import DataFrameKeys
 from src.failure_analyzer import FailureAnalyzer
-from src.helpers import create_excel_with_clusters, get_tc_ids_from_sql, tc_id_scheduler
+from src.faiss_db import FaissIVFFlatIndex
+from src.helpers import create_excel_with_clusters, get_tc_ids_from_sql, process_by_type, tc_id_scheduler
 
 nest_asyncio.apply()
-
+faiss = FaissIVFFlatIndex()
 ################################## Configurations and Global Streamlit Sessions ####################################
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 tc_id_scheduler()
 logger = logging.getLogger(__name__)
-
-
-async def process_by_type(df, analyzer):
-    results = {}
-
-    async def process_group(t, group_df):
-        group_df = group_df.reset_index(drop=True)
-        result = await analyzer.analyze(dataframe=group_df)
-        results[t] = result
-
-    logger.info(f"All types in data: {df.type.unique()}")
-    tasks = [process_group(t, group_df) for t, group_df in df.groupby("type")]
-    await asyncio.gather(*tasks)
-    return results
 
 
 st.set_page_config(page_title="Issue Grouping", page_icon=":material/group:", layout="wide")
@@ -184,7 +171,7 @@ if st.session_state.clustered_df_grouped:
         ignore_index=True,
     )
 
-    analyzer.save_as_faiss(clustered_df, st.session_state.last_processed_source["value"])
+    analyzer.save_as_faiss(faiss, clustered_df)
     excel_data = create_excel_with_clusters(clustered_df, DataFrameKeys.cluster_name)
     # Determine filename for download
     # Use the last processed source info for file naming

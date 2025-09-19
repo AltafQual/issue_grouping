@@ -11,7 +11,7 @@ from src import helpers
 from src.constants import ClusterSpecificKeys, DataFrameKeys
 from src.data_loader import ExcelLoader
 from src.embeddings import QGenieBGEM3Embedding
-from src.faiss_db import save_to_faiss
+from src.faiss_db import FaissIVFFlatIndex
 from src.qgenie import qgenie_post_processing
 
 
@@ -41,8 +41,9 @@ class FailureAnalyzer:
         else:
             dataframe = helpers.get_tc_id_df(tc_id)
 
-        st.write(f"Total number of test cases: {dataframe.shape[0]}")
-        return dataframe[dataframe["result"] != "PASS"]
+        if isinstance(dataframe, pd.DataFrame):
+            st.write(f"Total number of test cases: {dataframe.shape[0]}")
+            return dataframe[dataframe["result"] != "PASS"]
 
     def generate_embeddings(self, texts: List[str]) -> np.ndarray:
         """Generate embeddings for the provided texts."""
@@ -104,10 +105,7 @@ class FailureAnalyzer:
             failure_df[DataFrameKeys.cluster_name] != ClusterSpecificKeys.non_grouped_key
         ].reset_index(drop=True)
         if not empty_log_df.empty:
-            empty_log_df.loc[:, DataFrameKeys.embeddings_key] = pd.Series(
-                await self.agenerate_embeddings(empty_log_df[DataFrameKeys.preprocessed_text_key].tolist()),
-                index=empty_log_df.index,
-            )
+            empty_log_df.loc[:, DataFrameKeys.embeddings_key] = np.nan
 
         non_clustered_df = failure_df[
             failure_df[DataFrameKeys.cluster_name] == ClusterSpecificKeys.non_grouped_key
@@ -198,5 +196,5 @@ class FailureAnalyzer:
         save_data.to_excel(output_path, index=False)
         self.logger.info(f"Results saved to {output_path}")
 
-    def save_as_faiss(self, data: pd.DataFrame, file_name: str = None):
-        save_to_faiss(data, file_name)
+    def save_as_faiss(self, db: "FaissIVFFlatIndex", data: pd.DataFrame):
+        db.save(data)

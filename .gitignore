@@ -7,3 +7,7 @@ models
 __pycache__
 issue_grouping_hosting/
 *.parquet
+.ipynb_checkpoints
+UNKNOWN.egg-info
+*.ipynb
+faiss_issue_grouping_db

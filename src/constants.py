@@ -1,6 +1,13 @@
+from dataclasses import dataclass
+
 QGENEIE_API_KEY = "bad93c9e-c0da-4b3b-b0de-6dfb7f3db1c3"
 
+import faiss
 
+faiss.IndexFlatL2
+
+
+@dataclass
 class DataFrameKeys:
     embeddings_key: str = "embeddings"
     preprocessed_text_key: str = "preprocessed_reason"
@@ -10,11 +17,13 @@ class DataFrameKeys:
     error_logs_length: str = "logs_length"
 
 
+@dataclass
 class ClusterSpecificKeys:
     non_grouped_key: int = -1
     default_cluster_key: int = 200
 
 
+@dataclass
 class FaissConfigurations:
-    base_path: str = "faiss_issue_grouping_db/"
+    base_path: str = "faiss_issue_grouping_db"
     default_db_name: str = "issue_grouping_db"

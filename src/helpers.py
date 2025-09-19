@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import re
@@ -52,15 +53,17 @@ def preprocess_error_log(log: str) -> str:
     return log.lower()
 
 
+def is_empty_error_log(s):
+    if s is None or pd.isna(s) or (isinstance(s, str) and s.lower() in {"null", "nan", "none"}):
+        return "NoErrorLog"
+    if not bool(re.search(r"[a-zA-Z]", s)):
+        return "EmptyErrorLog"
+
+    return ClusterSpecificKeys.non_grouped_key
+
+
 @execution_timer
 def remove_empty_and_misc_rows(df: pd.DataFrame, errors: list, error_column_name: str):
-    def is_empty_error_log(s):
-        if s is None or pd.isna(s) or s in {"null", "nan", "None"}:
-            return "NoErrorLog"
-        if not bool(re.search(r"[a-zA-Z]", s)):
-            return "EmptyErrorLog"
-
-        return ClusterSpecificKeys.non_grouped_key
 
     def mask_numbers(text):
         # Match standalone numbers (not part of a word)
@@ -315,3 +318,17 @@ def tc_id_scheduler():
     scheduler = BackgroundScheduler()
     scheduler.add_job(update_tc_ids, "interval", hours=6)
     scheduler.start()
+
+
+async def process_by_type(df, analyzer):
+    results = {}
+
+    async def process_group(t, group_df):
+        group_df = group_df.reset_index(drop=True)
+        result = await analyzer.analyze(dataframe=group_df)
+        results[t] = result
+
+    logger.info(f"All types in data: {df.type.unique()}")
+    tasks = [process_group(t, group_df) for t, group_df in df.groupby("type")]
+    await asyncio.gather(*tasks)
+    return results

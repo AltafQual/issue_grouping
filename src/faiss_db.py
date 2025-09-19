@@ -1,49 +1,76 @@
+import json
+import math
+import os
+
+import faiss
 import numpy as np
 import pandas as pd
-from langchain.schema import Document
-from langchain_community.vectorstores import FAISS
 
 from src.constants import DataFrameKeys, FaissConfigurations
+from src.embeddings import QGenieBGEM3Embedding
 
 
 class EmbeddingsDB(object):
-    def __init__(self):
-        raise NotImplementedError
 
     def save(self):
-        pass
+        raise NotImplementedError
 
-    def load(self):
-        pass
+    def search(self):
+        raise NotImplementedError
 
 
-class FaissDB(EmbeddingsDB):
-    def __init__(self, file_name: str = None, path: str = FaissConfigurations.base_path):
-        self.file_name = file_name
-        self.path = path
-        self.faiss_db = self.load_from_faiss(file_name, path)
+def calculate_nlist(num_embeddings: int) -> int:
+    return max(1, int(math.sqrt(num_embeddings)))
 
-    def save_to_faiss(self, df: pd.DataFrame, file_name: str, path: str = FaissConfigurations.base_path):
-        documents = [
-            Document(
-                page_content=row[DataFrameKeys.preprocessed_text_key],
-                metadata={"issue_id": idx, "cluster_name": row[DataFrameKeys.cluster_name]},
+
+class FaissIVFFlatIndex(EmbeddingsDB):
+
+    def _check_existing_faiss_for_type(self, type):
+        type_based_path = os.path.join(FaissConfigurations.base_path, type)
+        if os.path.exists(type_based_path):
+            if os.path.isfile(os.path.join(type_based_path, "index.faiss")):
+                return True
+
+        print(f"Existing FAISS index not found for type: {type}. Creating a new one.")
+        return False
+
+    def save(self, dataframe: pd.DataFrame, faiss_dir_path: str = FaissConfigurations.base_path):
+        d = 1024
+        for t, df in dataframe.groupby("type"):
+            metadata = {}
+            print(f"Saving FAISS for type: {t}")
+
+            # if self._check_existing_faiss_for_type(t):
+            #     print(f"Existing FAISS index found for type: {t}. Skipping creation.")
+            #     continue
+
+            filtered_df = df[df[DataFrameKeys.embeddings_key].notna()]
+            embeddings_grouped = filtered_df.groupby(DataFrameKeys.cluster_name)[DataFrameKeys.embeddings_key].apply(
+                lambda x: np.mean(np.vstack(x), axis=0)
             )
-            for idx, row in df.iterrows()
-        ]
+            metadata["cluster_names"] = embeddings_grouped.index.tolist()
+            embeddings = np.array(embeddings_grouped.tolist())
+            nlist = calculate_nlist(len(embeddings))
+            quantizer = faiss.IndexFlatIP(d)
+            faiss_db = faiss.IndexIVFFlat(quantizer, d, nlist, faiss.METRIC_INNER_PRODUCT)
+            faiss_db.train(embeddings)
+            faiss_db.add(embeddings)
+            faiss_db.nprobe = 100
+            os.makedirs(faiss_dir_path, exist_ok=True)
 
-        embeddings = np.array(df[DataFrameKeys.embeddings_key].tolist())
-        faiss_db = FAISS.from_embeddings(embeddings=embeddings, documents=documents)
-        db_name = file_name if file_name else FaissConfigurations.default_db_name
-        faiss_db.save_local(f"{path}/{db_name}")
-        return faiss_db
+            base_path = os.path.join(faiss_dir_path, f"{t}_faiss")
+            faiss.write_index(faiss_db, os.path.join(base_path, "index.faiss").lower())
 
-    def save(self) -> None:
-        self.save_to_faiss(self.faiss_db, self.file_name, self.path)
+            with open(os.path.join(base_path, "metadata.json"), "w") as f:
+                f.write(json.dumps(metadata, indent=3))
 
-    def load_from_faiss(file_name: str, path: str = FaissConfigurations.base_path):
-        return FAISS.load_local(f"{path}/", embeddings=None)
+    def load(self, type: str):
+        db_path = os.path.join(FaissConfigurations.base_path, f"{type}_faiss")
+        faiss_db = faiss.read_index(os.path.join(db_path, "index.faiss").lower())
+        metadata = json.loads(open(os.path.join(db_path, "metadata.json")).read())
+        return faiss_db, metadata
 
-    def load(self):
-        db_name = self.file_name if self.file_name else FaissConfigurations.default_db_name
-        return FAISS.load(db_name)
+    def search(self, type: str, query: str, k: int = 2):
+        faiss_db, metadata = self.load(type)
+        similar_clusters = faiss_db.search(np.array(QGenieBGEM3Embedding().embed_query(query)).reshape(-1, 1), k=k)
+        return similar_clusters
