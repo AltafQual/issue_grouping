@@ -62,12 +62,13 @@ def is_empty_error_log(s):
     return ClusterSpecificKeys.non_grouped_key
 
 
+def mask_numbers(text):
+    # Match standalone numbers (not part of a word)
+    return re.sub(r"(?<!\w)(\d+(\.\d+)?)(?!\w)", "<NUM>", text)
+
+
 @execution_timer
 def remove_empty_and_misc_rows(df: pd.DataFrame, errors: list, error_column_name: str):
-
-    def mask_numbers(text):
-        # Match standalone numbers (not part of a word)
-        return re.sub(r"(?<!\w)(\d+(\.\d+)?)(?!\w)", "<NUM>", text)
 
     df[error_column_name] = errors
     # Apply filters
@@ -150,23 +151,24 @@ def update_labels_with_merged_clusters(df: pd.DataFrame, merged_clusters: dict, 
     return df
 
 
-@execution_timer
-def trim_error_logs(df: pd.DataFrame, column=DataFrameKeys.preprocessed_text_key, max_length=1000) -> pd.DataFrame:
-    def trim(log, head_ratio=0.3):
-        try:
-            log_str = str(log)
-            if len(log_str) > max_length:
-                head_length = int(max_length * head_ratio)
-                tail_length = max_length - head_length
-                head = log_str[:head_length]
-                tail = log_str[-tail_length:]
-                return head + tail
-            else:
-                return log_str
-        except Exception as e:
-            print(f"Error processing log: {log}, Error: {e}")
-            return ""
+def trim(log, head_ratio=0.3, max_length=1000):
+    try:
+        log_str = str(log)
+        if len(log_str) > max_length:
+            head_length = int(max_length * head_ratio)
+            tail_length = max_length - head_length
+            head = log_str[:head_length]
+            tail = log_str[-tail_length:]
+            return head + tail
+        else:
+            return log_str
+    except Exception as e:
+        print(f"Error processing log: {log}, Error: {e}")
+        return ""
 
+
+@execution_timer
+def trim_error_logs(df: pd.DataFrame, column=DataFrameKeys.preprocessed_text_key) -> pd.DataFrame:
     df[column] = df[column].apply(trim)
     return df
 

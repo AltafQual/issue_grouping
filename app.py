@@ -171,7 +171,7 @@ if st.session_state.clustered_df_grouped:
         ignore_index=True,
     )
 
-    analyzer.save_as_faiss(faiss, clustered_df)
+    # analyzer.save_as_faiss(faiss, clustered_df)
     excel_data = create_excel_with_clusters(clustered_df, DataFrameKeys.cluster_name)
     # Determine filename for download
     # Use the last processed source info for file naming
