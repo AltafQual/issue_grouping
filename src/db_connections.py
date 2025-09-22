@@ -1,10 +1,14 @@
 import logging
+import time
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
+from datetime import datetime
 from typing import Optional
 
 import mysql.connector as msqlconnector
 import pandas as pd
+
+from src.constants import DataFrameKeys
 
 logger = logging.getLogger(__name__)
 
@@ -204,3 +208,76 @@ class ConnectToMySql(DatabaseConnection):
             return pd.DataFrame()
 
         return df
+
+    def update_qgenie_error_map_table(self, input_df: pd.DataFrame) -> None:
+        """
+        Insert unique (cluster_name, runtime) pairs from input_df into error_map_qgenie table
+        if they don't already exist. Also assigns unique error_group_id and updates timestamps.
+
+        Args:
+            input_df: DataFrame containing cluster_name, runtime, reason, and type columns
+        """
+        required_columns = [DataFrameKeys.cluster_name, "runtime", "reason", "type"]
+        unique_columns_subset = ["runtime", "type"]
+        if not all(col in input_df.columns for col in required_columns):
+            logger.error(f"Input DataFrame must contain columns: {required_columns}")
+            return
+
+        input_df = input_df.dropna(subset=required_columns)
+        unique_rows = input_df[required_columns].drop_duplicates(subset=unique_columns_subset)
+
+        if unique_rows.empty:
+            logger.info("No valid cluster_name/runtime rows found in input DataFrame.")
+            return
+        
+        with self.connection_context() as cnx:
+            # Fetch existing cluster_name/runtime pairs
+            existing_query = "SELECT * FROM error_map_qgenie;"
+            existing_df = pd.read_sql(existing_query, cnx)
+            existing_pairs = set(zip(existing_df["cluster_name"], existing_df["runtime"], existing_df["test_type"]))
+
+            # Get current max error_group_id
+            cursor = cnx.cursor()
+            cursor.execute("SELECT MAX(error_group_id) FROM error_map_qgenie;")
+            max_id_result = cursor.fetchone()
+            current_max_id = int(max_id_result[0] if max_id_result[0] is not None else 0)
+
+            # Prepare new rows and update existing ones
+            new_rows = []
+            update_rows = []
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            next_id = current_max_id + 1
+
+            for _, row in unique_rows.iterrows():
+                cluster_name = row[DataFrameKeys.cluster_name].strip().lower()
+                runtime = row["runtime"].strip().lower()
+                reason = row["reason"].lower()
+                test_type = row["type"].lower()
+
+                if (cluster_name, runtime, test_type) not in existing_pairs:
+                    new_rows.append((cluster_name, runtime, reason, test_type, next_id, now, now))
+                    next_id += 1
+                else:
+                    update_rows.append((now, cluster_name, runtime, test_type))
+
+            # Insert new rows
+            if new_rows:
+                insert_query = """
+                    INSERT INTO error_map_qgenie (cluster_name, runtime, error_reason, test_type, error_group_id, createdAt, updatedAt)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s);
+                """
+                cursor.executemany(insert_query, new_rows)
+                logger.info(f"Inserted {len(new_rows)} new entries into error_map_qgenie.")
+
+            # Update existing rows' updatedAt
+            if update_rows:
+                update_query = """
+                    UPDATE error_map_qgenie
+                    SET updatedAt = %s
+                    WHERE cluster_name = %s AND runtime = %s AND test_type = %s;
+                """
+                cursor.executemany(update_query, update_rows)
+                logger.info(f"Updated {len(update_rows)} existing entries in error_map_qgenie.")
+
+            cnx.commit()
+            time.sleep(5)

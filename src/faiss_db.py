@@ -9,6 +9,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 from src.constants import DataFrameKeys, FaissConfigurations
 from src.embeddings import QGenieBGEM3Embedding
+from src import helpers as h
 
 
 class EmbeddingsDB(object):
@@ -111,8 +112,8 @@ class FaissIVFFlatIndex(EmbeddingsDB):
                 print(f"No embeddings found for type: {t} skipping...")
                 continue
 
+            h.update_error_map_qgenie_table(filtered_df)
             if not self._check_existing_faiss_for_type(t):
-
                 metadata["cluster_names"] = embeddings_grouped.index.tolist()
                 embeddings = np.array(embeddings_grouped.tolist())
                 nlist = calculate_nlist(len(embeddings))

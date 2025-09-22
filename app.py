@@ -9,11 +9,10 @@ import streamlit as st
 
 from src.constants import DataFrameKeys
 from src.failure_analyzer import FailureAnalyzer
-from src.faiss_db import FaissIVFFlatIndex
 from src.helpers import create_excel_with_clusters, get_tc_ids_from_sql, process_by_type, tc_id_scheduler
 
+
 nest_asyncio.apply()
-faiss = FaissIVFFlatIndex()
 ################################## Configurations and Global Streamlit Sessions ####################################
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 tc_id_scheduler()
@@ -45,8 +44,6 @@ if "last_processed_source" not in st.session_state:
     }  # e.g., {"type": "file", "value": file_name} or {"type": "tc_id", "value": tc_id}
 
 analyzer = FailureAnalyzer()
-
-
 ################################################ Main Page Start ########################################################
 st.title("Issue Grouping App 🫂")
 
@@ -114,7 +111,7 @@ if process_button:
 
             with st.spinner("Analyzing and grouping data... This may take a moment."):
                 try:
-                    clustered_results = asyncio.run(process_by_type(df_to_process, analyzer))
+                    clustered_results = asyncio.run(process_by_type(df_to_process))
                     st.session_state.clustered_df_grouped = clustered_results
                     st.session_state.processed_data = True
                     st.session_state.last_processed_source = {"type": current_input_type, "value": current_input_value}
@@ -171,7 +168,7 @@ if st.session_state.clustered_df_grouped:
         ignore_index=True,
     )
 
-    # analyzer.save_as_faiss(faiss, clustered_df)
+    # analyzer.save_as_faiss(faiss_runner, clustered_df)
     excel_data = create_excel_with_clusters(clustered_df, DataFrameKeys.cluster_name)
     # Determine filename for download
     # Use the last processed source info for file naming

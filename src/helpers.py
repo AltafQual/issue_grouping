@@ -13,12 +13,15 @@ from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.neighbors import LocalOutlierFactor
 
 from src.constants import ClusterSpecificKeys, DataFrameKeys
+from src.faiss_db import FaissIVFFlatIndex
 from src.db_connections import ConnectToMySql
 from src.execution_timer_log import execution_timer
 from src.qgenie import generate_cluster_name
 
+
 logger = logging.getLogger(__name__)
 sql_connection = ConnectToMySql()
+faiss_runner = FaissIVFFlatIndex()
 
 # in-memory tc id data cache
 _tc_id_cache = {}
@@ -292,6 +295,11 @@ def get_tc_ids_from_sql():
         return run_ids
 
 
+@execution_timer
+def update_error_map_qgenie_table(df):
+    sql_connection.update_qgenie_error_map_table(df)
+
+
 def cache_tc_id(func):
     @wraps(func)
     def wrapper(tc_id: str):
@@ -322,8 +330,10 @@ def tc_id_scheduler():
     scheduler.start()
 
 
-async def process_by_type(df, analyzer):
+async def process_by_type(df, update_faiss_and_sql = False):
+    from src.failure_analyzer import FailureAnalyzer
     results = {}
+    analyzer = FailureAnalyzer()
 
     async def process_group(t, group_df):
         group_df = group_df.reset_index(drop=True)
@@ -333,4 +343,12 @@ async def process_by_type(df, analyzer):
     logger.info(f"All types in data: {df.type.unique()}")
     tasks = [process_group(t, group_df) for t, group_df in df.groupby("type")]
     await asyncio.gather(*tasks)
+    
+    if update_faiss_and_sql:
+        clustered_df = pd.concat(
+        [df.assign(cluster_type=cluster_name) for cluster_name, df in results.items()],
+        ignore_index=True,
+        )
+        analyzer.save_as_faiss(faiss_runner, clustered_df)
+        
     return results
