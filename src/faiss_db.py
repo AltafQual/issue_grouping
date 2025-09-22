@@ -7,9 +7,9 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics.pairwise import cosine_similarity
 
+from src import helpers as h
 from src.constants import DataFrameKeys, FaissConfigurations
 from src.embeddings import QGenieBGEM3Embedding
-from src import helpers as h
 
 
 class EmbeddingsDB(object):

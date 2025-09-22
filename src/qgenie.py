@@ -1,11 +1,16 @@
 import asyncio
 import logging
+import time
 import traceback
 from collections import defaultdict
+from typing import Any
 
 import pandas as pd
 from langchain.prompts import ChatPromptTemplate
+from langchain_core.callbacks import AsyncCallbackManagerForLLMRun, CallbackManagerForLLMRun
+from langchain_core.messages import BaseMessage
 from langchain_core.output_parsers import JsonOutputParser
+from langchain_core.outputs import ChatResult
 from pydantic import BaseModel, Field
 
 from qgenie.integrations.langchain import QGenieChat
@@ -15,7 +20,59 @@ from src.execution_timer_log import execution_timer
 
 logger = logging.getLogger(__name__)
 
-model = QGenieChat(model="Pro", api_key=QGENEIE_API_KEY, temperature=0.2)
+
+class CustomQGenieChat(QGenieChat):
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        retry_count = 3
+        while retry_count:
+            try:
+                message_dicts, params = self._create_message_dicts(messages)
+                params = {**params, **kwargs}
+                params.pop("stream", "")
+                response = self.client.chat(messages=message_dicts, **params)
+                return self._create_chat_result(response)
+            except Exception as e:
+                logger.error(f"Error generating response: {e}")
+                logger.error(traceback.format_exc())
+                retry_count -= 1
+                time.sleep(4)
+                continue
+
+        return self._create_chat_result({})
+
+    async def _agenerate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: AsyncCallbackManagerForLLMRun | None = None,
+        stream: bool | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        retry_count = 3
+        message_dicts, params = self._create_message_dicts(messages)
+        params = {**params, **kwargs}
+        params.pop("stream", "")
+
+        while retry_count:
+            try:
+                response = await self.async_client.chat(messages=message_dicts, **params)
+                return self._create_chat_result(response)
+            except Exception as e:
+                logger.error(f"Error generating response: {e}")
+                logger.error(traceback.format_exc())
+                retry_count -= 1
+                await asyncio.sleep(4)
+                continue
+        return self._create_chat_result({})
+
+
+model = CustomQGenieChat(model="Pro", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=200)
 
 
 class ClusteringResult(BaseModel):

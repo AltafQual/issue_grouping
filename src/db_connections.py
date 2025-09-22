@@ -229,7 +229,7 @@ class ConnectToMySql(DatabaseConnection):
         if unique_rows.empty:
             logger.info("No valid cluster_name/runtime rows found in input DataFrame.")
             return
-        
+
         with self.connection_context() as cnx:
             # Fetch existing cluster_name/runtime pairs
             existing_query = "SELECT * FROM error_map_qgenie;"

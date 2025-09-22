@@ -1,10 +1,7 @@
+import os
 from dataclasses import dataclass
 
-QGENEIE_API_KEY = "bad93c9e-c0da-4b3b-b0de-6dfb7f3db1c3"
-
-import faiss
-
-faiss.IndexFlatL2
+QGENEIE_API_KEY = os.getenv("QGENIE_API_KEY")
 
 
 @dataclass
