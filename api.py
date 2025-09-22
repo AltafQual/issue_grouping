@@ -38,13 +38,12 @@ async def get_error_cluster_name(error_object: ErrorLog):
     faiss_db_path = os.path.join(base_path, "index.faiss")
     faiss_db = faiss.read_index(faiss_db_path)
     
-    with open(os.path.join(base_path, "metadata.json"), "rb") as f:
-        metadata = json.loads(f)
-
-    I, D = faiss_db.search(np.array(QGenieBGEM3Embedding().embed_query(error_object.error)).reshape(1, -1), 1)
+    with open(os.path.join(base_path, "metadata.json"), "r") as f:
+        metadata = json.loads(f.read())
+    
+    # distance, indices
+    D, I = faiss_db.search(np.array(QGenieBGEM3Embedding().embed_query(error_object.error)).reshape(1, -1), 1)
     index = int(I[0][0])
     score = float(D[0][0])
         
-    result =  {"cluster_name": metadata['cluster_names'][index], "cluster_score": score}
-    print(result)
-    return result
+    return {"cluster_name": metadata['cluster_names'][index], "cluster_score": round(score,2)}

@@ -56,9 +56,11 @@ class FaissIVFFlatIndex(EmbeddingsDB):
             faiss_db.train(embeddings)
             faiss_db.add(embeddings)
             faiss_db.nprobe = 100
-            os.makedirs(faiss_dir_path, exist_ok=True)
-
             base_path = os.path.join(faiss_dir_path, f"{t}_faiss")
+            
+            os.makedirs(faiss_dir_path, exist_ok=True)
+            os.makedirs(base_path, exist_ok=True)
+
             faiss.write_index(faiss_db, os.path.join(base_path, "index.faiss").lower())
 
             with open(os.path.join(base_path, "metadata.json"), "w") as f:
