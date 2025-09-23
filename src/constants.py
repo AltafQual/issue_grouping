@@ -2,6 +2,10 @@ import os
 from dataclasses import dataclass
 
 QGENEIE_API_KEY = os.getenv("QGENIE_API_KEY")
+regex_based_filteration_patterns = {
+    "Verifier Failed": r"verifier failed images list",
+    "DLC Handle": r"failed to create dlc handle with code",
+}
 
 
 @dataclass
@@ -24,3 +28,9 @@ class ClusterSpecificKeys:
 class FaissConfigurations:
     base_path: str = "faiss_issue_grouping_db"
     default_db_name: str = "issue_grouping_db"
+
+
+@dataclass
+class ErrorLogConfigurations:
+    empty_error: str = "EmptyErrorLog"
+    no_error: str = "NoErrorLog"

@@ -100,7 +100,7 @@ nameparser = JsonOutputParser(pydantic_object=NameClusteringResult)
 
 
 @execution_timer
-def generate_cluster_name(grouped_cluster: list) -> dict:
+def generate_cluster_name(grouped_cluster: pd.DataFrame) -> dict:
     prompt_template = ChatPromptTemplate.from_messages(
         [("system", prompts.CLUSTER_NAMING_SYS_MESSAGE), ("human", prompts.CLUSTER_NAMING_LOG_MESSAGE)]
     )

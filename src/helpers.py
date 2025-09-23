@@ -12,7 +12,7 @@ from rapidfuzz import fuzz
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.neighbors import LocalOutlierFactor
 
-from src.constants import ClusterSpecificKeys, DataFrameKeys
+from src.constants import ClusterSpecificKeys, DataFrameKeys, ErrorLogConfigurations, regex_based_filteration_patterns
 from src.db_connections import ConnectToMySql
 from src.execution_timer_log import execution_timer
 from src.faiss_db import FaissIVFFlatIndex
@@ -57,16 +57,21 @@ def preprocess_error_log(log: str) -> str:
 
 def is_empty_error_log(s):
     if s is None or pd.isna(s) or (isinstance(s, str) and s.lower() in {"null", "nan", "none"}):
-        return "NoErrorLog"
+        return ErrorLogConfigurations.no_error
     if not bool(re.search(r"[a-zA-Z]", s)):
-        return "EmptyErrorLog"
+        return ErrorLogConfigurations.empty_error
 
     return ClusterSpecificKeys.non_grouped_key
 
 
-def mask_numbers(text):
-    # Match standalone numbers (not part of a word)
-    return re.sub(r"(?<!\w)(\d+(\.\d+)?)(?!\w)", "<NUM>", text)
+def mask_numbers(text: str) -> str:
+    # Mask time formats like 01h, 30m, 20s, 500ms
+    time_masked = re.sub(r"\b\d+(?:\.\d+)?\s*(h|hr|hrs|m|min|s|sec|ms)\b", "<TIME>", text, flags=re.IGNORECASE)
+
+    # Mask standalone numbers not part of time units
+    final_masked = re.sub(r"(?<!\w)(\d+(\.\d+)?)(?!\w)", "<NUM>", time_masked)
+
+    return final_masked
 
 
 @execution_timer
@@ -85,6 +90,17 @@ def remove_empty_and_misc_rows(df: pd.DataFrame, errors: list, error_column_name
     df.loc[:, error_column_name] = df[error_column_name].apply(mask_numbers)
     df = df.reset_index(drop=True)
     return df
+
+
+def update_rows_by_regex_patterns(df: pd.DataFrame) -> pd.DataFrame:
+    for name, pattern in regex_based_filteration_patterns.items():
+        matched_df = df[
+            df[DataFrameKeys.preprocessed_text_key].astype(str).str.contains(pattern, flags=re.IGNORECASE, regex=True)
+        ]
+        print(f"Found occurence of match: {name}: {matched_df.shape[0]}")
+        if not matched_df.empty:
+            cluster_name = generate_cluster_name(matched_df)
+            df.loc[matched_df.index, DataFrameKeys.cluster_name] = cluster_name["cluster_name"]
 
 
 @execution_timer
@@ -230,11 +246,12 @@ def fuzzy_cluster_grouping(
             threshold,
         )
 
-        # Replace async gather with synchronous processing
         for group in grouped_indices:
             result = generate_cluster_name(failures_dataframe.iloc[group])
             failures_dataframe.loc[group, DataFrameKeys.cluster_name] = result["cluster_name"]
 
+    # regex based common errors mapping
+    update_rows_by_regex_patterns(failures_dataframe)
     return failures_dataframe
 
 
@@ -297,6 +314,11 @@ def get_tc_ids_from_sql():
 @execution_timer
 def update_error_map_qgenie_table(df):
     sql_connection.update_qgenie_error_map_table(df)
+
+
+@execution_timer
+def get_error_group_id(error_type: str, runtime: str, cluster_name: str) -> str:
+    return sql_connection.get_error_group_id(error_type, runtime, cluster_name)
 
 
 def cache_tc_id(func):

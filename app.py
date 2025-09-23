@@ -9,8 +9,7 @@ import streamlit as st
 
 from src.constants import DataFrameKeys
 from src.failure_analyzer import FailureAnalyzer
-from src.helpers import create_excel_with_clusters, get_tc_ids_from_sql, process_by_type, tc_id_scheduler
-
+from src.helpers import create_excel_with_clusters, faiss_runner, get_tc_ids_from_sql, process_by_type, tc_id_scheduler
 
 nest_asyncio.apply()
 ################################## Configurations and Global Streamlit Sessions ####################################
@@ -138,7 +137,15 @@ if st.session_state.processed_data and st.session_state.clustered_df_grouped is 
 
             st.markdown(f"## Type: {name}")
             if not clustered_df[clustered_df["result"] != "PASS"].empty:
-                COL_TO_SHOW = ["tc_uuid", "soc_name", "reason", "model_name", "tags", "feature_name"]
+                COL_TO_SHOW = [
+                    "tc_uuid",
+                    "soc_name",
+                    "reason",
+                    DataFrameKeys.preprocessed_text_key,
+                    "model_name",
+                    "tags",
+                    "feature_name",
+                ]
                 COL_TO_SHOW = [c for c in COL_TO_SHOW if c in clustered_df.columns]
 
                 clusters = [c for c in clustered_df[DataFrameKeys.cluster_name].unique().tolist()]

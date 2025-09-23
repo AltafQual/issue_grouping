@@ -1,3 +1,4 @@
+import hashlib
 import logging
 import time
 from abc import ABC, abstractmethod
@@ -209,6 +210,9 @@ class ConnectToMySql(DatabaseConnection):
 
         return df
 
+    def generate_key_from_testcase(self, testcase_str: str):
+        return hashlib.md5(testcase_str.encode()).hexdigest()[:10]
+
     def update_qgenie_error_map_table(self, input_df: pd.DataFrame) -> None:
         """
         Insert unique (cluster_name, runtime) pairs from input_df into error_map_qgenie table
@@ -235,18 +239,12 @@ class ConnectToMySql(DatabaseConnection):
             existing_query = "SELECT * FROM error_map_qgenie;"
             existing_df = pd.read_sql(existing_query, cnx)
             existing_pairs = set(zip(existing_df["cluster_name"], existing_df["runtime"], existing_df["test_type"]))
-
-            # Get current max error_group_id
             cursor = cnx.cursor()
-            cursor.execute("SELECT MAX(error_group_id) FROM error_map_qgenie;")
-            max_id_result = cursor.fetchone()
-            current_max_id = int(max_id_result[0] if max_id_result[0] is not None else 0)
 
             # Prepare new rows and update existing ones
             new_rows = []
             update_rows = []
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            next_id = current_max_id + 1
 
             for _, row in unique_rows.iterrows():
                 cluster_name = row[DataFrameKeys.cluster_name].strip().lower()
@@ -255,8 +253,17 @@ class ConnectToMySql(DatabaseConnection):
                 test_type = row["type"].lower()
 
                 if (cluster_name, runtime, test_type) not in existing_pairs:
-                    new_rows.append((cluster_name, runtime, reason, test_type, next_id, now, now))
-                    next_id += 1
+                    new_rows.append(
+                        (
+                            cluster_name,
+                            runtime,
+                            reason,
+                            test_type,
+                            self.generate_key_from_testcase(f"{cluster_name}_{test_type}_{runtime}"),
+                            now,
+                            now,
+                        )
+                    )
                 else:
                     update_rows.append((now, cluster_name, runtime, test_type))
 
@@ -281,3 +288,17 @@ class ConnectToMySql(DatabaseConnection):
 
             cnx.commit()
             time.sleep(5)
+
+    def get_error_group_id(self, type: str, runtime: str, cluster_name: str) -> str:
+        query = """
+            SELECT error_group_id FROM error_map_qgenie
+            WHERE test_type = %s AND runtime = %s AND cluster_name = %s;
+        """
+        with self.connection_context() as cnx:
+            cursor = cnx.cursor()
+            cursor.execute(query, (type, runtime, cluster_name.lower()))
+            result = cursor.fetchone()
+            cursor.close()
+
+        logger.info(f"Fetched result {result} with the details: {type}, {runtime}, {cluster_name}")
+        return result[0] if result else ""

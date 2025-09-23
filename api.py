@@ -18,6 +18,7 @@ analyzer = FailureAnalyzer()
 class ErrorLog(BaseModel):
     type: str = Field(description="Type to which error belongs ex: SaveContext, Converter, Quantizer etc..")
     error: str = Field(description="Error message")
+    runtime: str = Field(description="Runtime at which the error occurred")
 
 
 class InitiateIssueGrouping(BaseModel):
@@ -56,8 +57,16 @@ async def get_error_cluster_name(error_object: ErrorLog):
     D, I = faiss_db.search(np.array(QGenieBGEM3Embedding().embed_query(error)).reshape(1, -1), 1)
     index = int(I[0][0])
     score = float(D[0][0])
-
-    return {"cluster_name": metadata["cluster_names"][index], "cluster_score": round(score, 2)}
+    cluster_name = metadata["cluster_names"][index]
+    error_group_id = helpers.get_error_group_id(error_object.type, error_object.runtime, cluster_name)
+    return {
+        "id": error_group_id,
+        "metadata": {
+            "cluster_name": cluster_name,
+            "cluster_score": round(score, 2),
+            "runtime": error_object.runtime,
+        },
+    }
 
 
 @app.post("/api/initiate_issue_grouping/")

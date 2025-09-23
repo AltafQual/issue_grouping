@@ -8,7 +8,7 @@ import streamlit as st
 from sklearn.cluster import HDBSCAN
 
 from src import helpers
-from src.constants import ClusterSpecificKeys, DataFrameKeys
+from src.constants import ClusterSpecificKeys, DataFrameKeys, ErrorLogConfigurations
 from src.data_loader import ExcelLoader
 from src.embeddings import QGenieBGEM3Embedding
 from src.faiss_db import FaissIVFFlatIndex
@@ -111,8 +111,23 @@ class FailureAnalyzer:
             failure_df[DataFrameKeys.cluster_name] == ClusterSpecificKeys.non_grouped_key
         ].reset_index(drop=True)
         non_clustered_df = helpers.fuzzy_cluster_grouping(non_clustered_df).reset_index(drop=True)
+        fuzzy_clustered_df = non_clustered_df[
+            (non_clustered_df[DataFrameKeys.cluster_name] != ClusterSpecificKeys.non_grouped_key)
+            & (
+                ~non_clustered_df[DataFrameKeys.cluster_name].isin(
+                    {ErrorLogConfigurations.empty_error, ErrorLogConfigurations.no_error}
+                )
+            )
+        ]
 
-        failure_df = pd.concat([empty_log_df, non_clustered_df], axis=0).reset_index(drop=True)
+        fuzzy_clustered_df[DataFrameKeys.embeddings_key] = pd.Series(
+            await self.agenerate_embeddings(fuzzy_clustered_df[DataFrameKeys.preprocessed_text_key].tolist()),
+            index=fuzzy_clustered_df.index,
+        )
+        non_clustered_df = non_clustered_df[~non_clustered_df.index.isin(fuzzy_clustered_df.index)].reset_index(
+            drop=True
+        )
+        failure_df = pd.concat([empty_log_df, fuzzy_clustered_df, non_clustered_df], axis=0).reset_index(drop=True)
         self.logger.info(f"Initial Clusters: {failure_df[DataFrameKeys.cluster_name].unique()}")
 
         # Handle small datasets (10 or fewer rows)
