@@ -141,7 +141,6 @@ if st.session_state.processed_data and st.session_state.clustered_df_grouped is 
                     "tc_uuid",
                     "soc_name",
                     "reason",
-                    DataFrameKeys.preprocessed_text_key,
                     "model_name",
                     "tags",
                     "feature_name",
