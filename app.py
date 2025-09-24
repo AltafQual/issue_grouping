@@ -117,7 +117,7 @@ if process_button:
 
             with st.spinner("Analyzing and grouping data... This may take a moment."):
                 try:
-                    clustered_results = asyncio.run(async_process_by_type(df_to_process))
+                    clustered_results = asyncio.run(concurrent_process_by_type(df_to_process))
                     st.session_state.clustered_df_grouped = clustered_results
                     st.session_state.processed_data = True
                     st.session_state.last_processed_source = {"type": current_input_type, "value": current_input_value}
