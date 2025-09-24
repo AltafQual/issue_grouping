@@ -1,6 +1,8 @@
 import json
 import math
 import os
+from functools import lru_cache
+from typing import Union
 
 import faiss
 import numpy as np
@@ -8,7 +10,7 @@ import pandas as pd
 from sklearn.metrics.pairwise import cosine_similarity
 
 from src import helpers as h
-from src.constants import DataFrameKeys, FaissConfigurations
+from src.constants import ClusterSpecificKeys, DataFrameKeys, FaissConfigurations
 from src.embeddings import QGenieBGEM3Embedding
 
 
@@ -104,9 +106,9 @@ class FaissIVFFlatIndex(EmbeddingsDB):
             metadata = {}
             print(f"Saving FAISS for type: {t}")
             filtered_df = df[df[DataFrameKeys.embeddings_key].notna()]
-            embeddings_grouped = filtered_df.groupby(DataFrameKeys.cluster_name)[DataFrameKeys.embeddings_key].apply(
-                lambda x: np.mean(np.vstack(x), axis=0)
-            )
+            embeddings_grouped = filtered_df.groupby(DataFrameKeys.cluster_name)[
+                DataFrameKeys.embeddings_key
+            ].swifter.apply(lambda x: np.mean(np.vstack(x), axis=0))
 
             if embeddings_grouped.empty:
                 print(f"No embeddings found for type: {t} skipping...")
@@ -145,3 +147,50 @@ class FaissIVFFlatIndex(EmbeddingsDB):
         faiss_db, _ = self.load(type)
         similar_clusters = faiss_db.search(np.array(QGenieBGEM3Embedding().embed_query(query)).reshape(-1, 1), k=k)
         return similar_clusters
+
+
+class SearchInExistingFaiss(object):
+    def __init__(self):
+        self.base_path = FaissConfigurations.base_path
+
+    @lru_cache(maxsize=5)
+    def _load_faiss(self, type: str) -> tuple:
+        db_path = os.path.join(self.base_path, f"{type}_faiss")
+        faiss_db = faiss.read_index(os.path.join(db_path, "index.faiss").lower())
+        metadata = json.loads(open(os.path.join(db_path, "metadata.json")).read())
+        return faiss_db, metadata
+
+    def search(self, type: str, query: str, k: int = 2) -> tuple:
+        faiss_db, metadata = self._load_faiss(type)
+        Distance, Index = faiss_db.search(np.array(QGenieBGEM3Embedding().embed_query(query)).reshape(1, -1), k=k)
+        index = int(Index[0][0])
+        score = float(Distance[0][0])
+        cluster_name = metadata["cluster_names"][index]
+
+        print(f"For Query: {query}, score: {score}, cluster: {cluster_name}")
+        if score >= 0.95:
+            return cluster_name
+
+        return ClusterSpecificKeys.non_grouped_key
+
+    async def batch_search(self, type: str, query: Union[str, list[str]], k: int = 2) -> list[str]:
+        faiss_db, metadata = self._load_faiss(type)
+        queries = [query] if isinstance(query, str) else query
+        embeddings = await QGenieBGEM3Embedding().aembed_documents(queries)
+
+        # Search in FAISS
+        Distance, Index = faiss_db.search(np.array(embeddings), k=k)
+
+        cluster_names = []
+        for i, query in enumerate(queries):
+            index = int(Index[i][0])
+            score = float(Distance[i][0])
+            cluster_name = metadata["cluster_names"][index]
+
+            print(f"For Query: {query}, score: {score}, cluster: {cluster_name}")
+            if score >= 0.95:
+                cluster_names.append(cluster_name)
+            else:
+                cluster_names.append(ClusterSpecificKeys.non_grouped_key)
+
+        return cluster_names

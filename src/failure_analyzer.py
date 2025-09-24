@@ -5,6 +5,7 @@ from typing import List, Optional
 import numpy as np
 import pandas as pd
 import streamlit as st
+import swifter
 from sklearn.cluster import HDBSCAN
 
 from src import helpers
@@ -91,44 +92,52 @@ class FailureAnalyzer:
         self.logger.info(f"Loaded {len(dataframe)} rows")
 
         # Initialize all rows as non-grouped
+        dataframe = helpers.add_hashed_unique_id(dataframe)
         dataframe.loc[:, DataFrameKeys.cluster_name] = ClusterSpecificKeys.non_grouped_key
         dataframe.loc[:, DataFrameKeys.cluster_type_int] = ClusterSpecificKeys.non_grouped_key
+        dataframe.loc[:, DataFrameKeys.grouped_from_faiss] = np.nan
+
         # Preprocess failure texts
         failure_texts = dataframe[failure_column].astype(str).tolist()
         failure_texts = [helpers.preprocess_error_log(text) for text in failure_texts]
+
         # Apply preprocessing steps
         failure_df = helpers.remove_empty_and_misc_rows(dataframe, failure_texts, DataFrameKeys.preprocessed_text_key)
         failure_df = helpers.trim_error_logs(failure_df)
 
         # dataframe with empty/no logs
-        empty_log_df = failure_df[
-            failure_df[DataFrameKeys.cluster_name] != ClusterSpecificKeys.non_grouped_key
-        ].reset_index(drop=True)
+        empty_log_df = failure_df[failure_df[DataFrameKeys.cluster_name] != ClusterSpecificKeys.non_grouped_key]
         if not empty_log_df.empty:
             empty_log_df.loc[:, DataFrameKeys.embeddings_key] = np.nan
 
+        failure_df = failure_df[~failure_df.index.isin(empty_log_df.index)]
+        failure_df = await helpers.check_if_issue_alread_grouped(failure_df)
         non_clustered_df = failure_df[
             failure_df[DataFrameKeys.cluster_name] == ClusterSpecificKeys.non_grouped_key
         ].reset_index(drop=True)
-        non_clustered_df = helpers.fuzzy_cluster_grouping(non_clustered_df).reset_index(drop=True)
-        fuzzy_clustered_df = non_clustered_df[
-            (non_clustered_df[DataFrameKeys.cluster_name] != ClusterSpecificKeys.non_grouped_key)
-            & (
-                ~non_clustered_df[DataFrameKeys.cluster_name].isin(
-                    {ErrorLogConfigurations.empty_error, ErrorLogConfigurations.no_error}
+        fuzzy_clustered_df = pd.DataFrame()
+        if not non_clustered_df.empty:
+            non_clustered_df = helpers.fuzzy_cluster_grouping(non_clustered_df)
+            fuzzy_clustered_df = non_clustered_df[
+                (non_clustered_df[DataFrameKeys.cluster_name] != ClusterSpecificKeys.non_grouped_key)
+                & (
+                    ~non_clustered_df[DataFrameKeys.cluster_name].isin(
+                        {ErrorLogConfigurations.empty_error, ErrorLogConfigurations.no_error}
+                    )
                 )
-            )
-        ]
+            ]
 
-        fuzzy_clustered_df[DataFrameKeys.embeddings_key] = pd.Series(
-            await self.agenerate_embeddings(fuzzy_clustered_df[DataFrameKeys.preprocessed_text_key].tolist()),
-            index=fuzzy_clustered_df.index,
+            fuzzy_clustered_df[DataFrameKeys.embeddings_key] = pd.Series(
+                await self.agenerate_embeddings(fuzzy_clustered_df[DataFrameKeys.preprocessed_text_key].tolist()),
+                index=fuzzy_clustered_df.index,
+            )
+            non_clustered_df = non_clustered_df[~non_clustered_df.index.isin(fuzzy_clustered_df.index)]
+
+        faiss_grouped = failure_df[failure_df[DataFrameKeys.grouped_from_faiss] == True]
+        self.logger.info(
+            f"\nType: {failure_df.iloc[0]['type']} \ntotal errors: {failure_df.shape[0]}, \nEmpty logs grouped: {empty_log_df.shape[0]}, \nFuzzy and faiss grouped: {fuzzy_clustered_df.shape[0]}, \nNot grouped: {non_clustered_df.shape[0]} \n Faiss Grouped: {faiss_grouped.shape[0]}"
         )
-        non_clustered_df = non_clustered_df[~non_clustered_df.index.isin(fuzzy_clustered_df.index)].reset_index(
-            drop=True
-        )
-        failure_df = pd.concat([empty_log_df, fuzzy_clustered_df, non_clustered_df], axis=0).reset_index(drop=True)
-        self.logger.info(f"Initial Clusters: {failure_df[DataFrameKeys.cluster_name].unique()}")
+        failure_df = pd.concat([empty_log_df, fuzzy_clustered_df, non_clustered_df, faiss_grouped], axis=0)
 
         # Handle small datasets (10 or fewer rows)
         if failure_df.shape[0] <= 10:
@@ -140,16 +149,19 @@ class FailureAnalyzer:
                 non_clustered_df = failure_df[
                     failure_df[DataFrameKeys.cluster_name] == ClusterSpecificKeys.non_grouped_key
                 ]
-                embeddings = await self.agenerate_embeddings(
-                    non_clustered_df[DataFrameKeys.preprocessed_text_key].tolist()
-                )
-                non_clustered_df.loc[:, DataFrameKeys.embeddings_key] = pd.Series(
-                    embeddings, index=non_clustered_df.index
-                )
-                non_clustered_df = await qgenie_post_processing(non_clustered_df)
+                if not non_clustered_df.empty:
+                    embeddings = await self.agenerate_embeddings(
+                        non_clustered_df[DataFrameKeys.preprocessed_text_key].tolist()
+                    )
+                    non_clustered_df.loc[:, DataFrameKeys.embeddings_key] = pd.Series(
+                        embeddings, index=non_clustered_df.index
+                    )
+                    non_clustered_df = await qgenie_post_processing(non_clustered_df)
+                else:
+                    non_clustered_df = None
 
             if non_clustered_df is not None:
-                failure_df = pd.concat([empty_log_df, non_clustered_df], axis=0).reset_index(drop=True)
+                failure_df = pd.concat([empty_log_df, non_clustered_df], axis=0)
 
             return failure_df
 
@@ -165,31 +177,32 @@ class FailureAnalyzer:
             f"{already_clustered_df.shape[0]} already clustered logs and {non_clustered_df.shape[0]} non-clustered logs"
         )
 
-        embeddings = await self.agenerate_embeddings(non_clustered_df[DataFrameKeys.preprocessed_text_key].tolist())
-        non_clustered_df.loc[:, DataFrameKeys.embeddings_key] = pd.Series(embeddings, index=non_clustered_df.index)
+        if not non_clustered_df.empty:
+            embeddings = await self.agenerate_embeddings(non_clustered_df[DataFrameKeys.preprocessed_text_key].tolist())
+            non_clustered_df.loc[:, DataFrameKeys.embeddings_key] = pd.Series(embeddings, index=non_clustered_df.index)
 
-        # Process non-clustered data
-        if non_clustered_df.shape[0] > 10:
+            # Process non-clustered data
+            if non_clustered_df.shape[0] > 10:
 
-            # Cluster embeddings
-            non_clustered_df.loc[:, DataFrameKeys.cluster_type_int] = self.cluster_embeddings(embeddings)
+                # Cluster embeddings
+                non_clustered_df.loc[:, DataFrameKeys.cluster_type_int] = self.cluster_embeddings(embeddings)
 
-            # Merge similar clusters
-            merged_groups = helpers.merge_similar_clusters(
-                embeddings, list(non_clustered_df[DataFrameKeys.cluster_type_int].unique())
-            )
-            non_clustered_df = helpers.update_labels_with_merged_clusters(
-                non_clustered_df, merged_groups, DataFrameKeys.cluster_type_int
-            )
+                # Merge similar clusters
+                merged_groups = helpers.merge_similar_clusters(
+                    embeddings, list(non_clustered_df[DataFrameKeys.cluster_type_int].unique())
+                )
+                non_clustered_df = helpers.update_labels_with_merged_clusters(
+                    non_clustered_df, merged_groups, DataFrameKeys.cluster_type_int
+                )
 
-            # Log cluster statistics
-            cluster_counts = non_clustered_df[DataFrameKeys.cluster_type_int].value_counts()
-            num_clusters = len(cluster_counts) - (1 if -1 in cluster_counts else 0)
-            self.logger.info(f"Found {num_clusters} clusters")
-            self.logger.info(f"Noise points: {cluster_counts.get(-1, 0)}")
+                # Log cluster statistics
+                cluster_counts = non_clustered_df[DataFrameKeys.cluster_type_int].value_counts()
+                num_clusters = len(cluster_counts) - (1 if -1 in cluster_counts else 0)
+                self.logger.info(f"Found {num_clusters} clusters")
+                self.logger.info(f"Noise points: {cluster_counts.get(-1, 0)}")
 
-        # Apply Qgenie post-processing
-        non_clustered_df = await qgenie_post_processing(non_clustered_df)
+            # Apply Qgenie post-processing
+            non_clustered_df = await qgenie_post_processing(non_clustered_df)
         # Combine results and reset index
         final_df = pd.concat([already_clustered_df, non_clustered_df], axis=0).reset_index(drop=True)
 
@@ -198,7 +211,7 @@ class FailureAnalyzer:
         )
 
         # Apply get_name to each matching row and update the cluster_name
-        final_df.loc[mask, DataFrameKeys.cluster_name] = final_df[mask].apply(
+        final_df.loc[mask, DataFrameKeys.cluster_name] = final_df[mask].swifter.apply(
             lambda row: generate_cluster_name(row)["cluster_name"], axis=1
         )
 

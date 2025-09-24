@@ -152,7 +152,6 @@ if st.session_state.processed_data and st.session_state.clustered_df_grouped is 
                     st.warning("No clusters were created.")
                 else:
                     st.info(f"Clusters: {len(clusters)}")
-
                     tabs = st.tabs([str(c) for c in clusters])
                     for tab, cluster in zip(tabs, clusters):
                         _sub_cluster = clustered_df[clustered_df[DataFrameKeys.cluster_name] == cluster][COL_TO_SHOW]
@@ -161,7 +160,7 @@ if st.session_state.processed_data and st.session_state.clustered_df_grouped is 
                                 st.subheader(f"{cluster} - Total Rows: {_sub_cluster.shape[0]}")
                                 st.dataframe(_sub_cluster)
             else:
-                st.status("No failures found in the data.")
+                st.success("No failures found in the data.")
                 st.subheader("All tests passed.")
 
     except Exception as e:

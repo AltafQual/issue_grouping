@@ -433,6 +433,15 @@ wheels = [
 ]
 
 [[package]]
+name = "cloudpickle"
+version = "3.1.1"
+source = { registry = "https://devpi.qualcomm.com/qcom/dev/+simple" }
+sdist = { url = "https://devpi.qualcomm.com/root/pypi/+f/b21/6fa8ae4019d54/cloudpickle-3.1.1.tar.gz", hash = "sha256:b216fa8ae4019d5482a8ac3c95d8f6346115d8835911fd4aefd1a445e4242c64" }
+wheels = [
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/c8c/5a44295039331/cloudpickle-3.1.1-py3-none-any.whl", hash = "sha256:c8c5a44295039331ee9dad40ba100a9c7297b6f988e50e87ccdf3765a668350e" },
+]
+
+[[package]]
 name = "colorama"
 version = "0.4.6"
 source = { registry = "https://devpi.qualcomm.com/qcom/dev/+simple" }
@@ -448,6 +457,33 @@ source = { registry = "https://devpi.qualcomm.com/qcom/dev/+simple" }
 sdist = { url = "https://devpi.qualcomm.com/root/pypi/+f/2dc/8048c10962d55/comm-0.2.3.tar.gz", hash = "sha256:2dc8048c10962d55d7ad693be1e7045d891b7ce8d999c97963a5e3e99c055971" }
 wheels = [
     { url = "https://devpi.qualcomm.com/root/pypi/+f/c61/5d91d75f7f04f/comm-0.2.3-py3-none-any.whl", hash = "sha256:c615d91d75f7f04f095b30d1c1711babd43bdc6419c1be9886a85f2f4e489417" },
+]
+
+[[package]]
+name = "dask"
+version = "2025.9.1"
+source = { registry = "https://devpi.qualcomm.com/qcom/dev/+simple" }
+dependencies = [
+    { name = "click" },
+    { name = "cloudpickle" },
+    { name = "fsspec" },
+    { name = "importlib-metadata", marker = "python_full_version < '3.12'" },
+    { name = "packaging" },
+    { name = "partd" },
+    { name = "pyyaml" },
+    { name = "toolz" },
+]
+sdist = { url = "https://devpi.qualcomm.com/root/pypi/+f/718/df73e1fd3d7e2/dask-2025.9.1.tar.gz", hash = "sha256:718df73e1fd3d7e2b8546e0f04ce08e1ed7f9aa3da1eecd0c1f44c8b6d52f7e0" }
+wheels = [
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/2a8/a7dc933caaea2/dask-2025.9.1-py3-none-any.whl", hash = "sha256:2a8a7dc933caaea2f47745a65a6ec93d9e616e12aab53b4f03ee161d31939110" },
+]
+
+[package.optional-dependencies]
+dataframe = [
+    { name = "numpy", version = "2.2.6", source = { registry = "https://devpi.qualcomm.com/qcom/dev/+simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.3.2", source = { registry = "https://devpi.qualcomm.com/qcom/dev/+simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "pandas" },
+    { name = "pyarrow" },
 ]
 
 [[package]]
@@ -696,6 +732,15 @@ wheels = [
 ]
 
 [[package]]
+name = "fsspec"
+version = "2025.9.0"
+source = { registry = "https://devpi.qualcomm.com/qcom/dev/+simple" }
+sdist = { url = "https://devpi.qualcomm.com/root/pypi/+f/19f/d429483d25d28/fsspec-2025.9.0.tar.gz", hash = "sha256:19fd429483d25d28b65ec68f9f4adc16c17ea2c7c7bf54ec61360d478fb19c19" }
+wheels = [
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/530/dc2a2af60a414/fsspec-2025.9.0-py3-none-any.whl", hash = "sha256:530dc2a2af60a414a832059574df4a6e10cce927f6f4a78209390fe38955cfb7" },
+]
+
+[[package]]
 name = "gitdb"
 version = "4.0.12"
 source = { registry = "https://devpi.qualcomm.com/qcom/dev/+simple" }
@@ -862,6 +907,18 @@ wheels = [
 ]
 
 [[package]]
+name = "importlib-metadata"
+version = "8.7.0"
+source = { registry = "https://devpi.qualcomm.com/qcom/dev/+simple" }
+dependencies = [
+    { name = "zipp", marker = "python_full_version < '3.12'" },
+]
+sdist = { url = "https://devpi.qualcomm.com/root/pypi/+f/d13/b81ad223b890a/importlib_metadata-8.7.0.tar.gz", hash = "sha256:d13b81ad223b890aa16c5471f2ac3056cf76c5f10f82d6f9292f0b415f389000" }
+wheels = [
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/e5d/d1551894c7786/importlib_metadata-8.7.0-py3-none-any.whl", hash = "sha256:e5dd1551894c77868a30651cef00984d50e1002d06942a7101d34870c5f02afd" },
+]
+
+[[package]]
 name = "ipykernel"
 version = "6.30.1"
 source = { registry = "https://devpi.qualcomm.com/qcom/dev/+simple" }
@@ -979,6 +1036,7 @@ dependencies = [
     { name = "rapidfuzz" },
     { name = "scikit-learn" },
     { name = "streamlit" },
+    { name = "swifter" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -999,6 +1057,7 @@ requires-dist = [
     { name = "rapidfuzz", specifier = "===3.14.0" },
     { name = "scikit-learn", specifier = ">=1.7.1" },
     { name = "streamlit", specifier = "==1.47.0" },
+    { name = "swifter", specifier = ">=1.4.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.35.0" },
 ]
 
@@ -1258,6 +1317,15 @@ dependencies = [
 sdist = { url = "https://devpi.qualcomm.com/root/pypi/+f/eab/fb66970d50964/langsmith-0.4.21.tar.gz", hash = "sha256:eabfb66970d50964918acba524b407e8cfe585448013e3135ca92388c858d009" }
 wheels = [
     { url = "https://devpi.qualcomm.com/root/pypi/+f/15b/189e2e7a3337a/langsmith-0.4.21-py3-none-any.whl", hash = "sha256:15b189e2e7a3337a07cf250d91e158efcd0b39458735dc9e583c56dd0f21e4e0" },
+]
+
+[[package]]
+name = "locket"
+version = "1.0.0"
+source = { registry = "https://devpi.qualcomm.com/qcom/dev/+simple" }
+sdist = { url = "https://devpi.qualcomm.com/root/pypi/+f/5c0/d4c052a8bbbf7/locket-1.0.0.tar.gz", hash = "sha256:5c0d4c052a8bbbf750e056a8e65ccd309086f4f0f18a2eac306a8dfa4112a632" }
+wheels = [
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/b6c/819a722f7b6bd/locket-1.0.0-py2.py3-none-any.whl", hash = "sha256:b6c819a722f7b6bd955b80781788e4a66a55628b858d347536b7e81325a3a5e3" },
 ]
 
 [[package]]
@@ -1866,6 +1934,19 @@ source = { registry = "https://devpi.qualcomm.com/qcom/dev/+simple" }
 sdist = { url = "https://devpi.qualcomm.com/root/pypi/+f/034/d7354a9a018bd/parso-0.8.5.tar.gz", hash = "sha256:034d7354a9a018bdce352f48b2a8a450f05e9d6ee85db84764e9b6bd96dafe5a" }
 wheels = [
     { url = "https://devpi.qualcomm.com/root/pypi/+f/646/204b5ee239c39/parso-0.8.5-py2.py3-none-any.whl", hash = "sha256:646204b5ee239c396d040b90f9e272e9a8017c630092bf59980beb62fd033887" },
+]
+
+[[package]]
+name = "partd"
+version = "1.4.2"
+source = { registry = "https://devpi.qualcomm.com/qcom/dev/+simple" }
+dependencies = [
+    { name = "locket" },
+    { name = "toolz" },
+]
+sdist = { url = "https://devpi.qualcomm.com/root/pypi/+f/d02/2c33afbdc8405/partd-1.4.2.tar.gz", hash = "sha256:d022c33afbdc8405c226621b015e8067888173d85f7f5ecebb3cafed9a20f02c" }
+wheels = [
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/978/e4ac767ec4ba5/partd-1.4.2-py3-none-any.whl", hash = "sha256:978e4ac767ec4ba5b86c6eaa52e5a2a3bc748a2ca839e8cc798f1cc6ce6efb0f" },
 ]
 
 [[package]]
@@ -3156,6 +3237,18 @@ wheels = [
 ]
 
 [[package]]
+name = "swifter"
+version = "1.4.0"
+source = { registry = "https://devpi.qualcomm.com/qcom/dev/+simple" }
+dependencies = [
+    { name = "dask", extra = ["dataframe"] },
+    { name = "pandas" },
+    { name = "psutil" },
+    { name = "tqdm" },
+]
+sdist = { url = "https://devpi.qualcomm.com/root/pypi/+f/e1b/b74476a21b3f0/swifter-1.4.0.tar.gz", hash = "sha256:e1bb74476a21b3f07a17aa18c97fdcba8599726bd17da732f09dabcc50e26ba0" }
+
+[[package]]
 name = "tenacity"
 version = "9.1.2"
 source = { registry = "https://devpi.qualcomm.com/qcom/dev/+simple" }
@@ -3222,6 +3315,15 @@ wheels = [
 ]
 
 [[package]]
+name = "toolz"
+version = "1.0.0"
+source = { registry = "https://devpi.qualcomm.com/qcom/dev/+simple" }
+sdist = { url = "https://devpi.qualcomm.com/root/pypi/+f/2c8/6e3d9a04798ac/toolz-1.0.0.tar.gz", hash = "sha256:2c86e3d9a04798ac556793bced838816296a2f085017664e4995cb40a1047a02" }
+wheels = [
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/292/c8f1c4e7516bf/toolz-1.0.0-py3-none-any.whl", hash = "sha256:292c8f1c4e7516bf9086f8850935c799a874039c8bcf959d47b600e4c44a6236" },
+]
+
+[[package]]
 name = "tornado"
 version = "6.5.2"
 source = { registry = "https://devpi.qualcomm.com/qcom/dev/+simple" }
@@ -3238,6 +3340,18 @@ wheels = [
     { url = "https://devpi.qualcomm.com/root/pypi/+f/c6f/29e94d9b37a95/tornado-6.5.2-cp39-abi3-win32.whl", hash = "sha256:c6f29e94d9b37a95013bb669616352ddb82e3bfe8326fccee50583caebc8a5f0" },
     { url = "https://devpi.qualcomm.com/root/pypi/+f/e56/a5af51cc30dd2/tornado-6.5.2-cp39-abi3-win_amd64.whl", hash = "sha256:e56a5af51cc30dd2cae649429af65ca2f6571da29504a07995175df14c18f35f" },
     { url = "https://devpi.qualcomm.com/root/pypi/+f/d6c/33dc3672e3a1f/tornado-6.5.2-cp39-abi3-win_arm64.whl", hash = "sha256:d6c33dc3672e3a1f3618eb63b7ef4683a7688e7b9e6e8f0d9aa5726360a004af" },
+]
+
+[[package]]
+name = "tqdm"
+version = "4.67.1"
+source = { registry = "https://devpi.qualcomm.com/qcom/dev/+simple" }
+dependencies = [
+    { name = "colorama", marker = "sys_platform == 'win32'" },
+]
+sdist = { url = "https://devpi.qualcomm.com/root/pypi/+f/f8a/ef9c52c08c13a/tqdm-4.67.1.tar.gz", hash = "sha256:f8aef9c52c08c13a65f30ea34f4e5aac3fd1a34959879d7e59e63027286627f2" }
+wheels = [
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/264/45eca388f82e7/tqdm-4.67.1-py3-none-any.whl", hash = "sha256:26445eca388f82e72884e0d580d5464cd801a3ea01e63e5601bdff9ba6a48de2" },
 ]
 
 [[package]]
@@ -3747,6 +3861,15 @@ wheels = [
     { url = "https://devpi.qualcomm.com/root/pypi/+f/b12/1ff6a7cbd4abc/yarl-1.20.1-cp313-cp313t-win32.whl", hash = "sha256:b121ff6a7cbd4abc28985b6028235491941b9fe8fe226e6fdc539c977ea1739d" },
     { url = "https://devpi.qualcomm.com/root/pypi/+f/541/d050a355bbbc2/yarl-1.20.1-cp313-cp313t-win_amd64.whl", hash = "sha256:541d050a355bbbc27e55d906bc91cb6fe42f96c01413dd0f4ed5a5240513874f" },
     { url = "https://devpi.qualcomm.com/root/pypi/+f/83b/8eb083fe4683c/yarl-1.20.1-py3-none-any.whl", hash = "sha256:83b8eb083fe4683c6115795d9fc1cfaf2cbbefb19b3a1cb68f6527460f483a77" },
+]
+
+[[package]]
+name = "zipp"
+version = "3.23.0"
+source = { registry = "https://devpi.qualcomm.com/qcom/dev/+simple" }
+sdist = { url = "https://devpi.qualcomm.com/root/pypi/+f/a07/157588a12518c/zipp-3.23.0.tar.gz", hash = "sha256:a07157588a12518c9d4034df3fbbee09c814741a33ff63c05fa29d26a2404166" }
+wheels = [
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/071/652d6115ed432/zipp-3.23.0-py3-none-any.whl", hash = "sha256:071652d6115ed432f5ce1d34c336c0adfd6a884660d1e9712a256d3d3bd4b14e" },
 ]
 
 [[package]]

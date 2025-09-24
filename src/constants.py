@@ -16,6 +16,8 @@ class DataFrameKeys:
     cluster_name: str = "clusters"
     bins: str = "bins"
     error_logs_length: str = "logs_length"
+    index: str = "unique_id"
+    grouped_from_faiss: str = "issue_already_occured"
 
 
 @dataclass

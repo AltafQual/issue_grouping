@@ -1,12 +1,15 @@
 import asyncio
+import hashlib
 import logging
 import os
+import random
 import re
 from functools import wraps
 from io import BytesIO
 
 import numpy as np
 import pandas as pd
+import swifter
 from apscheduler.schedulers.background import BackgroundScheduler
 from rapidfuzz import fuzz
 from sklearn.metrics.pairwise import cosine_similarity
@@ -15,7 +18,7 @@ from sklearn.neighbors import LocalOutlierFactor
 from src.constants import ClusterSpecificKeys, DataFrameKeys, ErrorLogConfigurations, regex_based_filteration_patterns
 from src.db_connections import ConnectToMySql
 from src.execution_timer_log import execution_timer
-from src.faiss_db import FaissIVFFlatIndex
+from src.faiss_db import FaissIVFFlatIndex, SearchInExistingFaiss
 from src.qgenie import generate_cluster_name
 
 logger = logging.getLogger(__name__)
@@ -25,6 +28,17 @@ faiss_runner = FaissIVFFlatIndex()
 # in-memory tc id data cache
 _tc_id_cache = {}
 parquet_file = "run_ids.parquet"
+
+
+def add_hashed_unique_id(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.reset_index(drop=True)
+
+    def generate_hash(row):
+        raw_string = f"{random.randint(0, df.shape[0])}_{row['type']}_{row['tc_uuid']}_{row['runtime']}_{row['soc_name']}".lower()
+        return hashlib.md5(raw_string.encode()).hexdigest()
+
+    df[DataFrameKeys.index] = df.apply(generate_hash, axis=1)
+    return df
 
 
 @execution_timer
@@ -300,6 +314,24 @@ def detect_cluster_outlier(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+async def check_if_issue_alread_grouped(df: pd.DataFrame) -> pd.DataFrame:
+    # Identify rows that are not yet grouped
+    mask = df[DataFrameKeys.cluster_name].isin([ClusterSpecificKeys.non_grouped_key, np.nan])
+    ungrouped_df = df[mask]
+
+    # Get cluster names using FAISS
+    new_cluster_names = await SearchInExistingFaiss().batch_search(
+        type=ungrouped_df.iloc[0]["type"],  # assuming same type for batch
+        query=ungrouped_df[DataFrameKeys.preprocessed_text_key].tolist(),
+    )
+
+    # Update the original DataFrame
+    df.loc[mask, DataFrameKeys.cluster_name] = new_cluster_names
+    df.loc[mask, DataFrameKeys.grouped_from_faiss] = True
+
+    return df
+
+
 @execution_timer
 def get_tc_ids_from_sql():
     if os.path.exists(parquet_file):
@@ -351,26 +383,71 @@ def tc_id_scheduler():
     scheduler.start()
 
 
-async def process_by_type(df, update_faiss_and_sql=False):
+# async def process_by_type(df, update_faiss_and_sql=False):
+#     from src.failure_analyzer import FailureAnalyzer
+
+#     results = {}
+#     analyzer = FailureAnalyzer()
+
+#     async def process_group(t, group_df):
+#         group_df = group_df.reset_index(drop=True)
+#         result = await analyzer.analyze(dataframe=group_df)
+#         results[t] = result
+
+#     logger.info(f"All types in data: {df.type.unique()}")
+#     tasks = [process_group(t, group_df) for t, group_df in df.groupby("type") if t == "api_compliance"]
+#     await asyncio.gather(*tasks)
+
+#     if update_faiss_and_sql:
+#         clustered_df = pd.concat(
+#             [df.assign(cluster_type=cluster_name) for cluster_name, df in results.items()],
+#             ignore_index=True,
+#         )
+#         analyzer.save_as_faiss(faiss_runner, clustered_df)
+
+#     return results
+
+
+import asyncio
+from concurrent.futures import ProcessPoolExecutor
+
+import pandas as pd
+
+
+def run_analysis_in_process(group_df):
+    import asyncio
+
     from src.failure_analyzer import FailureAnalyzer
 
-    results = {}
-    analyzer = FailureAnalyzer()
+    async def run():
+        analyzer = FailureAnalyzer()
+        return await analyzer.analyze(dataframe=group_df.reset_index(drop=True))
 
-    async def process_group(t, group_df):
-        group_df = group_df.reset_index(drop=True)
-        result = await analyzer.analyze(dataframe=group_df)
-        results[t] = result
+    return asyncio.run(run())
+
+
+async def process_by_type(df, update_faiss_and_sql=False):
+    results = {}
 
     logger.info(f"All types in data: {df.type.unique()}")
-    tasks = [process_group(t, group_df) for t, group_df in df.groupby("type")]
-    await asyncio.gather(*tasks)
+
+    loop = asyncio.get_running_loop()
+    with ProcessPoolExecutor() as executor:
+        tasks = [
+            loop.run_in_executor(executor, run_analysis_in_process, group_df) for t, group_df in df.groupby("type")
+        ]
+        analysis_results = await asyncio.gather(*tasks)
+
+    # Map results back to type
+    for (t, _), result in zip(df.groupby("type"), analysis_results):
+        results[t] = result
 
     if update_faiss_and_sql:
         clustered_df = pd.concat(
             [df.assign(cluster_type=cluster_name) for cluster_name, df in results.items()],
             ignore_index=True,
         )
+        analyzer = FailureAnalyzer()
         analyzer.save_as_faiss(faiss_runner, clustered_df)
 
     return results
