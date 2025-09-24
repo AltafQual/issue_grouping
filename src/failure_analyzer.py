@@ -90,6 +90,7 @@ class FailureAnalyzer:
             dataframe = self.load_data(st_object=st_object)
 
         self.logger.info(f"Loaded {len(dataframe)} rows")
+        current_type = dataframe.iloc[0]["type"]
 
         # Initialize all rows as non-grouped
         dataframe = helpers.add_hashed_unique_id(dataframe)
@@ -135,7 +136,7 @@ class FailureAnalyzer:
 
         faiss_grouped = failure_df[failure_df[DataFrameKeys.grouped_from_faiss] == True]
         self.logger.info(
-            f"\nType: {failure_df.iloc[0]['type']} \ntotal errors: {failure_df.shape[0]}, \nEmpty logs grouped: {empty_log_df.shape[0]}, \nFuzzy and faiss grouped: {fuzzy_clustered_df.shape[0]}, \nNot grouped: {non_clustered_df.shape[0]} \n Faiss Grouped: {faiss_grouped.shape[0]}"
+            f"\nType: {current_type} \ntotal errors: {failure_df.shape[0]}, \nEmpty logs grouped: {empty_log_df.shape[0]}, \nFuzzy and faiss grouped: {fuzzy_clustered_df.shape[0]}, \nNot grouped: {non_clustered_df.shape[0]} \n Faiss Grouped: {faiss_grouped.shape[0]}"
         )
         failure_df = pd.concat([empty_log_df, fuzzy_clustered_df, non_clustered_df, faiss_grouped], axis=0)
 
@@ -211,9 +212,10 @@ class FailureAnalyzer:
         )
 
         # Apply get_name to each matching row and update the cluster_name
-        final_df.loc[mask, DataFrameKeys.cluster_name] = final_df[mask].swifter.apply(
-            lambda row: generate_cluster_name(row)["cluster_name"], axis=1
-        )
+        if not final_df.loc[mask].empty:
+            final_df.loc[mask, DataFrameKeys.cluster_name] = final_df[mask].swifter.apply(
+                lambda row: generate_cluster_name(row)["cluster_name"], axis=1
+            )
 
         return final_df
 

@@ -104,7 +104,12 @@ def generate_cluster_name(grouped_cluster: pd.DataFrame) -> dict:
     prompt_template = ChatPromptTemplate.from_messages(
         [("system", prompts.CLUSTER_NAMING_SYS_MESSAGE), ("human", prompts.CLUSTER_NAMING_LOG_MESSAGE)]
     )
-    logs = grouped_cluster[DataFrameKeys.preprocessed_text_key].tolist()
+
+    logs = grouped_cluster[DataFrameKeys.preprocessed_text_key]
+    if isinstance(logs, pd.Series):
+        logs = logs.tolist()
+    else:
+        logs = [logs]
     logs = logs[:5] if len(logs) > 5 else logs
     chain = prompt_template | model | nameparser
     response = chain.invoke({"logs": logs})

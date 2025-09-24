@@ -320,15 +320,16 @@ async def check_if_issue_alread_grouped(df: pd.DataFrame) -> pd.DataFrame:
     mask = df[DataFrameKeys.cluster_name].isin([ClusterSpecificKeys.non_grouped_key, np.nan])
     ungrouped_df = df[mask]
 
-    # Get cluster names using FAISS
-    new_cluster_names = await SearchInExistingFaiss().batch_search(
-        type=ungrouped_df.iloc[0]["type"],  # assuming same type for batch
-        query=ungrouped_df[DataFrameKeys.preprocessed_text_key].tolist(),
-    )
+    if not ungrouped_df.empty:
+        # Get cluster names using FAISS
+        new_cluster_names = await SearchInExistingFaiss().batch_search(
+            type=ungrouped_df.iloc[0]["type"],  # assuming same type for batch
+            query=ungrouped_df[DataFrameKeys.preprocessed_text_key].tolist(),
+        )
 
-    # Update the original DataFrame
-    df.loc[mask, DataFrameKeys.cluster_name] = new_cluster_names
-    df.loc[mask, DataFrameKeys.grouped_from_faiss] = True
+        # Update the original DataFrame
+        df.loc[mask, DataFrameKeys.cluster_name] = new_cluster_names
+        df.loc[mask, DataFrameKeys.grouped_from_faiss] = True
 
     return df
 
@@ -396,7 +397,7 @@ async def async_process_by_type(df, update_faiss_and_sql=False):
         results[t] = result
 
     logger.info(f"All types in data: {df.type.unique()}")
-    tasks = [process_group(t, group_df) for t, group_df in df.groupby("type") if t == "api_compliance"]
+    tasks = [process_group(t, group_df) for t, group_df in df.groupby("type")]
     await asyncio.gather(*tasks)
 
     if update_faiss_and_sql:

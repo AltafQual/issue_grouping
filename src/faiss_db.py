@@ -106,36 +106,39 @@ class FaissIVFFlatIndex(EmbeddingsDB):
             metadata = {}
             print(f"Saving FAISS for type: {t}")
             filtered_df = df[df[DataFrameKeys.embeddings_key].notna()]
-            embeddings_grouped = filtered_df.groupby(DataFrameKeys.cluster_name)[
-                DataFrameKeys.embeddings_key
-            ].swifter.apply(lambda x: np.mean(np.vstack(x), axis=0))
 
-            if embeddings_grouped.empty:
-                print(f"No embeddings found for type: {t} skipping...")
-                continue
+            if not filtered_df.empty:
+                h.update_error_map_qgenie_table(filtered_df)
+                embeddings_grouped = filtered_df.groupby(DataFrameKeys.cluster_name)[
+                    DataFrameKeys.embeddings_key
+                ].apply(lambda x: np.mean(np.vstack(x), axis=0))
 
-            h.update_error_map_qgenie_table(filtered_df)
-            if not self._check_existing_faiss_for_type(t):
-                metadata["cluster_names"] = embeddings_grouped.index.tolist()
-                embeddings = np.array(embeddings_grouped.tolist())
-                nlist = calculate_nlist(len(embeddings))
-                quantizer = faiss.IndexFlatIP(d)
-                faiss_db = faiss.IndexIVFFlat(quantizer, d, nlist, faiss.METRIC_INNER_PRODUCT)
-                faiss_db.train(embeddings)
-                faiss_db.add(embeddings)
-                faiss_db.nprobe = 100
-                base_path = os.path.join(faiss_dir_path, f"{t}_faiss")
+                if not self._check_existing_faiss_for_type(t):
 
-                os.makedirs(faiss_dir_path, exist_ok=True)
-                os.makedirs(base_path, exist_ok=True)
+                    if embeddings_grouped.empty:
+                        print(f"No embeddings found for type: {t} skipping...")
+                        continue
+                    metadata["cluster_names"] = embeddings_grouped.index.tolist()
+                    embeddings = np.array(embeddings_grouped.tolist())
+                    nlist = calculate_nlist(len(embeddings))
+                    quantizer = faiss.IndexFlatIP(d)
+                    faiss_db = faiss.IndexIVFFlat(quantizer, d, nlist, faiss.METRIC_INNER_PRODUCT)
+                    faiss_db.train(embeddings)
+                    faiss_db.add(embeddings)
+                    faiss_db.nprobe = 100
+                    base_path = os.path.join(faiss_dir_path, f"{t}_faiss")
 
-                faiss.write_index(faiss_db, os.path.join(base_path, "index.faiss").lower())
+                    os.makedirs(faiss_dir_path, exist_ok=True)
+                    os.makedirs(base_path, exist_ok=True)
 
-                with open(os.path.join(base_path, "metadata.json"), "w") as f:
-                    f.write(json.dumps(metadata, indent=3))
-            else:
-                print(f"Existing FAISS index found for type: {t}. Updating data")
-                self.update(t, filtered_df, embeddings_grouped, faiss_dir_path)
+                    faiss.write_index(faiss_db, os.path.join(base_path, "index.faiss").lower())
+
+                    with open(os.path.join(base_path, "metadata.json"), "w") as f:
+                        f.write(json.dumps(metadata, indent=3))
+                else:
+                    if not embeddings_grouped.empty:
+                        print(f"Existing FAISS index found for type: {t}. Updating data")
+                        self.update(t, filtered_df, embeddings_grouped, faiss_dir_path)
 
     def load(self, type: str):
         db_path = os.path.join(FaissConfigurations.base_path, f"{type}_faiss")
@@ -156,26 +159,37 @@ class SearchInExistingFaiss(object):
     @lru_cache(maxsize=5)
     def _load_faiss(self, type: str) -> tuple:
         db_path = os.path.join(self.base_path, f"{type}_faiss")
-        faiss_db = faiss.read_index(os.path.join(db_path, "index.faiss").lower())
-        metadata = json.loads(open(os.path.join(db_path, "metadata.json")).read())
-        return faiss_db, metadata
+        if os.path.exists(db_path):
+            faiss_db = faiss.read_index(os.path.join(db_path, "index.faiss").lower())
+            metadata = json.loads(open(os.path.join(db_path, "metadata.json")).read())
+            return faiss_db, metadata
+        return None, None
 
-    def search(self, type: str, query: str, k: int = 2) -> tuple:
+    def search(self, type: str, query: str, k: int = 2) -> Union[str, None]:
         faiss_db, metadata = self._load_faiss(type)
+        key = ClusterSpecificKeys.non_grouped_key
+
+        if faiss_db is None:
+            return key
+
         Distance, Index = faiss_db.search(np.array(QGenieBGEM3Embedding().embed_query(query)).reshape(1, -1), k=k)
         index = int(Index[0][0])
         score = float(Distance[0][0])
-        cluster_name = metadata["cluster_names"][index]
 
-        print(f"For Query: {query}, score: {score}, cluster: {cluster_name}")
         if score >= 0.95:
-            return cluster_name
+            key = metadata["cluster_names"][index]
 
-        return ClusterSpecificKeys.non_grouped_key
+        print(f"For Query: {query}, score: {score}, cluster: {key}")
+        return key
 
     async def batch_search(self, type: str, query: Union[str, list[str]], k: int = 2) -> list[str]:
         faiss_db, metadata = self._load_faiss(type)
+        key = ClusterSpecificKeys.non_grouped_key
         queries = [query] if isinstance(query, str) else query
+
+        if faiss_db is None:
+            return [key] * len(queries)
+
         embeddings = await QGenieBGEM3Embedding().aembed_documents(queries)
 
         # Search in FAISS
