@@ -9,7 +9,7 @@ import streamlit as st
 
 from src.constants import DataFrameKeys
 from src.failure_analyzer import FailureAnalyzer
-from src.helpers import create_excel_with_clusters, faiss_runner, get_tc_ids_from_sql, process_by_type, tc_id_scheduler
+from src.helpers import concurrent_process_by_type, create_excel_with_clusters, get_tc_ids_from_sql, tc_id_scheduler
 
 nest_asyncio.apply()
 ################################## Configurations and Global Streamlit Sessions ####################################
@@ -110,7 +110,7 @@ if process_button:
 
             with st.spinner("Analyzing and grouping data... This may take a moment."):
                 try:
-                    clustered_results = asyncio.run(process_by_type(df_to_process))
+                    clustered_results = asyncio.run(concurrent_process_by_type(df_to_process))
                     st.session_state.clustered_df_grouped = clustered_results
                     st.session_state.processed_data = True
                     st.session_state.last_processed_source = {"type": current_input_type, "value": current_input_value}

@@ -4,6 +4,7 @@ import logging
 import os
 import random
 import re
+from concurrent.futures import ProcessPoolExecutor
 from functools import wraps
 from io import BytesIO
 
@@ -383,40 +384,32 @@ def tc_id_scheduler():
     scheduler.start()
 
 
-# async def process_by_type(df, update_faiss_and_sql=False):
-#     from src.failure_analyzer import FailureAnalyzer
+async def async_process_by_type(df, update_faiss_and_sql=False):
+    from src.failure_analyzer import FailureAnalyzer
 
-#     results = {}
-#     analyzer = FailureAnalyzer()
+    results = {}
+    analyzer = FailureAnalyzer()
 
-#     async def process_group(t, group_df):
-#         group_df = group_df.reset_index(drop=True)
-#         result = await analyzer.analyze(dataframe=group_df)
-#         results[t] = result
+    async def process_group(t, group_df):
+        group_df = group_df.reset_index(drop=True)
+        result = await analyzer.analyze(dataframe=group_df)
+        results[t] = result
 
-#     logger.info(f"All types in data: {df.type.unique()}")
-#     tasks = [process_group(t, group_df) for t, group_df in df.groupby("type") if t == "api_compliance"]
-#     await asyncio.gather(*tasks)
+    logger.info(f"All types in data: {df.type.unique()}")
+    tasks = [process_group(t, group_df) for t, group_df in df.groupby("type") if t == "api_compliance"]
+    await asyncio.gather(*tasks)
 
-#     if update_faiss_and_sql:
-#         clustered_df = pd.concat(
-#             [df.assign(cluster_type=cluster_name) for cluster_name, df in results.items()],
-#             ignore_index=True,
-#         )
-#         analyzer.save_as_faiss(faiss_runner, clustered_df)
+    if update_faiss_and_sql:
+        clustered_df = pd.concat(
+            [df.assign(cluster_type=cluster_name) for cluster_name, df in results.items()],
+            ignore_index=True,
+        )
+        analyzer.save_as_faiss(faiss_runner, clustered_df)
 
-#     return results
-
-
-import asyncio
-from concurrent.futures import ProcessPoolExecutor
-
-import pandas as pd
+    return results
 
 
 def run_analysis_in_process(group_df):
-    import asyncio
-
     from src.failure_analyzer import FailureAnalyzer
 
     async def run():
@@ -426,7 +419,7 @@ def run_analysis_in_process(group_df):
     return asyncio.run(run())
 
 
-async def process_by_type(df, update_faiss_and_sql=False):
+async def concurrent_process_by_type(df, update_faiss_and_sql=False):
     results = {}
 
     logger.info(f"All types in data: {df.type.unique()}")
@@ -443,6 +436,8 @@ async def process_by_type(df, update_faiss_and_sql=False):
         results[t] = result
 
     if update_faiss_and_sql:
+        from src.failure_analyzer import FailureAnalyzer
+
         clustered_df = pd.concat(
             [df.assign(cluster_type=cluster_name) for cluster_name, df in results.items()],
             ignore_index=True,

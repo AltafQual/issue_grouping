@@ -76,5 +76,5 @@ async def get_error_cluster_name(tc_id_object: InitiateIssueGrouping, background
     if data.empty:
         return {"status": f"Error: No data found for the TC UUID: {tc_id}"}
 
-    background_tasks.add_task(helpers.process_by_type, data, update_faiss_and_sql=True)
+    background_tasks.add_task(helpers.concurrent_process_by_type, data, update_faiss_and_sql=True)
     return {"status": f"Successfully Started processing: {tc_id}"}
