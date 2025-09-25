@@ -296,7 +296,7 @@ class ConnectToMySql(DatabaseConnection):
         """
         with self.connection_context() as cnx:
             cursor = cnx.cursor()
-            cursor.execute(query, (type, runtime, cluster_name.lower()))
+            cursor.execute(query, (type.lower(), runtime.lower(), cluster_name.lower()))
             result = cursor.fetchone()
             cursor.close()
 

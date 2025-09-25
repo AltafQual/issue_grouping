@@ -97,6 +97,7 @@ class FailureAnalyzer:
         dataframe.loc[:, DataFrameKeys.cluster_name] = ClusterSpecificKeys.non_grouped_key
         dataframe.loc[:, DataFrameKeys.cluster_type_int] = ClusterSpecificKeys.non_grouped_key
         dataframe.loc[:, DataFrameKeys.grouped_from_faiss] = np.nan
+        dataframe.loc[:, DataFrameKeys.embeddings_key] = np.nan
 
         # Preprocess failure texts
         failure_texts = dataframe[failure_column].astype(str).tolist()
