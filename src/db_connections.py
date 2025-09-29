@@ -172,7 +172,7 @@ class ConnectToMySql(DatabaseConnection):
             DataFrame containing test plan results
         """
         with self.connection_context() as cnx:
-            query = f'select * from result where testplan_id = "{runid}" and result not in ("PASS");'
+            query = f'select * from result where testplan_id = "{runid}";'
             df = pd.read_sql(query, cnx)
             if df.empty:
                 logger.info(f"No Data Found for runid: {runid}")
