@@ -111,7 +111,7 @@ async def get_error_cluster_name(tc_id_object: InitiateIssueGrouping, background
     if data.empty:
         return {"status": f"Error: No data found for the TC UUID: {tc_id}"}
 
-    background_tasks.add_task(helpers.concurrent_process_by_type, data, update_faiss_and_sql=True)
+    background_tasks.add_task(helpers.async_sequential_process_by_type, data, update_faiss_and_sql=True)
     return {"status": f"Successfully Started processing: {tc_id}"}
 
 
@@ -122,7 +122,7 @@ async def get_error_cluster_name(regression_object: Regression) -> Dict:
         results = helpers.find_regressions_between_two_tests(regression_object.run_id_a, regression_object.run_id_b)
 
         if not results.empty:
-            new_cluster = await helpers.concurrent_process_by_type(results)
+            new_cluster = await helpers.async_sequential_process_by_type(results)
             clustered_df = pd.concat(
                 [df.assign(cluster_type=cluster_name) for cluster_name, df in new_cluster.items()],
                 ignore_index=True,
