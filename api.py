@@ -117,7 +117,7 @@ async def get_error_cluster_name(tc_id_object: InitiateIssueGrouping, background
 
 @app.post("/api/regression_between_two_tests/", response_model = RegressionResponse)
 async def get_error_cluster_name(regression_object: Regression) -> Dict:
-    reponse = RegressionResponse()
+    response = RegressionResponse()
     try:
         results = helpers.find_regressions_between_two_tests(regression_object.run_id_a, regression_object.run_id_b)
 
@@ -127,10 +127,18 @@ async def get_error_cluster_name(regression_object: Regression) -> Dict:
                 [df.assign(cluster_type=cluster_name) for cluster_name, df in new_cluster.items()],
                 ignore_index=True,
             )
+            
+            grouped = clustered_df.groupby(DataFrameKeys.cluster_name)
+            for cluster_name, group in grouped:
+                response.data[cluster_name] = {
+                    "tcuuids": group["tc_uuid"].tolist(),
+                    "runtimes": group["runtime"].tolist()
+                }
+
         else:
             response.status = 204
     except Exception as e:
         print(f"Exception occured while finding regression: {e}")
         response.status = 500
 
-    return reponse.to_dict()
+    return response.to_dict()
