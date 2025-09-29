@@ -95,7 +95,7 @@ async def get_error_cluster_name(error_object: ErrorLog) -> Dict:
             "soc_name": [""],
         }
     )
-    new_cluster = await helpers.concurrent_process_by_type(dataframe, update_faiss_and_sql=True)
+    new_cluster = await helpers.async_sequential_process_by_type(dataframe, update_faiss_and_sql=True)
     clustered_df = new_cluster[error_object.type]
     cluster_name = clustered_df.iloc[0][DataFrameKeys.cluster_name]
     _id = helpers.get_error_group_id(error_object.type, error_object.runtime, cluster_name)
@@ -131,8 +131,9 @@ async def get_error_cluster_name(regression_object: Regression) -> Dict:
             grouped = clustered_df.groupby(DataFrameKeys.cluster_name)
             for cluster_name, group in grouped:
                 response.data[cluster_name] = {
-                    "tcuuids": group["tc_uuid"].tolist(),
-                    "runtimes": group["runtime"].tolist()
+                    "tc_uuids": group["tc_uuid"].tolist(),
+                    "runtimes": group["runtime"].tolist(),
+                    "soc_names": group['soc_name'].tolist()
                 }
 
         else:

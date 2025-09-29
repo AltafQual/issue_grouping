@@ -12,6 +12,7 @@ from src.failure_analyzer import FailureAnalyzer
 from src.helpers import (
     async_process_by_type,
     concurrent_process_by_type,
+    async_sequential_process_by_type,
     create_excel_with_clusters,
     faiss_runner,
     get_tc_ids_from_sql,
@@ -117,7 +118,7 @@ if process_button:
 
             with st.spinner("Analyzing and grouping data... This may take a moment."):
                 try:
-                    clustered_results = asyncio.run(concurrent_process_by_type(df_to_process))
+                    clustered_results = asyncio.run(async_sequential_process_by_type(df_to_process))
                     st.session_state.clustered_df_grouped = clustered_results
                     st.session_state.processed_data = True
                     st.session_state.last_processed_source = {"type": current_input_type, "value": current_input_value}

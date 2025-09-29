@@ -450,3 +450,28 @@ async def concurrent_process_by_type(df, update_faiss_and_sql=False):
         analyzer.save_as_faiss(faiss_runner, clustered_df)
 
     return results
+
+async def async_sequential_process_by_type(df, update_faiss_and_sql=False):
+    from src.failure_analyzer import FailureAnalyzer
+
+    results = {}
+    analyzer = FailureAnalyzer()
+
+    async def process_group(t, group_df):
+        group_df = group_df.reset_index(drop=True)
+        result = await analyzer.analyze(dataframe=group_df)
+        results[t] = result
+
+    logger.info(f"All types in data: {df.type.unique()}")
+    for t, group_df in df.groupby("type"):
+        logger.info(f"Processing type: {t}  with {len(group_df)} rows")
+        await process_group(t, group_df)
+
+    if update_faiss_and_sql:
+        clustered_df = pd.concat(
+            [df.assign(cluster_type=cluster_name) for cluster_name, df in results.items()],
+            ignore_index=True,
+        )
+        analyzer.save_as_faiss(faiss_runner, clustered_df)
+
+    return results
