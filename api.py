@@ -25,6 +25,9 @@ class ErrorLog(BaseModel):
 class InitiateIssueGrouping(BaseModel):
     tc_id: str = Field(description="TC UUID of the test you want to run issue grouping on")
 
+class Regression(BaseModel):
+    tc_id_a: str = Field(description="first valid test case TcUUID")
+    tc_id_b: str = Field(description="second valid test case TcUUID")
 
 app = FastAPI(
     title="IssueGrouping",
@@ -62,7 +65,7 @@ async def get_error_cluster_name(error_object: ErrorLog):
     D, I = faiss_db.search(np.array(QGenieBGEM3Embedding().embed_query(error)).reshape(1, -1), 1)
     index = int(I[0][0])
     score = round(float(D[0][0]), 2)
-    if score >= 90:
+    if score >= 80:
         cluster_name = metadata["cluster_names"][index]
         response_metadata["cluster_name"] = cluster_name
         response_metadata["cluster_score"] = score
@@ -96,3 +99,8 @@ async def get_error_cluster_name(tc_id_object: InitiateIssueGrouping, background
 
     background_tasks.add_task(helpers.concurrent_process_by_type, data, update_faiss_and_sql=True)
     return {"status": f"Successfully Started processing: {tc_id}"}
+
+@app.post("/api/regression_between_two_tests/")
+async def get_error_cluster_name(regression_object: Regression):
+    results = helpers.find_regressions_between_two_tests(regression_object.tc_id_a, regression_object.tc_id_b)
+    return results

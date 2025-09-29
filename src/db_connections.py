@@ -302,3 +302,32 @@ class ConnectToMySql(DatabaseConnection):
 
         logger.info(f"Fetched result {result} with the details: {type}, {runtime}, {cluster_name}")
         return result[0] if result else ""
+    
+    def get_regressions(self, test_id_a: str, test_id_b: str):
+        query = f"""
+        SELECT 
+            r1.tc_uuid AS tc_uuid,
+            r1.model_name AS name,
+            r1.soc_name AS soc_name,
+            r1.runtime AS runtime,
+            r1.type AS type,
+            r1.result AS result,
+            r1.score AS score,
+            r1.reason AS reason,
+            r1.tags as tags
+                           
+        FROM result r1
+        JOIN result r2 ON r1.tc_uuid = r2.tc_uuid
+        WHERE r1.testplan_id = "{test_id_a}"
+        AND r2.testplan_id = "{test_id_b}"
+        AND r1.result = 'FAIL'
+        AND r2.result ='PASS'
+        """
+        import pdb; pdb.set_trace()
+        with self.connection_context() as cnx:
+            df = pd.read_sql(query, cnx)
+        
+        if df.empty:
+            return pd.DataFrame()
+        
+        return df
