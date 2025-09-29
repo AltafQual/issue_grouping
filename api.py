@@ -28,8 +28,8 @@ class InitiateIssueGrouping(BaseModel):
 
 
 class Regression(BaseModel):
-    tc_id_a: str = Field(description="first valid test case TcUUID")
-    tc_id_b: str = Field(description="second valid test case TcUUID")
+    run_id_a: str = Field(description="first valid test case TcUUID")
+    run_id_b: str = Field(description="second valid test case TcUUID")
 
 
 class RegressionResponse(BaseModel):
@@ -119,7 +119,7 @@ async def get_error_cluster_name(tc_id_object: InitiateIssueGrouping, background
 async def get_error_cluster_name(regression_object: Regression) -> Dict:
     reponse = RegressionResponse()
     try:
-        results = helpers.find_regressions_between_two_tests(regression_object.tc_id_a, regression_object.tc_id_b)
+        results = helpers.find_regressions_between_two_tests(regression_object.run_id_a, regression_object.run_id_b)
 
         if not results.empty:
             new_cluster = await helpers.concurrent_process_by_type(results)

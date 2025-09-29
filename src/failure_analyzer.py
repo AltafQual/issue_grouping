@@ -44,7 +44,7 @@ class FailureAnalyzer:
 
         if isinstance(dataframe, pd.DataFrame):
             st.write(f"Total number of test cases: {dataframe.shape[0]}")
-            return dataframe[dataframe["result"] != "PASS"]
+            return dataframe[dataframe["result"] not in {"PASS", "NOT_RUN", "PARENT_NOT_RUN", "PARENT_FAIL"}]
 
     def generate_embeddings(self, texts: List[str]) -> np.ndarray:
         """Generate embeddings for the provided texts."""
