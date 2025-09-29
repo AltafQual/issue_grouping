@@ -302,7 +302,7 @@ class ConnectToMySql(DatabaseConnection):
 
         logger.info(f"Fetched result {result} with the details: {type}, {runtime}, {cluster_name}")
         return result[0] if result else ""
-    
+
     def get_regressions(self, test_id_a: str, test_id_b: str):
         query = f"""
         SELECT 
@@ -323,11 +323,6 @@ class ConnectToMySql(DatabaseConnection):
         AND r1.result = 'FAIL'
         AND r2.result ='PASS'
         """
-        import pdb; pdb.set_trace()
         with self.connection_context() as cnx:
             df = pd.read_sql(query, cnx)
-        
-        if df.empty:
-            return pd.DataFrame()
-        
         return df

@@ -1,5 +1,6 @@
 import json
 import os
+from typing import Any, Dict
 
 import faiss
 import numpy as np
@@ -25,9 +26,22 @@ class ErrorLog(BaseModel):
 class InitiateIssueGrouping(BaseModel):
     tc_id: str = Field(description="TC UUID of the test you want to run issue grouping on")
 
+
 class Regression(BaseModel):
     tc_id_a: str = Field(description="first valid test case TcUUID")
     tc_id_b: str = Field(description="second valid test case TcUUID")
+
+
+class RegressionResponse(BaseModel):
+    status: int = 200
+    data: Dict[str, Any] = {}
+
+    def add(self, key: str, value: Any) -> None:
+        self.data[key] = value
+
+    def to_dict(self) -> Dict:
+        return self.dict()
+
 
 app = FastAPI(
     title="IssueGrouping",
@@ -43,7 +57,7 @@ def redirect_to_docs():
 
 
 @app.post("/api/get_error_cluster_name/")
-async def get_error_cluster_name(error_object: ErrorLog):
+async def get_error_cluster_name(error_object: ErrorLog) -> Dict:
     """
     This API provides the cluster name to which the error belongs to.
     """
@@ -91,7 +105,7 @@ async def get_error_cluster_name(error_object: ErrorLog):
 
 
 @app.post("/api/initiate_issue_grouping/")
-async def get_error_cluster_name(tc_id_object: InitiateIssueGrouping, background_tasks: BackgroundTasks):
+async def get_error_cluster_name(tc_id_object: InitiateIssueGrouping, background_tasks: BackgroundTasks) -> Dict:
     tc_id = tc_id_object.tc_id
     data = helpers.sql_connection.fetch_result_based_on_runid(tc_id)
     if data.empty:
@@ -100,7 +114,23 @@ async def get_error_cluster_name(tc_id_object: InitiateIssueGrouping, background
     background_tasks.add_task(helpers.concurrent_process_by_type, data, update_faiss_and_sql=True)
     return {"status": f"Successfully Started processing: {tc_id}"}
 
-@app.post("/api/regression_between_two_tests/")
-async def get_error_cluster_name(regression_object: Regression):
-    results = helpers.find_regressions_between_two_tests(regression_object.tc_id_a, regression_object.tc_id_b)
-    return results
+
+@app.post("/api/regression_between_two_tests/", response_model = RegressionResponse)
+async def get_error_cluster_name(regression_object: Regression) -> Dict:
+    reponse = RegressionResponse()
+    try:
+        results = helpers.find_regressions_between_two_tests(regression_object.tc_id_a, regression_object.tc_id_b)
+
+        if not results.empty:
+            new_cluster = await helpers.concurrent_process_by_type(results)
+            clustered_df = pd.concat(
+                [df.assign(cluster_type=cluster_name) for cluster_name, df in new_cluster.items()],
+                ignore_index=True,
+            )
+        else:
+            response.status = 204
+    except Exception as e:
+        print(f"Exception occured while finding regression: {e}")
+        response.status = 500
+
+    return reponse.to_dict()
