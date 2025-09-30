@@ -314,7 +314,13 @@ class ConnectToMySql(DatabaseConnection):
             r1.result AS result,
             r1.score AS score,
             r1.reason AS reason,
-            r1.tags as tags
+            r1.tags as tags,
+            r1.converter_options as converter_options,
+            r1.quantize_options as quantize_options,
+            r1.inference_options as inference_options,
+            r1.graph_prepare as graph_prepare,
+            r1.graph_execute as graph_execute,
+            r1.jira_id as jira_id
                            
         FROM result r1
         JOIN result r2 ON r1.tc_uuid = r2.tc_uuid

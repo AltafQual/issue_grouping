@@ -149,16 +149,23 @@ async def get_regression_between_two_tests(regression_object: Regression) -> Dic
                 ignore_index=True,
             )
 
+            clustered_df = clustered_df.drop(
+                columns=[col for col in [
+                    DataFrameKeys.embeddings_key,
+                    DataFrameKeys.bins,
+                    DataFrameKeys.error_logs_length,
+                    DataFrameKeys.cluster_type_int,
+                    DataFrameKeys.preprocessed_text_key,
+                    DataFrameKeys.grouped_from_faiss,
+                ] if col in clustered_df.columns]
+            )
             grouped = clustered_df.groupby(DataFrameKeys.cluster_name)
             for cluster_name, group in grouped:
-                response.data[cluster_name] = {
-                    "tc_uuids": group["tc_uuid"].tolist(),
-                    "runtimes": group["runtime"].tolist(),
-                    "soc_names": group["soc_name"].tolist(),
-                }
+                response.data[cluster_name] = group.to_dict(orient="records")
 
         else:
             response.status = 204
+
     except Exception as e:
         print(f"Exception occured while finding regression: {e}")
         response.status = 500
@@ -175,41 +182,31 @@ async def get_two_run_ids_cluster_info(cluster_info_object: ClusterInfo) -> Dict
         if not results.empty:
             new_cluster = await helpers.async_sequential_process_by_type(results)
             for test_type, df in new_cluster.items():
+                df = df.drop(
+                    columns=[col for col in [
+                        DataFrameKeys.embeddings_key,
+                        DataFrameKeys.bins,
+                        DataFrameKeys.error_logs_length,
+                        DataFrameKeys.cluster_type_int,
+                        DataFrameKeys.preprocessed_text_key,
+                        DataFrameKeys.grouped_from_faiss,
+                    ] if col in df.columns]
+                )
                 for runtime, runtime_df in df.groupby("runtime"):
                     for cluster_name, cluster_df in runtime_df.groupby(DataFrameKeys.cluster_name):
-                        new_entry = [
-                            {
-                                "tc_uuid": row["tc_uuid"],
-                                "soc_name": row["soc_name"],
-                                "runtime": row["runtime"],
-                                "cluster_name": row[DataFrameKeys.cluster_name],
-                            }
-                            for _, row in cluster_df.iterrows()
-                        ]
+                        new_entry = cluster_df.to_dict(orient="records")
 
                         response.type.setdefault(test_type, {})
-                        if test_type.lower() not in {"converter", "quantizer", "savecontext"}:
-                            response.type[test_type].setdefault(runtime, {})
-                            response.type[test_type][runtime].setdefault(cluster_name, [])
-                            response.type[test_type][runtime][cluster_name].extend(new_entry)
-                        else:
-                            response.type[test_type].setdefault(cluster_name, [])
-                            response.type[test_type][cluster_name].extend(new_entry)
+                        response.type[test_type].setdefault(runtime, {})
+                        response.type[test_type][runtime].setdefault(cluster_name, [])
+                        response.type[test_type][runtime][cluster_name].extend(new_entry)
 
                 for model_name, model_df in df.groupby("name"):
                     response.model.setdefault(model_name, [])
-                    model_cluster_details = [
-                        {
-                            "tc_uuid": row["tc_uuid"],
-                            "soc_name": row["soc_name"],
-                            "runtime": row["runtime"],
-                            "cluster_name": row[DataFrameKeys.cluster_name],
-                        }
-                        for _, row in model_df.iterrows()
-                    ]
+                    model_cluster_details = model_df.to_dict(orient="records")
                     response.model[model_name].extend(model_cluster_details)
         else:
-            response.status = 204
+            response.status = 404
 
     except Exception as e:
         print(f"Exception occured while finding regression: {e}")

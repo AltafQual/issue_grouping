@@ -354,9 +354,11 @@ def update_error_map_qgenie_table(df):
 def get_error_group_id(error_type: str, runtime: str, cluster_name: str) -> str:
     return sql_connection.get_error_group_id(error_type, runtime, cluster_name)
 
+
 @execution_timer
 def find_regressions_between_two_tests(tc_id_a: str, tc_id_b: str) -> str:
     return sql_connection.get_regressions(tc_id_a, tc_id_b)
+
 
 def cache_tc_id(func):
     @wraps(func)
@@ -450,6 +452,7 @@ async def concurrent_process_by_type(df, update_faiss_and_sql=False):
         analyzer.save_as_faiss(faiss_runner, clustered_df)
 
     return results
+
 
 async def async_sequential_process_by_type(df, update_faiss_and_sql=False):
     from src.failure_analyzer import FailureAnalyzer
