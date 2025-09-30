@@ -32,12 +32,33 @@ class Regression(BaseModel):
     run_id_b: str = Field(description="second valid test case TcUUID")
 
 
+class ClusterInfo(BaseModel):
+    run_id_a: str = Field(description="first valid test case TcUUID")
+    run_id_b: str = Field(description="second valid test case TcUUID")
+
+
 class RegressionResponse(BaseModel):
     status: int = 200
     data: Dict[str, Any] = {}
 
     def add(self, key: str, value: Any) -> None:
         self.data[key] = value
+
+    def to_dict(self) -> Dict:
+        return self.dict()
+
+
+class ClusterInfoResponse(BaseModel):
+    status: int = 200
+    type: Dict[str, Any] = {}
+    model: Dict[str, Any] = {}
+
+    def add(self, key: str, value: Any, data_type: str) -> None:
+        if data_type == "type":
+            self.type[key] = value
+        elif data_type == "model":
+            self.model[key] = value
+        print(f"Data: {key}: {value} not added valid `data_type` not provided")
 
     def to_dict(self) -> Dict:
         return self.dict()
@@ -115,8 +136,8 @@ async def get_error_cluster_name(tc_id_object: InitiateIssueGrouping, background
     return {"status": f"Successfully Started processing: {tc_id}"}
 
 
-@app.post("/api/regression_between_two_tests/", response_model = RegressionResponse)
-async def get_error_cluster_name(regression_object: Regression) -> Dict:
+@app.post("/api/regression_between_two_tests/", response_model=RegressionResponse)
+async def get_regression_between_two_tests(regression_object: Regression) -> Dict:
     response = RegressionResponse()
     try:
         results = helpers.find_regressions_between_two_tests(regression_object.run_id_a, regression_object.run_id_b)
@@ -127,17 +148,69 @@ async def get_error_cluster_name(regression_object: Regression) -> Dict:
                 [df.assign(cluster_type=cluster_name) for cluster_name, df in new_cluster.items()],
                 ignore_index=True,
             )
-            
+
             grouped = clustered_df.groupby(DataFrameKeys.cluster_name)
             for cluster_name, group in grouped:
                 response.data[cluster_name] = {
                     "tc_uuids": group["tc_uuid"].tolist(),
                     "runtimes": group["runtime"].tolist(),
-                    "soc_names": group['soc_name'].tolist()
+                    "soc_names": group["soc_name"].tolist(),
                 }
 
         else:
             response.status = 204
+    except Exception as e:
+        print(f"Exception occured while finding regression: {e}")
+        response.status = 500
+
+    return response.to_dict()
+
+
+@app.post("/api/get_two_run_ids_cluster_info/", response_model=ClusterInfoResponse)
+async def get_two_run_ids_cluster_info(cluster_info_object: ClusterInfo) -> Dict:
+    response = ClusterInfoResponse()
+    try:
+        results = helpers.find_regressions_between_two_tests(cluster_info_object.run_id_a, cluster_info_object.run_id_b)
+
+        if not results.empty:
+            new_cluster = await helpers.async_sequential_process_by_type(results)
+            for test_type, df in new_cluster.items():
+                for runtime, runtime_df in df.groupby("runtime"):
+                    for cluster_name, cluster_df in runtime_df.groupby(DataFrameKeys.cluster_name):
+                        new_entry = [
+                            {
+                                "tc_uuid": row["tc_uuid"],
+                                "soc_name": row["soc_name"],
+                                "runtime": row["runtime"],
+                                "cluster_name": row[DataFrameKeys.cluster_name],
+                            }
+                            for _, row in cluster_df.iterrows()
+                        ]
+
+                        response.type.setdefault(test_type, {})
+                        if test_type.lower() not in {"converter", "quantizer", "savecontext"}:
+                            response.type[test_type].setdefault(runtime, {})
+                            response.type[test_type][runtime].setdefault(cluster_name, [])
+                            response.type[test_type][runtime][cluster_name].extend(new_entry)
+                        else:
+                            response.type[test_type].setdefault(cluster_name, [])
+                            response.type[test_type][cluster_name].extend(new_entry)
+
+                for model_name, model_df in df.groupby("name"):
+                    response.model.setdefault(model_name, [])
+                    model_cluster_details = [
+                        {
+                            "tc_uuid": row["tc_uuid"],
+                            "soc_name": row["soc_name"],
+                            "runtime": row["runtime"],
+                            "cluster_name": row[DataFrameKeys.cluster_name],
+                        }
+                        for _, row in model_df.iterrows()
+                    ]
+                    response.model[model_name].extend(model_cluster_details)
+        else:
+            response.status = 204
+
     except Exception as e:
         print(f"Exception occured while finding regression: {e}")
         response.status = 500
