@@ -1,5 +1,4 @@
 import asyncio
-import logging
 from typing import List, Optional
 
 import numpy as np
@@ -13,26 +12,16 @@ from src.constants import ClusterSpecificKeys, DataFrameKeys, ErrorLogConfigurat
 from src.data_loader import ExcelLoader
 from src.embeddings import QGenieBGEM3Embedding
 from src.faiss_db import FaissIVFFlatIndex
+from src.logger import AppLogger
 from src.qgenie import generate_cluster_name, qgenie_post_processing
 
 
 class FailureAnalyzer:
     def __init__(self, embedding_model=None):
         """Initialize the failure analyzer with configurable parameters."""
-        self.logger = self._setup_logger()
+        self.logger = AppLogger().get_logger(__name__)
         self.logger.info("loading model")
         self.embedding_model = QGenieBGEM3Embedding()
-
-    def _setup_logger(self) -> logging.Logger:
-        """Set up a logger for the analyzer."""
-        logger = logging.getLogger(__name__)
-        if not logger.handlers:
-            handler = logging.StreamHandler()
-            formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-            handler.setFormatter(formatter)
-            logger.addHandler(handler)
-            logger.setLevel(logging.INFO)
-        return logger
 
     def load_data(self, file_path: str = None, st_obj=None, tc_id=None) -> pd.DataFrame:
         """Load data from the specified Excel file."""
@@ -230,5 +219,5 @@ class FailureAnalyzer:
         save_data.to_excel(output_path, index=False)
         self.logger.info(f"Results saved to {output_path}")
 
-    def save_as_faiss(self, db: "FaissIVFFlatIndex", data: pd.DataFrame):
-        db.save(data)
+    def save_as_faiss(self, db: "FaissIVFFlatIndex", data: pd.DataFrame, run_id=None):
+        db.save(data, run_id=run_id)

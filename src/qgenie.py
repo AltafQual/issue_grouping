@@ -17,8 +17,9 @@ from qgenie.integrations.langchain import QGenieChat
 from src import helpers, prompts
 from src.constants import QGENEIE_API_KEY, ClusterSpecificKeys, DataFrameKeys
 from src.execution_timer_log import execution_timer
+from src.logger import AppLogger
 
-logger = logging.getLogger(__name__)
+logger = AppLogger().get_logger(__name__)
 
 
 class CustomQGenieChat(QGenieChat):
@@ -38,8 +39,8 @@ class CustomQGenieChat(QGenieChat):
                 response = self.client.chat(messages=message_dicts, **params)
                 return self._create_chat_result(response)
             except Exception as e:
-                logger.error(f"Error generating response: {e}")
                 logger.error(traceback.format_exc())
+                logger.error(f"for messages: {message_dicts}")
                 retry_count -= 1
                 time.sleep(4)
                 continue
@@ -64,8 +65,8 @@ class CustomQGenieChat(QGenieChat):
                 response = await self.async_client.chat(messages=message_dicts, **params)
                 return self._create_chat_result(response)
             except Exception as e:
-                logger.error(f"Error generating response: {e}")
                 logger.error(traceback.format_exc())
+                logger.error(f"for messages: {message_dicts}")
                 retry_count -= 1
                 await asyncio.sleep(4)
                 continue
@@ -93,10 +94,28 @@ class ReclusterResult(BaseModel):
     clusters: list[dict] = Field(description="List of clusters with name and log indices")
 
 
+class ClassifyClusterGroup(BaseModel):
+    environment_issue: bool = Field(description="Whether this cluster is an environment issue or not")
+    code_failure: bool = Field(description="Whether this cluster is a code failure or not")
+    sdk_issue: bool = Field(description="Whether this is a sdk related issue or not")
+    reasoning: str = Field(description="Reasoning behind the classification")
+
+
 parser = JsonOutputParser(pydantic_object=ClusteringResult)
 merge_parser = JsonOutputParser(pydantic_object=MergeResult)
 recluster_parser = JsonOutputParser(pydantic_object=ReclusterResult)
 nameparser = JsonOutputParser(pydantic_object=NameClusteringResult)
+classify_cluster_based_on_type = JsonOutputParser(pydantic_object=ClassifyClusterGroup)
+
+
+@execution_timer
+def classify_cluster_based_of_type(cluster_logs: list[str]) -> dict:
+    prompt_template = ChatPromptTemplate.from_messages(
+        [("system", prompts.CLASSIFY_CLUSTER_TYPE_SYS_MESSAGE), ("human", prompts.CLASSIFY_CLUSTER_TYPE_LOG_MESSAGE)]
+    )
+    chain = prompt_template | model | classify_cluster_based_on_type
+    result = chain.invoke({"logs": cluster_logs})
+    return result
 
 
 @execution_timer
@@ -181,6 +200,65 @@ def merge_clusters(
     response = chain.invoke({"id_a": cluster_id_a, "logs_a": logs_a, "id_b": cluster_id_b, "logs_b": logs_b})
 
     return response
+
+
+@execution_timer
+async def async_merge_clusters(
+    df: pd.DataFrame,
+    cluster_id_a: int = None,
+    cluster_id_b: int = None,
+    cluster_name_a: str = None,
+    cluster_name_b: str = None,
+) -> MergeResult:
+    def chunk_logs(logs, chunk_size=30, overlap=10):
+        start = 0
+        while start < len(logs):
+            end = start + chunk_size
+            yield logs[start:end]
+            start = end - overlap
+
+    async def process_chunk(chunk, id_a, id_b):
+        return await chain.ainvoke({"id_a": id_a, "logs_a": chunk["logs_a"], "id_b": id_b, "logs_b": chunk["logs_b"]})
+
+    # Select clusters
+    if cluster_id_a and cluster_id_b:
+        df_a = df[df[DataFrameKeys.cluster_type_int] == cluster_id_a]
+        df_b = df[df[DataFrameKeys.cluster_type_int] == cluster_id_b]
+    else:
+        df_a = df[df[DataFrameKeys.cluster_name] == cluster_name_a]
+        df_b = df[df[DataFrameKeys.cluster_name] == cluster_name_b]
+
+    logs_a = [
+        {"index": int(idx), "error log": row[DataFrameKeys.preprocessed_text_key]} for idx, row in df_a.iterrows()
+    ]
+    logs_b = [
+        {"index": int(idx), "error log": row[DataFrameKeys.preprocessed_text_key]} for idx, row in df_b.iterrows()
+    ]
+
+    # Prepare prompt chain
+    chain = ChatPromptTemplate.from_template(prompts.MERGE_PROMPT_TEMPLATE) | model | merge_parser
+
+    # Chunk logs to avoid token overflow
+    logs_a_chunks = list(chunk_logs(logs_a))
+    logs_b_chunks = list(chunk_logs(logs_b))
+
+    tasks = []
+    for chunk_a in logs_a_chunks:
+        for chunk_b in logs_b_chunks:
+            tasks.append(process_chunk({"logs_a": chunk_a, "logs_b": chunk_b}, cluster_id_a, cluster_id_b))
+
+    responses = await asyncio.gather(*tasks)
+
+    name = ""
+    if responses:
+        name = responses[0].get("")
+        indices = set()
+        for response in responses:
+            indices.add(*[int(idx) for idx in response.get("outlier_indices", [])])
+
+        indices = list(indices)
+
+    return {"merged_name": name, "outlier_indices": indices}
 
 
 @execution_timer

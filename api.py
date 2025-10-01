@@ -24,17 +24,17 @@ class ErrorLog(BaseModel):
 
 
 class InitiateIssueGrouping(BaseModel):
-    tc_id: str = Field(description="TC UUID of the test you want to run issue grouping on")
+    run_id: str = Field(description="Run ID of the test you want to run issue grouping on")
 
 
 class Regression(BaseModel):
-    run_id_a: str = Field(description="first valid test case TcUUID")
-    run_id_b: str = Field(description="second valid test case TcUUID")
+    run_id_a: str = Field(description="first valid test case Run ID")
+    run_id_b: str = Field(description="second valid test case Run ID")
 
 
 class ClusterInfo(BaseModel):
-    run_id_a: str = Field(description="first valid test case TcUUID")
-    run_id_b: str = Field(description="second valid test case TcUUID")
+    run_id_a: str = Field(description="first valid test case Run ID")
+    run_id_b: str = Field(description="second valid test case Run ID")
 
 
 class RegressionResponse(BaseModel):
@@ -127,13 +127,15 @@ async def get_error_cluster_name(error_object: ErrorLog) -> Dict:
 
 @app.post("/api/initiate_issue_grouping/")
 async def get_error_cluster_name(tc_id_object: InitiateIssueGrouping, background_tasks: BackgroundTasks) -> Dict:
-    tc_id = tc_id_object.tc_id
-    data = helpers.sql_connection.fetch_result_based_on_runid(tc_id)
+    run_id = tc_id_object.run_id
+    data = helpers.sql_connection.fetch_result_based_on_runid(run_id)
     if data.empty:
-        return {"status": f"Error: No data found for the TC UUID: {tc_id}"}
+        return {"status": f"Error: No data found for the Run ID: {run_id}"}
 
-    background_tasks.add_task(helpers.async_sequential_process_by_type, data, update_faiss_and_sql=True)
-    return {"status": f"Successfully Started processing: {tc_id}"}
+    background_tasks.add_task(
+        helpers.async_sequential_process_by_type, data, update_faiss_and_sql=True, run_id=run_id.strip()
+    )
+    return {"status": f"Successfully Started processing: {run_id}"}
 
 
 @app.post("/api/regression_between_two_tests/", response_model=RegressionResponse)
@@ -150,14 +152,18 @@ async def get_regression_between_two_tests(regression_object: Regression) -> Dic
             )
 
             clustered_df = clustered_df.drop(
-                columns=[col for col in [
-                    DataFrameKeys.embeddings_key,
-                    DataFrameKeys.bins,
-                    DataFrameKeys.error_logs_length,
-                    DataFrameKeys.cluster_type_int,
-                    DataFrameKeys.preprocessed_text_key,
-                    DataFrameKeys.grouped_from_faiss,
-                ] if col in clustered_df.columns]
+                columns=[
+                    col
+                    for col in [
+                        DataFrameKeys.embeddings_key,
+                        DataFrameKeys.bins,
+                        DataFrameKeys.error_logs_length,
+                        DataFrameKeys.cluster_type_int,
+                        DataFrameKeys.preprocessed_text_key,
+                        DataFrameKeys.grouped_from_faiss,
+                    ]
+                    if col in clustered_df.columns
+                ]
             )
             grouped = clustered_df.groupby(DataFrameKeys.cluster_name)
             for cluster_name, group in grouped:
@@ -183,14 +189,18 @@ async def get_two_run_ids_cluster_info(cluster_info_object: ClusterInfo) -> Dict
             new_cluster = await helpers.async_sequential_process_by_type(results)
             for test_type, df in new_cluster.items():
                 df = df.drop(
-                    columns=[col for col in [
-                        DataFrameKeys.embeddings_key,
-                        DataFrameKeys.bins,
-                        DataFrameKeys.error_logs_length,
-                        DataFrameKeys.cluster_type_int,
-                        DataFrameKeys.preprocessed_text_key,
-                        DataFrameKeys.grouped_from_faiss,
-                    ] if col in df.columns]
+                    columns=[
+                        col
+                        for col in [
+                            DataFrameKeys.embeddings_key,
+                            DataFrameKeys.bins,
+                            DataFrameKeys.error_logs_length,
+                            DataFrameKeys.cluster_type_int,
+                            DataFrameKeys.preprocessed_text_key,
+                            DataFrameKeys.grouped_from_faiss,
+                        ]
+                        if col in df.columns
+                    ]
                 )
                 for runtime, runtime_df in df.groupby("runtime"):
                     for cluster_name, cluster_df in runtime_df.groupby(DataFrameKeys.cluster_name):

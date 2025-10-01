@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import json
 import logging
 import os
 import random
@@ -16,19 +17,27 @@ from rapidfuzz import fuzz
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.neighbors import LocalOutlierFactor
 
-from src.constants import ClusterSpecificKeys, DataFrameKeys, ErrorLogConfigurations, regex_based_filteration_patterns
+from src.constants import (
+    ClusterSpecificKeys,
+    DataFrameKeys,
+    ErrorLogConfigurations,
+    FaissConfigurations,
+    regex_based_filteration_patterns
+)
 from src.db_connections import ConnectToMySql
 from src.execution_timer_log import execution_timer
 from src.faiss_db import FaissIVFFlatIndex, SearchInExistingFaiss
+from src.logger import AppLogger
 from src.qgenie import generate_cluster_name
 
-logger = logging.getLogger(__name__)
+logger = AppLogger().get_logger(__name__)
 sql_connection = ConnectToMySql()
 faiss_runner = FaissIVFFlatIndex()
 
 # in-memory tc id data cache
 _tc_id_cache = {}
 parquet_file = "run_ids.parquet"
+scheduler = BackgroundScheduler()
 
 
 def add_hashed_unique_id(df: pd.DataFrame) -> pd.DataFrame:
@@ -356,7 +365,7 @@ def get_error_group_id(error_type: str, runtime: str, cluster_name: str) -> str:
 
 
 @execution_timer
-def find_regressions_between_two_tests(tc_id_a: str, tc_id_b: str) -> str:
+def find_regressions_between_two_tests(tc_id_a: str, tc_id_b: str) -> pd.DataFrame:
     return sql_connection.get_regressions(tc_id_a, tc_id_b)
 
 
@@ -384,13 +393,38 @@ def tc_id_scheduler():
         run_ids = sql_connection.fetch_runids()
         run_ids.to_parquet(parquet_file)
         logger.info("Background task updated Parquet file")
+        asyncio.run(process_tc_ids_async_bg_job(run_ids))
 
-    scheduler = BackgroundScheduler()
-    scheduler.add_job(update_tc_ids, "interval", hours=6)
+    scheduler.add_job(update_tc_ids, "interval", hours=10)
     scheduler.start()
 
 
-async def async_process_by_type(df, update_faiss_and_sql=False):
+async def process_tc_ids_async_bg_job(run_ids):
+    from src.failure_analyzer import FailureAnalyzer
+
+    logger.info("processing the parquet and updating faiss as background job")
+
+    run_ids_list = run_ids["testplan_id"].tolist()
+    for run_id in run_ids_list:
+        metadata = {}
+        processed_run_ids_path = os.path.join(FaissConfigurations.base_path, "processed_runids.json")
+        processed_run_ids = []
+        if os.path.isfile(processed_run_ids_path):
+            processed_run_ids = json.loads(open(processed_run_ids_path).read())
+
+        if run_id not in processed_run_ids:
+            logger.info(f"Processing: {run_id}")
+            await async_sequential_process_by_type(
+                FailureAnalyzer().load_data(tc_id=run_id), update_faiss_and_sql=True, run_id=run_id
+            )
+            await asyncio.sleep(5)
+        else:
+            logger.info(f"Skipping processing: {run_id} already processed")
+
+    logger.info("Finished background job processing of TC IDs")
+
+
+async def async_process_by_type(df, update_faiss_and_sql=False, run_id=None):
     from src.failure_analyzer import FailureAnalyzer
 
     results = {}
@@ -405,12 +439,12 @@ async def async_process_by_type(df, update_faiss_and_sql=False):
     tasks = [process_group(t, group_df) for t, group_df in df.groupby("type")]
     await asyncio.gather(*tasks)
 
-    if update_faiss_and_sql:
+    if results and update_faiss_and_sql:
         clustered_df = pd.concat(
             [df.assign(cluster_type=cluster_name) for cluster_name, df in results.items()],
             ignore_index=True,
         )
-        analyzer.save_as_faiss(faiss_runner, clustered_df)
+        analyzer.save_as_faiss(faiss_runner, clustered_df, run_id=run_id)
 
     return results
 
@@ -425,7 +459,7 @@ def run_analysis_in_process(group_df):
     return asyncio.run(run())
 
 
-async def concurrent_process_by_type(df, update_faiss_and_sql=False):
+async def concurrent_process_by_type(df, update_faiss_and_sql=False, run_id=None):
     results = {}
 
     logger.info(f"All types in data: {df.type.unique()}")
@@ -441,7 +475,7 @@ async def concurrent_process_by_type(df, update_faiss_and_sql=False):
     for (t, _), result in zip(df.groupby("type"), analysis_results):
         results[t] = result
 
-    if update_faiss_and_sql:
+    if results and update_faiss_and_sql:
         from src.failure_analyzer import FailureAnalyzer
 
         clustered_df = pd.concat(
@@ -449,12 +483,12 @@ async def concurrent_process_by_type(df, update_faiss_and_sql=False):
             ignore_index=True,
         )
         analyzer = FailureAnalyzer()
-        analyzer.save_as_faiss(faiss_runner, clustered_df)
+        analyzer.save_as_faiss(faiss_runner, clustered_df, run_id=run_id)
 
     return results
 
 
-async def async_sequential_process_by_type(df, update_faiss_and_sql=False):
+async def async_sequential_process_by_type(df, update_faiss_and_sql=False, run_id=None):
     from src.failure_analyzer import FailureAnalyzer
 
     results = {}
@@ -470,11 +504,11 @@ async def async_sequential_process_by_type(df, update_faiss_and_sql=False):
         logger.info(f"Processing type: {t}  with {len(group_df)} rows")
         await process_group(t, group_df)
 
-    if update_faiss_and_sql:
+    if results and update_faiss_and_sql:
         clustered_df = pd.concat(
             [df.assign(cluster_type=cluster_name) for cluster_name, df in results.items()],
             ignore_index=True,
         )
-        analyzer.save_as_faiss(faiss_runner, clustered_df)
+        analyzer.save_as_faiss(faiss_runner, clustered_df, run_id=run_id)
 
     return results

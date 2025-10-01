@@ -9,7 +9,6 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics.pairwise import cosine_similarity
 
-from src import helpers as h
 from src.constants import ClusterSpecificKeys, DataFrameKeys, FaissConfigurations
 from src.embeddings import QGenieBGEM3Embedding
 
@@ -45,6 +44,7 @@ class FaissIVFFlatIndex(EmbeddingsDB):
         new_embeddings_grouped: pd.Series,
         faiss_dir_path: str = FaissConfigurations.base_path,
         similarity_threshold: float = 0.95,
+        run_id=None,
     ):
         d = 1024
         new_cluster_names = new_embeddings_grouped.index.tolist()
@@ -62,7 +62,7 @@ class FaissIVFFlatIndex(EmbeddingsDB):
         existing_embeddings = faiss_db.reconstruct_n(0, faiss_db.ntotal)
         existing_embeddings = np.array(existing_embeddings)
         if not metadata:
-            metadata = {"cluster_names": []}
+            metadata = {"cluster_names": [], "run_ids": []}
 
         print(f"Existing cluster names: {existing_cluster_names}, new cluster names: {new_cluster_names}")
         merged_embeddings = list(existing_embeddings)
@@ -97,18 +97,34 @@ class FaissIVFFlatIndex(EmbeddingsDB):
         # Save updated index and metadata
         faiss.write_index(faiss_db, os.path.join(base_path, "index.faiss").lower())
         metadata["cluster_names"] = final_cluster_names
+        if run_id:
+            metadata["run_ids"].append(run_id)
         with open(os.path.join(base_path, "metadata.json"), "w") as f:
             f.write(json.dumps(metadata, indent=3))
 
-    def save(self, dataframe: pd.DataFrame, faiss_dir_path: str = FaissConfigurations.base_path):
+    def save(self, dataframe: pd.DataFrame, faiss_dir_path: str = FaissConfigurations.base_path, run_id=None):
+        from src.helpers import update_error_map_qgenie_table
+
+        # save the run id to global processed run ids list
+        os.makedirs(faiss_dir_path, exist_ok=True)
+        if "processed_runids.json" not in os.listdir(faiss_dir_path):
+            processed_runids = [run_id]
+        else:
+            processed_runids = json.loads(open(os.path.join(faiss_dir_path, "processed_runids.json")).read())
+            processed_runids.append(run_id)
+
+        with open(os.path.join(faiss_dir_path, "processed_runids.json"), "w") as f:
+            f.write(json.dumps(processed_runids, indent=3))
+
         d = 1024
         for t, df in dataframe.groupby("type"):
             metadata = {}
+            metadata.setdefault("run_ids", [])
             print(f"Saving FAISS for type: {t}")
             filtered_df = df[df[DataFrameKeys.embeddings_key].notna()]
 
             if not filtered_df.empty:
-                h.update_error_map_qgenie_table(filtered_df)
+                update_error_map_qgenie_table(filtered_df)
                 embeddings_grouped = filtered_df.groupby(DataFrameKeys.cluster_name)[
                     DataFrameKeys.embeddings_key
                 ].apply(lambda x: np.mean(np.vstack(x), axis=0))
@@ -127,18 +143,18 @@ class FaissIVFFlatIndex(EmbeddingsDB):
                     faiss_db.add(embeddings)
                     faiss_db.nprobe = 100
                     base_path = os.path.join(faiss_dir_path, f"{t}_faiss")
-
-                    os.makedirs(faiss_dir_path, exist_ok=True)
                     os.makedirs(base_path, exist_ok=True)
 
                     faiss.write_index(faiss_db, os.path.join(base_path, "index.faiss").lower())
 
+                    if run_id:
+                        metadata["run_ids"] = [run_id]
                     with open(os.path.join(base_path, "metadata.json"), "w") as f:
                         f.write(json.dumps(metadata, indent=3))
                 else:
                     if not embeddings_grouped.empty:
                         print(f"Existing FAISS index found for type: {t}. Updating data")
-                        self.update(t, filtered_df, embeddings_grouped, faiss_dir_path)
+                        self.update(t, filtered_df, embeddings_grouped, faiss_dir_path, run_id=run_id)
 
     def load(self, type: str):
         db_path = os.path.join(FaissConfigurations.base_path, f"{type}_faiss")

@@ -81,3 +81,22 @@ Logs:
 ```json
 {error_logs}
 """
+CLASSIFY_CLUSTER_TYPE_SYS_MESSAGE = """
+You are an expert in log analysis and classification. Your task is to analyze the provided error logs and classify them into one of the following categories:
+
+1. **Environment Issue**: Logs indicating timeouts during operations, such as connection timeouts, request timeouts, or process timeouts or even some variable missing in the environment
+2. **Code related Issue**: all the error related to failure of test due to bug in code, indexing error, value error are some example
+3. **SDK related Issue**: logs related to hardware failures, sub modules failed or any type of failure in legacy code. All the errors which doesn't belong to either environment/code will fall in this category
+
+Return your response in the following JSON format:
+{{
+  "environment_issue": true/false,
+  "code_failure": true/false,
+  "sdk_issue": true/false,
+  "reasoning": "Brief explanation of why this classification was chosen"
+}}
+"""
+CLASSIFY_CLUSTER_TYPE_LOG_MESSAGE = """
+Below are the logs to classify:
+{logs}
+"""

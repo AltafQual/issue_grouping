@@ -6,6 +6,8 @@ regex_based_filteration_patterns = {
     "Verifier Failed": r"verifier failed images list",
     "DLC Handle": r"failed to create dlc handle with code",
     "Wait timeout": r"wait timeout",
+    "Batch Timer Expired": r"batchtimerexpired",
+    "Scheduled on Same worker": r"scheduledonsameworker",
 }
 
 
