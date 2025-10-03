@@ -8,6 +8,7 @@ import re
 from concurrent.futures import ProcessPoolExecutor
 from functools import wraps
 from io import BytesIO
+from apscheduler.schedulers.base import STATE_RUNNING
 
 import numpy as np
 import pandas as pd
@@ -386,7 +387,6 @@ def cache_tc_id(func):
 def get_tc_id_df(tc_id: str):
     return sql_connection.fetch_result_based_on_runid(tc_id)
 
-
 def tc_id_scheduler():
     def update_tc_ids():
         logger.info("Running tc ids updation background job")
@@ -394,6 +394,11 @@ def tc_id_scheduler():
         run_ids.to_parquet(parquet_file)
         logger.info("Background task updated Parquet file")
         asyncio.run(process_tc_ids_async_bg_job(run_ids))
+
+    
+    if scheduler.state == STATE_RUNNING:
+            logging.warning("Scheduler already running. Shutting down and restarting.")
+            scheduler.shutdown(wait=False)
 
     scheduler.add_job(update_tc_ids, "interval", hours=10)
     scheduler.start()
