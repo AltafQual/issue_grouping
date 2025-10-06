@@ -33,8 +33,8 @@ if "tc_ids_options" not in st.session_state:
         logger.info(f"Failed to load test case IDs: {str(e)}")
         st.session_state.tc_ids_options = pd.DataFrame()
 
-# if "started_scheduler" not in st.session_state:
-#     st.session_state.started_scheduler = tc_id_scheduler()
+if "started_scheduler" not in st.session_state:
+    st.session_state.started_scheduler = tc_id_scheduler()
 
 if "processed_data" not in st.session_state:
     st.session_state.processed_data = False
