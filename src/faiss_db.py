@@ -183,7 +183,6 @@ class SearchInExistingFaiss(object):
     def __init__(self):
         self.base_path = FaissConfigurations.base_path
 
-    @lru_cache(maxsize=5)
     def _load_faiss(self, type: str) -> tuple:
         db_path = os.path.join(self.base_path, f"{type}_faiss")
         if os.path.exists(db_path):
