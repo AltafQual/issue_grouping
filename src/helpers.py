@@ -18,9 +18,13 @@ from rapidfuzz import fuzz
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.neighbors import LocalOutlierFactor
 
-from src.constants import (ClusterSpecificKeys, DataFrameKeys,
-                           ErrorLogConfigurations, FaissConfigurations,
-                           regex_based_filteration_patterns)
+from src.constants import (
+    ClusterSpecificKeys,
+    DataFrameKeys,
+    ErrorLogConfigurations,
+    FaissConfigurations,
+    regex_based_filteration_patterns,
+)
 from src.db_connections import ConnectToMySql
 from src.execution_timer_log import execution_timer
 from src.faiss_db import FaissIVFFlatIndex, SearchInExistingFaiss
@@ -389,18 +393,25 @@ def get_tc_id_df(tc_id: str):
 
 def tc_id_scheduler():
     def update_tc_ids():
-        logger.info("Running tc ids updation background job")
+        logger.info("Running TC IDs updation background job")
         run_ids = sql_connection.fetch_runids()
         run_ids.to_parquet(parquet_file)
         logger.info("Background task updated Parquet file")
         asyncio.run(process_tc_ids_async_bg_job(run_ids))
 
-    if scheduler.state == STATE_RUNNING:
-        logging.warning("Scheduler already running. Shutting down and restarting.")
-        scheduler.shutdown(wait=False)
+    job_id = "update_tc_ids_job"
 
-    scheduler.add_job(update_tc_ids, "interval", hours=10)
-    scheduler.start()
+    # Check if scheduler is running
+    if scheduler.state != STATE_RUNNING:
+        scheduler.start()
+
+    # Check if job is already scheduled
+    existing_job = scheduler.get_job(job_id)
+    if existing_job is None:
+        scheduler.add_job(update_tc_ids, "interval", hours=5, id=job_id)
+        logger.info("Scheduled TC ID update job.")
+    else:
+        logger.info("TC ID update job is already scheduled. Skipping re-scheduling.")
 
 
 @execution_timer

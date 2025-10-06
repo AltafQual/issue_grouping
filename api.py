@@ -69,6 +69,7 @@ class ClusterInfoResponse(BaseModel):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     asyncio.create_task(helpers.faiss_update_worker())
+    asyncio.create_task(asyncio.to_thread(helpers.tc_id_scheduler))
     yield
 
 
