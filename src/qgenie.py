@@ -250,15 +250,15 @@ async def async_merge_clusters(
 
     responses = await asyncio.gather(*tasks)
 
+    logger.info(f"Merged cluster response: {responses}")
     name = ""
+    indices = set()
     if responses and len(responses) > 1:
         name = responses[0].get("merged_name")
-        indices = set()
         for response in responses:
             indices.update([int(idx) for idx in response.get("outlier_indices", [])])
 
-        indices = list(indices)
-
+    indices = list(indices)
     return {"merged_name": name, "outlier_indices": indices}
 
 

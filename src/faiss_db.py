@@ -106,6 +106,9 @@ class FaissIVFFlatIndex(EmbeddingsDB):
             f.write(json.dumps(metadata, indent=3))
 
     def write_and_update_processed_runids(self, faiss_dir_path, run_id):
+        if not run_id:
+            return
+        
         # save the run id to global processed run ids list
         os.makedirs(faiss_dir_path, exist_ok=True)
         if "processed_runids.json" not in os.listdir(faiss_dir_path):
@@ -113,8 +116,7 @@ class FaissIVFFlatIndex(EmbeddingsDB):
         else:
             processed_runids = json.loads(open(os.path.join(faiss_dir_path, "processed_runids.json")).read())
 
-        if run_id:
-            processed_runids.append(run_id)
+        processed_runids.append(run_id)
 
         # Keep only the latest 1000 entries (drop the oldest 10 if exceeded)
         if len(processed_runids) > 1000:
@@ -167,9 +169,13 @@ class FaissIVFFlatIndex(EmbeddingsDB):
                         print(f"Existing FAISS index found for type: {t}. Updating data")
                         self.update(t, filtered_df, embeddings_grouped, faiss_dir_path, run_id=run_id)
 
-    def load(self, type: str):
+    def load(self, type: str, only_metadata = False):
         db_path = os.path.join(FaissConfigurations.base_path, f"{type}_faiss")
-        faiss_db = faiss.read_index(os.path.join(db_path, "index.faiss").lower())
+        
+        faiss_db = None
+        if only_metadata is False:
+            faiss_db = faiss.read_index(os.path.join(db_path, "index.faiss").lower())
+        
         metadata = json.loads(open(os.path.join(db_path, "metadata.json")).read())
         return faiss_db, metadata
 
