@@ -7,7 +7,8 @@ from typing import Any
 
 import pandas as pd
 from langchain.prompts import ChatPromptTemplate
-from langchain_core.callbacks import AsyncCallbackManagerForLLMRun, CallbackManagerForLLMRun
+from langchain_core.callbacks import (AsyncCallbackManagerForLLMRun,
+                                      CallbackManagerForLLMRun)
 from langchain_core.messages import BaseMessage
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.outputs import ChatResult
@@ -250,11 +251,11 @@ async def async_merge_clusters(
     responses = await asyncio.gather(*tasks)
 
     name = ""
-    if responses:
-        name = responses[0].get("")
+    if responses and len(responses) > 1:
+        name = responses[0].get("merged_name")
         indices = set()
         for response in responses:
-            indices.add(*[int(idx) for idx in response.get("outlier_indices", [])])
+            indices.update([int(idx) for idx in response.get("outlier_indices", [])])
 
         indices = list(indices)
 
@@ -287,7 +288,7 @@ def get_duplicate_clusters(results: dict) -> dict:
 
 
 @execution_timer
-def merge_duplicate_clusters(
+async def merge_duplicate_clusters(
     df: pd.DataFrame, duplicate_clusters: dict, cluster_results: dict
 ) -> tuple[pd.DataFrame, dict]:
     for duplicate_name, cluster_ids in duplicate_clusters.items():
@@ -296,7 +297,9 @@ def merge_duplicate_clusters(
 
         for next_cluster_id in cluster_ids[1:]:
             print(f"Merging {base_cluster_id} and {next_cluster_id} for name '{duplicate_name}'")
-            response = merge_clusters(df, cluster_id_a=base_cluster_id, cluster_id_b=next_cluster_id)
+
+            # TODO: getting input token exceed error, have to update this
+            response = await async_merge_clusters(df, cluster_id_a=base_cluster_id, cluster_id_b=next_cluster_id)
 
             # Update base cluster name
             cluster_results[base_cluster_id]["cluster_name"] = response["merged_name"]
@@ -470,7 +473,7 @@ async def qgenie_post_processing(df: pd.DataFrame) -> pd.DataFrame:
         analyzed_results = await get_clusters_name_and_misclassified_errors(df)
         if analyzed_results:
             duplicate_clusters = get_duplicate_clusters(analyzed_results)
-            df, analyzed_results = merge_duplicate_clusters(df, duplicate_clusters, analyzed_results)
+            df, analyzed_results = await merge_duplicate_clusters(df, duplicate_clusters, analyzed_results)
             df = give_cluster_names_and_reassign_misc_clusters(df, analyzed_results)
 
         df = helpers.detect_cluster_outlier(df)

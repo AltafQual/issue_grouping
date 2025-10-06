@@ -1,3 +1,4 @@
+import asyncio
 import json
 import math
 import os
@@ -9,7 +10,8 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics.pairwise import cosine_similarity
 
-from src.constants import ClusterSpecificKeys, DataFrameKeys, FaissConfigurations
+from src.constants import (ClusterSpecificKeys, DataFrameKeys,
+                           FaissConfigurations)
 from src.embeddings import QGenieBGEM3Embedding
 
 
@@ -58,11 +60,12 @@ class FaissIVFFlatIndex(EmbeddingsDB):
         existing_cluster_names = []
 
         faiss_db, metadata = self.load(type)
-        existing_cluster_names = metadata.get("cluster_names", [])
-        existing_embeddings = faiss_db.reconstruct_n(0, faiss_db.ntotal)
-        existing_embeddings = np.array(existing_embeddings)
         if not metadata:
             metadata = {"cluster_names": [], "run_ids": []}
+
+        existing_cluster_names = metadata.get("cluster_names")
+        existing_embeddings = faiss_db.reconstruct_n(0, faiss_db.ntotal)
+        existing_embeddings = np.array(existing_embeddings)
 
         print(f"Existing cluster names: {existing_cluster_names}, new cluster names: {new_cluster_names}")
         merged_embeddings = list(existing_embeddings)
@@ -102,20 +105,28 @@ class FaissIVFFlatIndex(EmbeddingsDB):
         with open(os.path.join(base_path, "metadata.json"), "w") as f:
             f.write(json.dumps(metadata, indent=3))
 
-    def save(self, dataframe: pd.DataFrame, faiss_dir_path: str = FaissConfigurations.base_path, run_id=None):
-        from src.helpers import update_error_map_qgenie_table
-
+    def write_and_update_processed_runids(self, faiss_dir_path, run_id):
         # save the run id to global processed run ids list
         os.makedirs(faiss_dir_path, exist_ok=True)
         if "processed_runids.json" not in os.listdir(faiss_dir_path):
-            processed_runids = [run_id]
+            processed_runids = []
         else:
             processed_runids = json.loads(open(os.path.join(faiss_dir_path, "processed_runids.json")).read())
+
+        if run_id:
             processed_runids.append(run_id)
+
+        # Keep only the latest 1000 entries (drop the oldest 10 if exceeded)
+        if len(processed_runids) > 1000:
+            processed_runids = processed_runids[10:]
 
         with open(os.path.join(faiss_dir_path, "processed_runids.json"), "w") as f:
             f.write(json.dumps(processed_runids, indent=3))
 
+    def save(self, dataframe: pd.DataFrame, faiss_dir_path: str = FaissConfigurations.base_path, run_id=None):
+        from src.helpers import update_error_map_qgenie_table
+
+        self.write_and_update_processed_runids(faiss_dir_path, run_id)
         d = 1024
         for t, df in dataframe.groupby("type"):
             metadata = {}

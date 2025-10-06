@@ -9,20 +9,15 @@ import streamlit as st
 
 from src.constants import DataFrameKeys
 from src.failure_analyzer import FailureAnalyzer
-from src.helpers import (
-    async_process_by_type,
-    concurrent_process_by_type,
-    async_sequential_process_by_type,
-    create_excel_with_clusters,
-    faiss_runner,
-    get_tc_ids_from_sql,
-    tc_id_scheduler,
-)
+from src.helpers import (async_process_by_type,
+                         async_sequential_process_by_type,
+                         concurrent_process_by_type,
+                         create_excel_with_clusters, faiss_runner,
+                         get_tc_ids_from_sql, tc_id_scheduler)
 
 nest_asyncio.apply()
 ################################## Configurations and Global Streamlit Sessions ####################################
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-tc_id_scheduler()
 logger = logging.getLogger(__name__)
 
 
@@ -37,6 +32,9 @@ if "tc_ids_options" not in st.session_state:
         traceback.print_exc()
         logger.info(f"Failed to load test case IDs: {str(e)}")
         st.session_state.tc_ids_options = pd.DataFrame()
+
+if "started_scheduler" not in st.session_state:
+    st.session_state.started_scheduler = tc_id_scheduler()
 
 if "processed_data" not in st.session_state:
     st.session_state.processed_data = False

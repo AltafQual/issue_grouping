@@ -8,23 +8,19 @@ import re
 from concurrent.futures import ProcessPoolExecutor
 from functools import wraps
 from io import BytesIO
-from apscheduler.schedulers.base import STATE_RUNNING
 
 import numpy as np
 import pandas as pd
 import swifter
 from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.schedulers.base import STATE_RUNNING
 from rapidfuzz import fuzz
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.neighbors import LocalOutlierFactor
 
-from src.constants import (
-    ClusterSpecificKeys,
-    DataFrameKeys,
-    ErrorLogConfigurations,
-    FaissConfigurations,
-    regex_based_filteration_patterns
-)
+from src.constants import (ClusterSpecificKeys, DataFrameKeys,
+                           ErrorLogConfigurations, FaissConfigurations,
+                           regex_based_filteration_patterns)
 from src.db_connections import ConnectToMySql
 from src.execution_timer_log import execution_timer
 from src.faiss_db import FaissIVFFlatIndex, SearchInExistingFaiss
@@ -34,11 +30,12 @@ from src.qgenie import generate_cluster_name
 logger = AppLogger().get_logger(__name__)
 sql_connection = ConnectToMySql()
 faiss_runner = FaissIVFFlatIndex()
+faiss_update_queue = asyncio.Queue()
+scheduler = BackgroundScheduler()
 
 # in-memory tc id data cache
 _tc_id_cache = {}
 parquet_file = "run_ids.parquet"
-scheduler = BackgroundScheduler()
 
 
 def add_hashed_unique_id(df: pd.DataFrame) -> pd.DataFrame:
@@ -156,7 +153,7 @@ def merge_similar_clusters(embeddings, labels, threshold=0.95):
 def reassign_unclustered_logs(df: pd.DataFrame, threshold=0.95):
     # Step 1: Compute centroids for all valid clusters
     valid_clusters = set(df[DataFrameKeys.cluster_name]) - {-1}
-    logger.info(f"Valid clusters for reassigning: {valid_clusters}")
+    logger.info(f"Valid clusters for reassigning unclustered logs: {valid_clusters}")
     if valid_clusters:
         centroids = {
             label: np.mean(
@@ -294,6 +291,7 @@ def create_excel_with_clusters(df: pd.DataFrame, cluster_column: str, columns_to
     return output
 
 
+@execution_timer
 def detect_cluster_outlier(df: pd.DataFrame) -> pd.DataFrame:
     clusters = set(df[DataFrameKeys.cluster_name]) - {-1}
     for cluster in clusters:
@@ -325,6 +323,7 @@ def detect_cluster_outlier(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+@execution_timer
 async def check_if_issue_alread_grouped(df: pd.DataFrame) -> pd.DataFrame:
     # Identify rows that are not yet grouped
     mask = df[DataFrameKeys.cluster_name].isin([ClusterSpecificKeys.non_grouped_key, np.nan])
@@ -387,6 +386,7 @@ def cache_tc_id(func):
 def get_tc_id_df(tc_id: str):
     return sql_connection.fetch_result_based_on_runid(tc_id)
 
+
 def tc_id_scheduler():
     def update_tc_ids():
         logger.info("Running tc ids updation background job")
@@ -395,15 +395,15 @@ def tc_id_scheduler():
         logger.info("Background task updated Parquet file")
         asyncio.run(process_tc_ids_async_bg_job(run_ids))
 
-    
     if scheduler.state == STATE_RUNNING:
-            logging.warning("Scheduler already running. Shutting down and restarting.")
-            scheduler.shutdown(wait=False)
+        logging.warning("Scheduler already running. Shutting down and restarting.")
+        scheduler.shutdown(wait=False)
 
     scheduler.add_job(update_tc_ids, "interval", hours=10)
     scheduler.start()
 
 
+@execution_timer
 async def process_tc_ids_async_bg_job(run_ids):
     from src.failure_analyzer import FailureAnalyzer
 
@@ -411,7 +411,6 @@ async def process_tc_ids_async_bg_job(run_ids):
 
     run_ids_list = run_ids["testplan_id"].tolist()
     for run_id in run_ids_list:
-        metadata = {}
         processed_run_ids_path = os.path.join(FaissConfigurations.base_path, "processed_runids.json")
         processed_run_ids = []
         if os.path.isfile(processed_run_ids_path):
@@ -429,6 +428,7 @@ async def process_tc_ids_async_bg_job(run_ids):
     logger.info("Finished background job processing of TC IDs")
 
 
+@execution_timer
 async def async_process_by_type(df, update_faiss_and_sql=False, run_id=None):
     from src.failure_analyzer import FailureAnalyzer
 
@@ -454,6 +454,7 @@ async def async_process_by_type(df, update_faiss_and_sql=False, run_id=None):
     return results
 
 
+@execution_timer
 def run_analysis_in_process(group_df):
     from src.failure_analyzer import FailureAnalyzer
 
@@ -464,35 +465,33 @@ def run_analysis_in_process(group_df):
     return asyncio.run(run())
 
 
+@execution_timer
 async def concurrent_process_by_type(df, update_faiss_and_sql=False, run_id=None):
     results = {}
 
     logger.info(f"All types in data: {df.type.unique()}")
 
     loop = asyncio.get_running_loop()
+    grouped_df = df.groupby("type")
     with ProcessPoolExecutor() as executor:
-        tasks = [
-            loop.run_in_executor(executor, run_analysis_in_process, group_df) for t, group_df in df.groupby("type")
-        ]
+        tasks = [loop.run_in_executor(executor, run_analysis_in_process, group_df) for t, group_df in grouped_df]
         analysis_results = await asyncio.gather(*tasks)
 
     # Map results back to type
-    for (t, _), result in zip(df.groupby("type"), analysis_results):
+    for (t, _), result in zip(grouped_df, analysis_results):
         results[t] = result
 
     if results and update_faiss_and_sql:
-        from src.failure_analyzer import FailureAnalyzer
-
         clustered_df = pd.concat(
             [df.assign(cluster_type=cluster_name) for cluster_name, df in results.items()],
             ignore_index=True,
         )
-        analyzer = FailureAnalyzer()
-        analyzer.save_as_faiss(faiss_runner, clustered_df, run_id=run_id)
+        await faiss_update_queue.put((clustered_df, run_id))
 
     return results
 
 
+@execution_timer
 async def async_sequential_process_by_type(df, update_faiss_and_sql=False, run_id=None):
     from src.failure_analyzer import FailureAnalyzer
 
@@ -517,3 +516,19 @@ async def async_sequential_process_by_type(df, update_faiss_and_sql=False, run_i
         analyzer.save_as_faiss(faiss_runner, clustered_df, run_id=run_id)
 
     return results
+
+
+async def faiss_update_worker():
+    while True:
+        await asyncio.sleep(5)
+        task = await faiss_update_queue.get()
+        try:
+            clustered_df, run_id = task
+            from src.failure_analyzer import FailureAnalyzer
+
+            analyzer = FailureAnalyzer()
+            analyzer.save_as_faiss(faiss_runner, clustered_df, run_id=run_id)
+        except Exception as e:
+            logger.error(f"Error in FAISS update: {e}")
+        finally:
+            faiss_update_queue.task_done()

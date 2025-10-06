@@ -8,7 +8,8 @@ import swifter
 from sklearn.cluster import HDBSCAN
 
 from src import helpers
-from src.constants import ClusterSpecificKeys, DataFrameKeys, ErrorLogConfigurations
+from src.constants import (ClusterSpecificKeys, DataFrameKeys,
+                           ErrorLogConfigurations)
 from src.data_loader import ExcelLoader
 from src.embeddings import QGenieBGEM3Embedding
 from src.faiss_db import FaissIVFFlatIndex

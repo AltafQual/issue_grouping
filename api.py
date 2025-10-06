@@ -1,5 +1,7 @@
+import asyncio
 import json
 import os
+from contextlib import asynccontextmanager
 from typing import Any, Dict
 
 import faiss
@@ -63,12 +65,18 @@ class ClusterInfoResponse(BaseModel):
     def to_dict(self) -> Dict:
         return self.dict()
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    asyncio.create_task(helpers.faiss_update_worker())
+    yield
+
 
 app = FastAPI(
     title="IssueGrouping",
     contact={"name": "Mohammed Altaf", "email": "altaf@qti.qualcomm.com"},
     docs_url="/api",
     redoc_url=None,
+    lifespan=lifespan,
 )
 
 
@@ -181,12 +189,13 @@ async def get_regression_between_two_tests(regression_object: Regression) -> Dic
 
 @app.post("/api/get_two_run_ids_cluster_info/", response_model=ClusterInfoResponse)
 async def get_two_run_ids_cluster_info(cluster_info_object: ClusterInfo) -> Dict:
+    print(f"Received run ids: {cluster_info_object}")
     response = ClusterInfoResponse()
     try:
         results = helpers.find_regressions_between_two_tests(cluster_info_object.run_id_a, cluster_info_object.run_id_b)
 
         if not results.empty:
-            new_cluster = await helpers.async_sequential_process_by_type(results)
+            new_cluster = await helpers.concurrent_process_by_type(results, update_faiss_and_sql=True)
             for test_type, df in new_cluster.items():
                 df = df.drop(
                     columns=[

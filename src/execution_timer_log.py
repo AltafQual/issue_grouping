@@ -1,8 +1,7 @@
 import functools
-import logging
 import time
 
-logger = logging.getLogger(__name__)
+from src.logger import AppLogger
 
 
 def execution_timer(func):
@@ -15,7 +14,7 @@ def execution_timer(func):
         start_time = time.time()
         result = func(*args, **kwargs)
         end_time = time.time()
-        logger.info(f"Function '{func.__name__}' executed in {end_time - start_time:.4f} seconds")
+        AppLogger.get_logger().info(f"Function '{func.__name__}' executed in {end_time - start_time:.4f} seconds")
         return result
 
     return wrapper
