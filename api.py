@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 from contextlib import asynccontextmanager
+import traceback
 from typing import Any, Dict
 
 import faiss
@@ -229,6 +230,7 @@ async def get_two_run_ids_cluster_info(cluster_info_object: ClusterInfo) -> Dict
 
     except Exception as e:
         print(f"Exception occured while finding regression: {e}")
+        traceback.format_exc()
         response.status = 500
 
     return response.to_dict()
