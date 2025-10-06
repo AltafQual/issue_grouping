@@ -75,7 +75,8 @@ class CustomQGenieChat(QGenieChat):
 
 
 model = CustomQGenieChat(model="Pro", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=200)
-
+gemini_flash_model = CustomQGenieChat(model="vertexai::gemini-2.5-pro", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=200)
+model = gemini_flash_model
 
 class ClusteringResult(BaseModel):
     cluster_name: str = Field(description="Name to the whole cluster")
@@ -131,7 +132,7 @@ def generate_cluster_name(grouped_cluster: pd.DataFrame) -> dict:
     else:
         logs = [logs]
     logs = logs[:5] if len(logs) > 5 else logs
-    chain = prompt_template | model | nameparser
+    chain = prompt_template | gemini_flash_model | nameparser
     response = chain.invoke({"logs": logs})
     return response
 
@@ -237,7 +238,7 @@ async def async_merge_clusters(
     ]
 
     # Prepare prompt chain
-    chain = ChatPromptTemplate.from_template(prompts.MERGE_PROMPT_TEMPLATE) | model | merge_parser
+    chain = ChatPromptTemplate.from_template(prompts.MERGE_PROMPT_TEMPLATE) | gemini_flash_model | merge_parser
 
     # Chunk logs to avoid token overflow
     logs_a_chunks = list(chunk_logs(logs_a))

@@ -422,20 +422,24 @@ async def process_tc_ids_async_bg_job(run_ids):
 
     run_ids_list = run_ids["testplan_id"].tolist()
     for run_id in run_ids_list:
-        processed_run_ids_path = os.path.join(FaissConfigurations.base_path, "processed_runids.json")
-        processed_run_ids = []
-        if os.path.isfile(processed_run_ids_path):
-            processed_run_ids = json.loads(open(processed_run_ids_path).read())
+        try:
+            processed_run_ids_path = os.path.join(FaissConfigurations.base_path, "processed_runids.json")
+            processed_run_ids = []
+            if os.path.isfile(processed_run_ids_path):
+                processed_run_ids = json.loads(open(processed_run_ids_path).read())
 
-        if run_id not in processed_run_ids:
-            logger.info(f"Processing: {run_id}")
-            await async_sequential_process_by_type(
-                FailureAnalyzer().load_data(tc_id=run_id), update_faiss_and_sql=True, run_id=run_id
-            )
-            await asyncio.sleep(5)
-        else:
-            logger.info(f"Skipping processing: {run_id} already processed")
-
+            if run_id not in processed_run_ids:
+                logger.info(f"Processing: {run_id}")
+                await async_sequential_process_by_type(
+                    FailureAnalyzer().load_data(tc_id=run_id), update_faiss_and_sql=True, run_id=run_id
+                )
+                await asyncio.sleep(5)
+            else:
+                logger.info(f"Skipping processing: {run_id} already processed")
+        except Exception as e:
+            logger.error(f"Error occured while processing: {run_id}: \n\n{e}")
+            continue
+        
     logger.info("Finished background job processing of TC IDs")
 
 

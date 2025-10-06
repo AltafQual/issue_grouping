@@ -39,7 +39,7 @@ class FaissIVFFlatIndex(EmbeddingsDB):
         print(f"Existing FAISS index not found for type: {type}. Creating a new one.")
         return False
 
-    def update(
+    def  update(
         self,
         type: str,
         dataframe: pd.DataFrame,
@@ -61,9 +61,9 @@ class FaissIVFFlatIndex(EmbeddingsDB):
 
         faiss_db, metadata = self.load(type)
         if not metadata:
-            metadata = {"cluster_names": [], "run_ids": []}
+            metadata = {}
 
-        existing_cluster_names = metadata.get("cluster_names")
+        existing_cluster_names = list(metadata.keys())
         existing_embeddings = faiss_db.reconstruct_n(0, faiss_db.ntotal)
         existing_embeddings = np.array(existing_embeddings)
 
@@ -99,9 +99,12 @@ class FaissIVFFlatIndex(EmbeddingsDB):
 
         # Save updated index and metadata
         faiss.write_index(faiss_db, os.path.join(base_path, "index.faiss").lower())
-        metadata["cluster_names"] = final_cluster_names
-        if run_id:
-            metadata["run_ids"].append(run_id)
+        for cluster_name in final_cluster_names:
+            if cluster_name not in metadata:
+                metadata[cluster_name] = {"class": ""}
+            if run_id:
+                metadata[cluster_name]["run_ids"] = (metadata[cluster_name].get("run_ids") or []).append(run_id)
+                
         with open(os.path.join(base_path, "metadata.json"), "w") as f:
             f.write(json.dumps(metadata, indent=3))
 
@@ -132,7 +135,6 @@ class FaissIVFFlatIndex(EmbeddingsDB):
         d = 1024
         for t, df in dataframe.groupby("type"):
             metadata = {}
-            metadata.setdefault("run_ids", [])
             print(f"Saving FAISS for type: {t}")
             filtered_df = df[df[DataFrameKeys.embeddings_key].notna()]
 
@@ -147,7 +149,6 @@ class FaissIVFFlatIndex(EmbeddingsDB):
                     if embeddings_grouped.empty:
                         print(f"No embeddings found for type: {t} skipping...")
                         continue
-                    metadata["cluster_names"] = embeddings_grouped.index.tolist()
                     embeddings = np.array(embeddings_grouped.tolist())
                     nlist = calculate_nlist(len(embeddings))
                     quantizer = faiss.IndexFlatIP(d)
@@ -160,8 +161,12 @@ class FaissIVFFlatIndex(EmbeddingsDB):
 
                     faiss.write_index(faiss_db, os.path.join(base_path, "index.faiss").lower())
 
-                    if run_id:
-                        metadata["run_ids"] = [run_id]
+                    for cluster_name in embeddings_grouped.index.tolist():
+                        # TODO: add class name logic here
+                        metadata[cluster_name] = {"class": ""}
+                        if run_id:
+                            metadata[cluster_name]["run_ids"] = [run_id]
+                            
                     with open(os.path.join(base_path, "metadata.json"), "w") as f:
                         f.write(json.dumps(metadata, indent=3))
                 else:
