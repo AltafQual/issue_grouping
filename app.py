@@ -9,11 +9,15 @@ import streamlit as st
 
 from src.constants import DataFrameKeys
 from src.failure_analyzer import FailureAnalyzer
-from src.helpers import (async_process_by_type,
-                         async_sequential_process_by_type,
-                         concurrent_process_by_type,
-                         create_excel_with_clusters, faiss_runner,
-                         get_tc_ids_from_sql, tc_id_scheduler)
+from src.helpers import (
+    async_process_by_type,
+    async_sequential_process_by_type,
+    concurrent_process_by_type,
+    create_excel_with_clusters,
+    faiss_runner,
+    get_tc_ids_from_sql,
+    tc_id_scheduler
+)
 
 nest_asyncio.apply()
 ################################## Configurations and Global Streamlit Sessions ####################################
@@ -180,7 +184,7 @@ if st.session_state.clustered_df_grouped:
         ignore_index=True,
     )
 
-    analyzer.save_as_faiss(faiss_runner, clustered_df)
+    # analyzer.save_as_faiss(faiss_runner, clustered_df)
     excel_data = create_excel_with_clusters(clustered_df, DataFrameKeys.cluster_name)
     # Determine filename for download
     # Use the last processed source info for file naming

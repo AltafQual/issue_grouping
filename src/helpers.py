@@ -1,11 +1,12 @@
 import asyncio
 import hashlib
 import json
-import logging
 import os
 import random
 import re
+import traceback
 from concurrent.futures import ProcessPoolExecutor
+from datetime import datetime
 from functools import wraps
 from io import BytesIO
 
@@ -23,7 +24,7 @@ from src.constants import (
     DataFrameKeys,
     ErrorLogConfigurations,
     FaissConfigurations,
-    regex_based_filteration_patterns,
+    regex_based_filteration_patterns
 )
 from src.db_connections import ConnectToMySql
 from src.execution_timer_log import execution_timer
@@ -51,6 +52,17 @@ def add_hashed_unique_id(df: pd.DataFrame) -> pd.DataFrame:
 
     df[DataFrameKeys.index] = df.apply(generate_hash, axis=1)
     return df
+
+
+def get_cluster_class(cluster_dict):
+    if not isinstance(cluster_dict, dict):
+        return ""
+
+    for cluster_class in cluster_dict:
+        if cluster_dict[cluster_class]:
+            return cluster_class
+
+    return ""
 
 
 @execution_timer
@@ -125,7 +137,10 @@ def update_rows_by_regex_patterns(df: pd.DataFrame) -> pd.DataFrame:
         ]
         print(f"Found occurence of match: {name}: {matched_df.shape[0]}")
         if not matched_df.empty:
-            cluster_name = generate_cluster_name(matched_df)
+            if "verifier failed" in pattern:
+                cluster_name = {"cluster_name": "VerifierFailed"}
+            else:
+                cluster_name = generate_cluster_name(matched_df)
             df.loc[matched_df.index, DataFrameKeys.cluster_name] = cluster_name["cluster_name"]
 
 
@@ -437,9 +452,18 @@ async def process_tc_ids_async_bg_job(run_ids):
             else:
                 logger.info(f"Skipping processing: {run_id} already processed")
         except Exception as e:
-            logger.error(f"Error occured while processing: {run_id}: \n\n{e}")
+            logger.error(f"Error occured while processing: {run_id}: \n{e}")
+
+            # Append full traceback to a log file
+            error_log_path = os.path.join(FaissConfigurations.base_path, "failed_processing_runids_log.txt")
+            with open(error_log_path, "a") as log_file:
+                log_file.write(f"\nRun ID: {run_id}\n")
+                log_file.write(f"\nFailed with error: {e}\n")
+                log_file.write(traceback.format_exc())
+                log_file.write("\n" + "-" * 80 + "\n")
+
             continue
-        
+
     logger.info("Finished background job processing of TC IDs")
 
 
@@ -520,8 +544,9 @@ async def async_sequential_process_by_type(df, update_faiss_and_sql=False, run_i
 
     logger.info(f"All types in data: {df.type.unique()}")
     for t, group_df in df.groupby("type"):
-        logger.info(f"Processing type: {t}  with {len(group_df)} rows")
-        await process_group(t, group_df)
+        if t == "verifier":
+            logger.info(f"Processing type: {t}  with {len(group_df)} rows")
+            await process_group(t, group_df)
 
     if results and update_faiss_and_sql:
         clustered_df = pd.concat(
@@ -547,3 +572,25 @@ async def faiss_update_worker():
             logger.error(f"Error in FAISS update: {e}")
         finally:
             faiss_update_queue.task_done()
+
+
+# TODO: test this and add this in the faiss logic or run ids removal
+def filter_and_sort_by_embedded_datetime(strings, n_remove=0):
+    def extract_datetime(s):
+        match = re.search(r"\d{12,}", s)
+        if match:
+            dt_str = match.group()
+            try:
+                # Parse the datetime string assuming format: yymmddHHMMSS
+                dt = datetime.strptime(dt_str[:12], "%y%m%d%H%M%S")
+                return dt
+            except ValueError:
+                return None
+        return None
+
+    dated_strings = [(extract_datetime(s), s) for s in strings]
+    dated_strings = [item for item in dated_strings if item[0] is not None]
+    dated_strings.sort(key=lambda x: x[0])
+    filtered_strings = [s for _, s in dated_strings[n_remove:]]
+
+    return filtered_strings

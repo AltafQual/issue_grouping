@@ -1,5 +1,5 @@
 import asyncio
-import logging
+import json
 import time
 import traceback
 from collections import defaultdict
@@ -7,8 +7,7 @@ from typing import Any
 
 import pandas as pd
 from langchain.prompts import ChatPromptTemplate
-from langchain_core.callbacks import (AsyncCallbackManagerForLLMRun,
-                                      CallbackManagerForLLMRun)
+from langchain_core.callbacks import AsyncCallbackManagerForLLMRun, CallbackManagerForLLMRun
 from langchain_core.messages import BaseMessage
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.outputs import ChatResult
@@ -23,6 +22,22 @@ from src.logger import AppLogger
 logger = AppLogger().get_logger(__name__)
 
 
+def get_exponential_backoff_delay(attempt: int, base_delay: int = 1, max_delay: int = 60) -> int:
+    """
+    Returns the number of seconds to wait before the next retry using exponential backoff.
+
+    Parameters:
+    - attempt: The current retry attempt (starting from 1).
+    - base_delay: The initial delay in seconds.
+    - max_delay: The maximum delay allowed.
+
+    Returns:
+    - An integer number of seconds to wait.
+    """
+    delay = base_delay * (2 ** (attempt - 1))
+    return min(delay, max_delay)
+
+
 class CustomQGenieChat(QGenieChat):
     def _generate(
         self,
@@ -31,7 +46,7 @@ class CustomQGenieChat(QGenieChat):
         run_manager: CallbackManagerForLLMRun | None = None,
         **kwargs: Any,
     ) -> ChatResult:
-        retry_count = 3
+        retry_count = 5
         while retry_count:
             try:
                 message_dicts, params = self._create_message_dicts(messages)
@@ -43,7 +58,7 @@ class CustomQGenieChat(QGenieChat):
                 logger.error(traceback.format_exc())
                 logger.error(f"for messages: {message_dicts}")
                 retry_count -= 1
-                time.sleep(4)
+                time.sleep(get_exponential_backoff_delay(attempt=retry_count))
                 continue
 
         return self._create_chat_result({})
@@ -56,7 +71,7 @@ class CustomQGenieChat(QGenieChat):
         stream: bool | None = None,
         **kwargs: Any,
     ) -> ChatResult:
-        retry_count = 3
+        retry_count = 5
         message_dicts, params = self._create_message_dicts(messages)
         params = {**params, **kwargs}
         params.pop("stream", "")
@@ -69,14 +84,19 @@ class CustomQGenieChat(QGenieChat):
                 logger.error(traceback.format_exc())
                 logger.error(f"for messages: {message_dicts}")
                 retry_count -= 1
-                await asyncio.sleep(4)
+                await asyncio.sleep(get_exponential_backoff_delay(attempt=retry_count))
                 continue
         return self._create_chat_result({})
 
 
-model = CustomQGenieChat(model="Pro", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=200)
-gemini_flash_model = CustomQGenieChat(model="vertexai::gemini-2.5-pro", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=200)
-model = gemini_flash_model
+# pro_model = CustomQGenieChat(model="Pro", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=200)
+gemini_pro_model = CustomQGenieChat(
+    model="vertexai::gemini-2.5-pro", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=200
+)
+model = CustomQGenieChat(
+    model="vertexai::gemini-2.5-flash", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=200
+)
+
 
 class ClusteringResult(BaseModel):
     cluster_name: str = Field(description="Name to the whole cluster")
@@ -100,7 +120,12 @@ class ClassifyClusterGroup(BaseModel):
     environment_issue: bool = Field(description="Whether this cluster is an environment issue or not")
     code_failure: bool = Field(description="Whether this cluster is a code failure or not")
     sdk_issue: bool = Field(description="Whether this is a sdk related issue or not")
-    reasoning: str = Field(description="Reasoning behind the classification")
+
+
+class SubClusterVerifierFailed(BaseModel):
+    cluster_name: str = Field(description="name of the subcluster")
+    indices: list[int] = Field(description="index of the logs that belong to that cluster")
+    previous_clusters: dict = Field(description="json of existing verifier failed clusters for regrouping")
 
 
 parser = JsonOutputParser(pydantic_object=ClusteringResult)
@@ -108,6 +133,7 @@ merge_parser = JsonOutputParser(pydantic_object=MergeResult)
 recluster_parser = JsonOutputParser(pydantic_object=ReclusterResult)
 nameparser = JsonOutputParser(pydantic_object=NameClusteringResult)
 classify_cluster_based_on_type = JsonOutputParser(pydantic_object=ClassifyClusterGroup)
+subcluster_verifer_failed = JsonOutputParser(pydantic_object=SubClusterVerifierFailed)
 
 
 @execution_timer
@@ -115,7 +141,7 @@ def classify_cluster_based_of_type(cluster_logs: list[str]) -> dict:
     prompt_template = ChatPromptTemplate.from_messages(
         [("system", prompts.CLASSIFY_CLUSTER_TYPE_SYS_MESSAGE), ("human", prompts.CLASSIFY_CLUSTER_TYPE_LOG_MESSAGE)]
     )
-    chain = prompt_template | model | classify_cluster_based_on_type
+    chain = prompt_template | gemini_pro_model | classify_cluster_based_on_type
     result = chain.invoke({"logs": cluster_logs})
     return result
 
@@ -132,14 +158,14 @@ def generate_cluster_name(grouped_cluster: pd.DataFrame) -> dict:
     else:
         logs = [logs]
     logs = logs[:5] if len(logs) > 5 else logs
-    chain = prompt_template | gemini_flash_model | nameparser
+    chain = prompt_template | model | nameparser
     response = chain.invoke({"logs": logs})
     return response
 
 
 @execution_timer
 async def analyze_cluster(cluster_df: pd.DataFrame) -> dict:
-    def chunk_logs(logs, chunk_size=30, overlap=10):
+    def chunk_logs(logs, chunk_size=50, overlap=3):
         start = 0
         while start < len(logs):
             end = start + chunk_size
@@ -157,7 +183,7 @@ async def analyze_cluster(cluster_df: pd.DataFrame) -> dict:
         [("system", prompts.CLUSTERING_SYS_MESSAGE), ("human", prompts.CLUSTERING_LOG_MESSAGE)]
     )
 
-    chain = prompt_template | model | parser
+    chain = prompt_template | gemini_pro_model | parser
 
     tasks = [process_chunk(chunk) for chunk in chunk_logs(error_logs)]
     responses = await asyncio.gather(*tasks)
@@ -198,7 +224,7 @@ def merge_clusters(
         {"index": int(idx), "error log": row[DataFrameKeys.preprocessed_text_key]} for idx, row in df_b.iterrows()
     ]
 
-    chain = ChatPromptTemplate.from_template(prompts.MERGE_PROMPT_TEMPLATE) | model | merge_parser
+    chain = ChatPromptTemplate.from_template(prompts.MERGE_PROMPT_TEMPLATE) | gemini_pro_model | merge_parser
     response = chain.invoke({"id_a": cluster_id_a, "logs_a": logs_a, "id_b": cluster_id_b, "logs_b": logs_b})
 
     return response
@@ -212,7 +238,7 @@ async def async_merge_clusters(
     cluster_name_a: str = None,
     cluster_name_b: str = None,
 ) -> MergeResult:
-    def chunk_logs(logs, chunk_size=30, overlap=10):
+    def chunk_logs(logs, chunk_size=50, overlap=3):
         start = 0
         while start < len(logs):
             end = start + chunk_size
@@ -238,7 +264,7 @@ async def async_merge_clusters(
     ]
 
     # Prepare prompt chain
-    chain = ChatPromptTemplate.from_template(prompts.MERGE_PROMPT_TEMPLATE) | gemini_flash_model | merge_parser
+    chain = ChatPromptTemplate.from_template(prompts.MERGE_PROMPT_TEMPLATE) | gemini_pro_model | merge_parser
 
     # Chunk logs to avoid token overflow
     logs_a_chunks = list(chunk_logs(logs_a))
@@ -456,6 +482,158 @@ def inter_cluster_merging(df: pd.DataFrame) -> pd.DataFrame:
 
     return df
 
+
+@execution_timer
+def subcluster_verifier_failed(df: pd.DataFrame):
+    """
+    Iteratively sub-cluster logs in batches of 50 using the SUBCLUSTER_VERIFIER_FAILED prompts.
+    Maintains a previous_clusters registry across batches, and within each batch continues to
+    refine subclusters until no new indices are added or a safety cap is hit.
+
+    Changes:
+    - Limits per-batch iterations to 5.
+    - Once an index is assigned, it is excluded from subsequent iterations within the same batch.
+    - Any logs not assigned to any subcluster by the end are grouped under the special key "-1".
+
+    Returns:
+    - dict[str, list[int]]: final consolidated mapping of subcluster name -> indices
+    """
+    if df is None or df.empty:
+        return {}
+
+    df = df.reset_index(drop=True)
+    logs = [{"index": int(idx), "error log": row[DataFrameKeys.preprocessed_text_key]} for idx, row in df.iterrows()]
+
+    # Helper to chunk logs into non-overlapping batches of 50
+    def chunk_logs(items, size=30):
+        for i in range(0, len(items), size):
+            yield items[i : i + size]
+
+    # Build the prompt chain once
+    prompt_template = ChatPromptTemplate.from_messages(
+        [
+            ("system", prompts.SUBCLUSTER_VERIFIER_FAILED_SYS_MESSAGE),
+            ("human", prompts.SUBCLUSTER_VERIFIER_FAILED_LOG_MESSAGE),
+        ]
+    )
+    chain = prompt_template | gemini_pro_model | subcluster_verifer_failed
+
+    # previous_clusters as a dict[str, set[int]] for consolidation
+    previous_clusters_agg: dict[str, set[int]] = {}
+
+    # For validation
+    df_index_set = set(int(i) for i in df.index)
+
+    # Process in 50-log batches
+    for batch in chunk_logs(logs):
+        if not batch:
+            continue
+
+        batch_index_set = {int(item["index"]) for item in batch}
+        clustered_in_batch: set[int] = set()
+
+        # Safety cap: at most 5 model iterations per batch
+        max_iters = 5
+        for _ in range(max_iters):
+            # Compute globally assigned indices (across all previous batches)
+            global_assigned_indices = set()
+            for idxs in previous_clusters_agg.values():
+                global_assigned_indices.update(idxs)
+
+            # Remaining indices to consider in this batch
+            remaining_in_batch = batch_index_set - clustered_in_batch - global_assigned_indices
+            if not remaining_in_batch:
+                break  # no work left in this batch
+
+            # Prepare current batch logs excluding already-assigned indices
+            current_batch_logs = [item for item in batch if int(item["index"]) in remaining_in_batch]
+
+            previous_clusters_json = json.dumps(
+                {name: sorted(list(indices)) for name, indices in previous_clusters_agg.items()},
+                indent=2,
+            )
+            batch_logs_json = json.dumps(current_batch_logs, ensure_ascii=False, indent=2)
+
+            try:
+                result = chain.invoke({"previous_clusters": previous_clusters_json, "error_logs": batch_logs_json})
+            except Exception as e:
+                logger.error(f"Subcluster verifier failed invocation error: {e}")
+                break
+
+            cluster_name = (result or {}).get("cluster_name") or ""
+            indices = (result or {}).get("indices") or []
+            returned_prev = (result or {}).get("previous_clusters") or {}
+
+            # Coerce indices to ints and validate
+            try:
+                indices_int = {int(i) for i in indices}
+            except Exception:
+                indices_int = set()
+
+            # Only keep indices that are valid for this df and not already assigned globally,
+            # and are still remaining in this batch
+            indices_int = {
+                i
+                for i in indices_int
+                if i in df_index_set and i in remaining_in_batch and i not in global_assigned_indices
+            }
+
+            # If no progress (no indices or no cluster name), still merge structural updates and exit iteration
+            new_indices = indices_int - clustered_in_batch
+            if not cluster_name or not new_indices:
+                if isinstance(returned_prev, dict):
+                    for name, idxs in returned_prev.items():
+                        try:
+                            idxs_int = {int(i) for i in idxs if int(i) in df_index_set}
+                        except Exception:
+                            idxs_int = set()
+                        # Exclude globally assigned duplicates
+                        idxs_int -= global_assigned_indices
+                        if idxs_int:
+                            previous_clusters_agg.setdefault(name, set()).update(idxs_int)
+                break
+
+            # Merge returned_prev after filtering out already assigned indices
+            if isinstance(returned_prev, dict):
+                for name, idxs in returned_prev.items():
+                    try:
+                        idxs_int = {int(i) for i in idxs if int(i) in df_index_set}
+                    except Exception:
+                        idxs_int = set()
+                    idxs_int -= global_assigned_indices
+                    if idxs_int:
+                        previous_clusters_agg.setdefault(name, set()).update(idxs_int)
+
+            # Ensure the chosen cluster_name reflects the new indices as well
+            previous_clusters_agg.setdefault(cluster_name, set()).update(new_indices)
+
+            # Mark progress within this batch — assigned indices won't be reconsidered next iterations
+            clustered_in_batch.update(new_indices)
+
+            # If we've covered the whole batch, stop iterating
+            if clustered_in_batch == batch_index_set:
+                break
+
+    # Finalize: identify any indices that were never assigned to any subcluster and assign to "-1"
+    all_assigned = set()
+    for idxs in previous_clusters_agg.values():
+        all_assigned.update(idxs)
+
+    # Consider the whole df index set as the universe for this function
+    unassigned = sorted(list(df_index_set - all_assigned))
+    if unassigned:
+        previous_clusters_agg.setdefault(str(ClusterSpecificKeys.non_grouped_key), set()).update(unassigned)
+
+    finalized = {name: sorted(list(indices)) for name, indices in previous_clusters_agg.items()}
+    logger.info(f"Subcluster verifier finalized clusters: {list(finalized.keys())}")
+
+    for cluster_name, indices in finalized.items():
+        if cluster_name != str(ClusterSpecificKeys.non_grouped_key):
+            df.loc[indices, DataFrameKeys.cluster_name] = cluster_name
+        else:
+            df.loc[indices, DataFrameKeys.cluster_name] = ClusterSpecificKeys.non_grouped_key
+
+    return df
 
 @execution_timer
 async def qgenie_post_processing(df: pd.DataFrame) -> pd.DataFrame:

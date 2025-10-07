@@ -1,8 +1,8 @@
 import asyncio
 import json
 import os
-from contextlib import asynccontextmanager
 import traceback
+from contextlib import asynccontextmanager
 from typing import Any, Dict
 
 import faiss
@@ -65,6 +65,7 @@ class ClusterInfoResponse(BaseModel):
 
     def to_dict(self) -> Dict:
         return self.dict()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

@@ -8,13 +8,12 @@ import swifter
 from sklearn.cluster import HDBSCAN
 
 from src import helpers
-from src.constants import (ClusterSpecificKeys, DataFrameKeys,
-                           ErrorLogConfigurations)
+from src.constants import ClusterSpecificKeys, DataFrameKeys, ErrorLogConfigurations
 from src.data_loader import ExcelLoader
 from src.embeddings import QGenieBGEM3Embedding
 from src.faiss_db import FaissIVFFlatIndex
 from src.logger import AppLogger
-from src.qgenie import generate_cluster_name, qgenie_post_processing
+from src.qgenie import generate_cluster_name, qgenie_post_processing, subcluster_verifier_failed
 
 
 class FailureAnalyzer:
@@ -103,7 +102,7 @@ class FailureAnalyzer:
             empty_log_df.loc[:, DataFrameKeys.embeddings_key] = np.nan
 
         failure_df = failure_df[~failure_df.index.isin(empty_log_df.index)]
-        failure_df = await helpers.check_if_issue_alread_grouped(failure_df)
+        # failure_df = await helpers.check_if_issue_alread_grouped(failure_df)
         non_clustered_df = failure_df[
             failure_df[DataFrameKeys.cluster_name] == ClusterSpecificKeys.non_grouped_key
         ].reset_index(drop=True)
@@ -127,7 +126,7 @@ class FailureAnalyzer:
 
         faiss_grouped = failure_df[failure_df[DataFrameKeys.grouped_from_faiss] == True]
         self.logger.info(
-            f"\nType: {current_type} \ntotal errors: {failure_df.shape[0]}, \nEmpty logs grouped: {empty_log_df.shape[0]}, \nFuzzy and faiss grouped: {fuzzy_clustered_df.shape[0]}, \nNot grouped: {non_clustered_df.shape[0]} \n Faiss Grouped: {faiss_grouped.shape[0]}"
+            f"\nType: {current_type} \ntotal errors: {failure_df.shape[0]}, \nEmpty logs grouped: {empty_log_df.shape[0]}, \nFuzzy grouped: {fuzzy_clustered_df.shape[0]}, \nNot grouped: {non_clustered_df.shape[0]} \nFaiss Grouped: {faiss_grouped.shape[0]}"
         )
         failure_df = pd.concat([empty_log_df, fuzzy_clustered_df, non_clustered_df, faiss_grouped], axis=0)
 
@@ -195,9 +194,19 @@ class FailureAnalyzer:
 
             # Apply Qgenie post-processing
             non_clustered_df = await qgenie_post_processing(non_clustered_df)
-        # Combine results and reset index
-        final_df = pd.concat([already_clustered_df, non_clustered_df], axis=0).reset_index(drop=True)
 
+        verifier_failed_df = subcluster_verifier_failed(
+            already_clustered_df[already_clustered_df[DataFrameKeys.cluster_name] == "VerifierFailed"]
+        )
+        # Combine results and reset index
+        dfs_to_concat = [
+            non_clustered_df,
+            already_clustered_df[already_clustered_df[DataFrameKeys.cluster_name] != "VerifierFailed"],
+        ]
+        if verifier_failed_df is not None and not verifier_failed_df.empty:
+            dfs_to_concat.append(verifier_failed_df)
+
+        final_df = pd.concat(dfs_to_concat, axis=0).reset_index(drop=True)
         mask = final_df[DataFrameKeys.cluster_name].isin(
             {ClusterSpecificKeys.non_grouped_key, str(ClusterSpecificKeys.non_grouped_key)}
         )

@@ -88,15 +88,44 @@ You are an expert in log analysis and classification. Your task is to analyze th
 2. **Code related Issue**: all the error related to failure of test due to bug in code, indexing error, value error are some example
 3. **SDK related Issue**: logs related to hardware failures, sub modules failed or any type of failure in legacy code. All the errors which doesn't belong to either environment/code will fall in this category
 
-Return your response in the following JSON format:
+Return your response in the following JSON format and out of 3 failure only one can be true at any given instance:
 {{
   "environment_issue": true/false,
   "code_failure": true/false,
-  "sdk_issue": true/false,
-  "reasoning": "Brief explanation of why this classification was chosen"
+  "sdk_issue": true/false
 }}
 """
 CLASSIFY_CLUSTER_TYPE_LOG_MESSAGE = """
 Below are the logs to classify:
 {logs}
+"""
+SUBCLUSTER_VERIFIER_FAILED_SYS_MESSAGE = """
+You are an expert in sub-clustering verifier-failed logs. You will iteratively process logs in batches (up to 50 per batch) and maintain/update the subcluster registry provided as `previous_clusters`.
+
+Your task:
+- First batch (previous_clusters is empty): Discover coherent subclusters from the provided logs based on shared operation (ops), subsystem/module, error type, and context. In this pass, return exactly one subcluster (the most coherent group) with its name and indices.
+- Subsequent batches (previous_clusters provided): Evaluate the current batch against existing subclusters.
+  - If some logs clearly belong to one existing subcluster, return that subcluster_name and the indices to add.
+  - If no existing subcluster matches, create a new subcluster, return its name and the indices that belong to it.
+- Always return an updated previous_clusters dictionary that merges the returned indices into the chosen subcluster. If a new subcluster is created, add it to previous_clusters.
+
+Rules:
+- Use PascalCase for cluster_name (short, no spaces, each word capitalized). Do not include the word "Cluster" in the name and Make sure the cluster name always starts with VerifierFailed<issue details> and no ManyImages/ManyVerifierImages should be added
+- indices must be the exact "index" values from the provided logs. INDEX SHOULD BE CORRECT IT IS VERY CRITICAL.
+- Only include logs that strongly fit the chosen subcluster; leave unrelated logs for later passes.
+- Accuracy enforcement: Clusters must be highly precise. Single-log subclusters are permitted only when that single log uniquely and correctly fits the subcluster theme; do not assign incorrect logs. Append a concise failure reason at the end of the PascalCase name (shortened and specific), e.g., VerifierFailedTimeout, VerifierFailedConfigMissing, VerifierFailedInitDeinit.
+- Return strictly and only this JSON format (no extra text):
+{{
+  "cluster_name": "<name in PascalCase format: `VerifierFailed<sub cluster type>`>",
+  "indices": [<list of indices>],
+  "previous_clusters": {{ "<SubclusterName>": [<indices>], ... }}
+}}
+"""
+
+SUBCLUSTER_VERIFIER_FAILED_LOG_MESSAGE = """
+Existing subclusters (previous_clusters):
+{previous_clusters}
+
+Current batch logs:
+{error_logs}
 """

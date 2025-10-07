@@ -287,7 +287,51 @@ class ConnectToMySql(DatabaseConnection):
                 logger.info(f"Updated {len(update_rows)} existing entries in error_map_qgenie.")
 
             cnx.commit()
+            cnx.close()
             time.sleep(5)
+
+    def update_error_group_class(self, df, cluster_class: str):
+        update_query = """
+            UPDATE error_map_qgenie
+            SET cluster_class = %s
+            WHERE error_group_id = %s;
+        """
+
+        with self.connection_context() as cnx:
+            cursor = cnx.cursor()
+
+            for _, row in df.iterrows():
+                error_group_id_df = self.get_error_id_row(
+                    type=row["type"], runtime=row["runtime"], cluster_name=row[DataFrameKeys.cluster_name].lower()
+                )
+
+                error_group_id, existing_cluster_class = None, None
+                if not error_group_id_df.empty:
+                    error_group_id = error_group_id_df.iloc[0]["error_group_id"]
+                    existing_cluster_class = error_group_id_df.iloc[0]["cluster_class"]
+
+                logger.info(f"error group id: {error_group_id}, exisitng class: {existing_cluster_class}")
+                if error_group_id and existing_cluster_class is None:
+                    cursor.execute(update_query, (cluster_class, error_group_id))
+
+            cnx.commit()
+            cnx.close()
+
+    def get_error_id_row(self, type, runtime, cluster_name):
+        query = f"""
+            SELECT * FROM error_map_qgenie
+            WHERE test_type = "{type}" AND runtime = "{runtime}" AND cluster_name = "{cluster_name}";
+        """
+
+        with self.connection_context() as cnx:
+            logger.info(f"Executing query: {query}")
+            df = pd.read_sql(query, cnx)
+
+        if df.empty:
+            logger.error(f"No data found for query: {query}")
+            return pd.DataFrame()
+
+        return df
 
     def get_error_group_id(self, type: str, runtime: str, cluster_name: str) -> str:
         query = """

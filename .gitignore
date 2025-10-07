@@ -12,3 +12,4 @@ UNKNOWN.egg-info
 *.ipynb
 faiss_issue_grouping_db
 .vscode
+test_faiss_issue_grouping_db
