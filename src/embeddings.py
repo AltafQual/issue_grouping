@@ -3,9 +3,11 @@ import asyncio
 import time
 
 from langchain.embeddings.base import Embeddings
+from sentence_transformers import SentenceTransformer
 
 from qgenie.integrations.langchain import QGenieEmbeddings
 from src.constants import QGENEIE_API_KEY
+from src.execution_timer_log import execution_timer
 from src.logger import AppLogger
 
 logger = AppLogger.get_logger(__name__)
@@ -49,13 +51,15 @@ class QGenieBGEM3Embedding(Embeddings):
     def embed_query(self, text: str) -> list[float]:
         return self._retry_sync(self.model.embed_query, text)
 
+    @execution_timer
     async def aembed(self, data: list):
         return await self._retry_async(self.model.aembed_documents, data)
 
+    @execution_timer
     async def aembed_query(self, text: str):
         return await self._retry_async(self.model.aembed_query, text)
-    
 
+    @execution_timer
     async def aembed_query_batch(self, text: str):
         if isinstance(text, list):
             results = [self._retry_async(self.model.aembed_query, t) for t in text]
@@ -63,3 +67,21 @@ class QGenieBGEM3Embedding(Embeddings):
         else:
             return await self._retry_async(self.model.aembed_query, text)
 
+
+class BGEM3Embeddings(object):
+    def __init__(self):
+        from src.helpers import load_cached_model
+
+        self.model = load_cached_model()
+
+        if self.model is None:
+            print("Unable to find model locally donwloading model")
+            self.model = SentenceTransformer("BAAI/bge-m3", cache_folder="./models")
+
+    @execution_timer
+    def embed_query(self, text: str):
+        return self.model.encode_query(text)
+
+    @execution_timer
+    def embed(self, data: list[str]):
+        return self.model.encode_document(data)

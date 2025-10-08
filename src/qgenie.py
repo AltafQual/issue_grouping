@@ -1,5 +1,6 @@
 import asyncio
 import json
+import re
 import time
 import traceback
 from collections import defaultdict
@@ -622,9 +623,17 @@ def subcluster_verifier_failed(df: pd.DataFrame):
     finalized = {name: sorted(list(indices)) for name, indices in previous_clusters_agg.items()}
     logger.info(f"Subcluster verifier finalized clusters: {list(finalized.keys())}")
 
+    generic_pattern = r"^(verifierfailedimageslist|manyverifierfailedimageslist|verifierfailedimages)$"
+
     for cluster_name, indices in finalized.items():
         if cluster_name != str(ClusterSpecificKeys.non_grouped_key):
-            df.loc[indices, DataFrameKeys.cluster_name] = cluster_name
+            if re.match(generic_pattern, cluster_name.lower()):
+                logger.info(
+                    f"Generic cluster name detected via regex: '{cluster_name}'. Marking {len(indices)} rows as non-grouped for separate processing."
+                )
+                df.loc[indices, DataFrameKeys.cluster_name] = ClusterSpecificKeys.non_grouped_key
+            else:
+                df.loc[indices, DataFrameKeys.cluster_name] = cluster_name
         else:
             df.loc[indices, DataFrameKeys.cluster_name] = ClusterSpecificKeys.non_grouped_key
 
