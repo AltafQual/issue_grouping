@@ -277,9 +277,11 @@ class SearchInExistingFaiss(object):
         if faiss_db is None:
             return [key] * len(queries), [np.nan] * len(queries)
 
-        embeddings = await QGenieBGEM3Embedding().aembed_documents(queries)
+        print(f"Generating embeddings in batch search")
+        embeddings = await QGenieBGEM3Embedding().aembed_query_batch(queries)
 
         # Search in FAISS
+        print("Searching for closest index in faiss")
         Distance, Index = faiss_db.search(np.array(embeddings), k=k)
         all_cluster_names = list(metadata.keys())
         total_cluster_names = len(all_cluster_names)
@@ -295,7 +297,7 @@ class SearchInExistingFaiss(object):
                 cluster_name = str(all_cluster_names[index])
                 class_name = metadata[cluster_name]["class"]
 
-            print(f"For Query: {q}, score: {score}, cluster: {cluster_name}")
+            print(f"For Query: {q}, score: {score}")
             if score >= 0.95:
                 cluster_names.append(cluster_name)
                 class_names.append(class_name)

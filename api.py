@@ -4,6 +4,7 @@ import os
 import traceback
 from contextlib import asynccontextmanager
 from typing import Any, Dict
+import time
 
 import faiss
 import numpy as np
@@ -53,6 +54,7 @@ class RegressionResponse(BaseModel):
 
 class ClusterInfoResponse(BaseModel):
     status: int = 200
+    time_taken: float = 0
     type: Dict[str, Any] = {}
     model: Dict[str, Any] = {}
 
@@ -193,6 +195,7 @@ async def get_regression_between_two_tests(regression_object: Regression) -> Dic
 @app.post("/api/get_two_run_ids_cluster_info/", response_model=ClusterInfoResponse)
 async def get_two_run_ids_cluster_info(cluster_info_object: ClusterInfo) -> Dict:
     print(f"Received run ids: {cluster_info_object}")
+    start_time = time.time()
     response = ClusterInfoResponse()
     try:
         results = helpers.find_regressions_between_two_tests(cluster_info_object.run_id_a, cluster_info_object.run_id_b)
@@ -232,7 +235,8 @@ async def get_two_run_ids_cluster_info(cluster_info_object: ClusterInfo) -> Dict
 
     except Exception as e:
         print(f"Exception occured while finding regression: {e}")
-        traceback.format_exc()
+        print(traceback.format_exc())
         response.status = 500
 
+    response.time_taken = round(time.time() - start_time, 2)
     return response.to_dict()

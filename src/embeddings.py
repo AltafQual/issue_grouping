@@ -54,3 +54,12 @@ class QGenieBGEM3Embedding(Embeddings):
 
     async def aembed_query(self, text: str):
         return await self._retry_async(self.model.aembed_query, text)
+    
+
+    async def aembed_query_batch(self, text: str):
+        if isinstance(text, list):
+            results = [self._retry_async(self.model.aembed_query, t) for t in text]
+            return await asyncio.gather(*results)
+        else:
+            return await self._retry_async(self.model.aembed_query, text)
+
