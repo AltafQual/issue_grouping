@@ -26,6 +26,8 @@ Your task is to:
 - Suggest a meaningful cluster name that reflects the entire error type and context
 - Use PascalCase formatting for the cluster name (no spaces, each word capitalized).
 - Identify any logs that appear misclassified or unrelated to that cluster and return there ids as `misclassified_ids`.
+- Do not include the word "Cluster" in the name (e.g., TimeoutErrorCluster -> TimeoutError, InitDeinitErrorCluster -> InitDeinitError).
+- Prohibited generic names: Never use generic or quantity-based names such as "ManyImages", "ManyVerifierImages", "VerifierFailedImagesList", "VerifierFailedManyImages", "ImagesList", or any name containing "Many" or "Multiple". Names must not describe volume; they must describe the failure cause.
 
 Return the result strictly as a JSON as shown below. Do not include any explanation or extra text:
 
@@ -46,6 +48,8 @@ Your task is to:
 - Suggest a short, meaningful name for the merged cluster that reflects the nature of the grouped errors.
 - Use PascalCase formatting for the cluster name (no spaces, each word capitalized).
 - Identify any logs that appear unrelated or wrongly grouped and doesn't match the theme/context of the merged cluster. These should be flagged as outliers and indices should be returned as `outlier_indices` (INDEX SHOULD BE CORRECT IT IS VERY CRITICAL)
+- Do not include the word "Cluster" in the name (e.g., TimeoutErrorCluster -> TimeoutError, InitDeinitErrorCluster -> InitDeinitError).
+- Prohibited generic names: Never use generic or quantity-based names such as "ManyImages", "ManyVerifierImages", "VerifierFailedImagesList", "VerifierFailedManyImages", "ImagesList", or any name containing "Many" or "Multiple". Names must not describe volume; they must describe the failure cause.
 
 Return the result strictly as a JSON as shown below. Do not include any explanation or extra text:
 {{
@@ -71,6 +75,8 @@ Your task is to:
 - Retun the correct index of the error logs to group together as `log_indices` (INDEX SHOULD BE CORRECT IT IS VERY CRITICAL)
 - Suggest a meaningful cluster name that reflects the entire error type and context.
 - Return the result strictly as a JSON list. Do not include any explanation or text
+- Do not include the word "Cluster" in the name (e.g., TimeoutErrorCluster -> TimeoutError, InitDeinitErrorCluster -> InitDeinitError).
+- Prohibited generic names: Never use generic or quantity-based names such as "ManyImages", "ManyVerifierImages", "VerifierFailedImagesList", "VerifierFailedManyImages", "ImagesList", or any name containing "Many" or "Multiple". Names must not describe volume; they must describe the failure cause.
 
 Each JSON object must follow this format:
 {{
@@ -119,11 +125,11 @@ Rules:
 - If you cannot confidently determine a specific, cause-based subcluster name, return an empty string "" for cluster_name and an empty list for indices. In that case, do not update or create any subcluster; such logs will be handled later.
 
 - Return strictly and only this JSON format (no extra text):
-{
+{{
   "cluster_name": "<name in PascalCase format: `VerifierFailed<sub cluster type>` or empty string>",
   "indices": [<list of indices>],
-  "previous_clusters": { "<SubclusterName>": [<indices>], ... }
-}
+  "previous_clusters": {{ "<SubclusterName>": [<indices>], ... }}
+}}
 """
 
 SUBCLUSTER_VERIFIER_FAILED_LOG_MESSAGE = """

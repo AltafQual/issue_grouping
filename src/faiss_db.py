@@ -1,8 +1,6 @@
-import asyncio
 import json
 import math
 import os
-from functools import lru_cache
 from typing import Union
 
 import faiss
@@ -11,7 +9,7 @@ import pandas as pd
 from sklearn.metrics.pairwise import cosine_similarity
 
 from src.constants import ClusterSpecificKeys, DataFrameKeys, FaissConfigurations
-from src.embeddings import QGenieBGEM3Embedding
+from src.embeddings import FallbackEmbeddings
 
 
 class EmbeddingsDB(object):
@@ -44,7 +42,7 @@ class FaissIVFFlatIndex(EmbeddingsDB):
         dataframe: pd.DataFrame,
         new_embeddings_grouped: pd.Series,
         faiss_dir_path: str = FaissConfigurations.base_path,
-        similarity_threshold: float = 0.95,
+        similarity_threshold: float = 0.90,
         run_id=None,
     ):
         d = 1024
@@ -231,7 +229,7 @@ class FaissIVFFlatIndex(EmbeddingsDB):
         if faiss_db is None:
             return []
         similar_clusters = faiss_db.search(
-            np.array(QGenieBGEM3Embedding().embed_query(query)).reshape(-1, 1),
+            np.array(FallbackEmbeddings().embed_query(query)).reshape(-1, 1),
             k=k,
         )
         return similar_clusters
@@ -257,7 +255,7 @@ class SearchInExistingFaiss(object):
         if faiss_db is None:
             return key
 
-        Distance, Index = faiss_db.search(np.array(QGenieBGEM3Embedding().embed_query(query)).reshape(1, -1), k=k)
+        Distance, Index = faiss_db.search(np.array(FallbackEmbeddings().embed_query(query)).reshape(1, -1), k=k)
         index = int(Index[0][0])
         score = float(Distance[0][0])
 
@@ -269,7 +267,7 @@ class SearchInExistingFaiss(object):
         print(f"For Query: {query}, score: {score}, cluster: {key}")
         return key, class_key
 
-    async def batch_search(self, type: str, query: Union[str, list[str]], k: int = 2):
+    def batch_search(self, type: str, query: Union[str, list[str]], k: int = 2):
         faiss_db, metadata = self._load_faiss(type)
         key = ClusterSpecificKeys.non_grouped_key
         queries = [query] if isinstance(query, str) else query
@@ -278,7 +276,7 @@ class SearchInExistingFaiss(object):
             return [key] * len(queries), [np.nan] * len(queries)
 
         print(f"Generating embeddings in batch search")
-        embeddings = await QGenieBGEM3Embedding().aembed_query_batch(queries)
+        embeddings = FallbackEmbeddings().embed(queries)
 
         # Search in FAISS
         print("Searching for closest index in faiss")

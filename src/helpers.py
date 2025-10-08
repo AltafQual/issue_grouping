@@ -2,13 +2,16 @@ import asyncio
 import hashlib
 import json
 import os
+import queue
 import random
 import re
+import time
 import traceback
 from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime
 from functools import wraps
 from io import BytesIO
+from queue import Queue
 
 import numpy as np
 import pandas as pd
@@ -16,6 +19,7 @@ import swifter
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.schedulers.base import STATE_RUNNING
 from rapidfuzz import fuzz
+from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.neighbors import LocalOutlierFactor
 
@@ -35,7 +39,7 @@ from src.qgenie import classify_cluster_based_of_type, generate_cluster_name
 logger = AppLogger().get_logger(__name__)
 sql_connection = ConnectToMySql()
 faiss_runner = FaissIVFFlatIndex()
-faiss_update_queue = asyncio.Queue()
+faiss_update_queue = Queue()
 scheduler = BackgroundScheduler()
 
 # in-memory tc id data cache
@@ -131,6 +135,32 @@ def assign_cluster_class(df: pd.DataFrame) -> pd.DataFrame:
         logger.error(f"assign_cluster_class error: {e}")
 
     return df
+
+
+def load_cached_model(model_name="BAAI/bge-m3", models_dir="models"):
+    try:
+        # Convert model name to Hugging Face cache format
+        model_folder_name = f"models--{model_name.replace('/', '--')}"
+
+        # Construct full path to the model cache
+        cwd = os.getcwd()
+        model_base_path = os.path.join(cwd, models_dir, model_folder_name, "snapshots")
+
+        if not os.path.exists(model_base_path):
+            raise FileNotFoundError(f"No cached model found at {model_base_path}")
+
+        # Get the first snapshot folder
+        snapshots = os.listdir(model_base_path)
+        if not snapshots:
+            raise FileNotFoundError(f"No snapshot folders found in {model_base_path}")
+
+        model_path = os.path.join(model_base_path, snapshots[0])
+        print(f"Loading model from: {model_path}")
+
+        return SentenceTransformer(model_path)
+    except Exception as e:
+        print(f"Exception occured while loading cached model: {e}")
+        return None
 
 
 @execution_timer
@@ -411,14 +441,14 @@ def detect_cluster_outlier(df: pd.DataFrame) -> pd.DataFrame:
 
 
 @execution_timer
-async def check_if_issue_alread_grouped(df: pd.DataFrame) -> pd.DataFrame:
+def check_if_issue_alread_grouped(df: pd.DataFrame) -> pd.DataFrame:
     # Identify rows that are not yet grouped
     mask = df[DataFrameKeys.cluster_name].isin([ClusterSpecificKeys.non_grouped_key, np.nan])
     ungrouped_df = df[mask]
 
     if not ungrouped_df.empty:
         # Get cluster names using FAISS
-        new_cluster_names, class_names = await SearchInExistingFaiss().batch_search(
+        new_cluster_names, class_names = SearchInExistingFaiss().batch_search(
             type=ungrouped_df.iloc[0]["type"],  # assuming same type for batch
             query=ungrouped_df[DataFrameKeys.preprocessed_text_key].tolist(),
         )
@@ -557,7 +587,7 @@ async def async_process_by_type(df, update_faiss_and_sql=False, run_id=None):
             [df.assign(cluster_type=cluster_name) for cluster_name, df in results.items()],
             ignore_index=True,
         )
-        analyzer.save_as_faiss(faiss_runner, clustered_df, run_id=run_id)
+        faiss_update_queue.put((clustered_df, run_id))
 
     return results
 
@@ -581,7 +611,7 @@ async def concurrent_process_by_type(df, update_faiss_and_sql=False, run_id=None
 
     loop = asyncio.get_running_loop()
     grouped_df = df.groupby("type")
-    with ProcessPoolExecutor() as executor:
+    with ProcessPoolExecutor(max_workers=5) as executor:
         tasks = [loop.run_in_executor(executor, run_analysis_in_process, group_df) for t, group_df in grouped_df]
         analysis_results = await asyncio.gather(*tasks)
 
@@ -594,7 +624,7 @@ async def concurrent_process_by_type(df, update_faiss_and_sql=False, run_id=None
             [df.assign(cluster_type=cluster_name) for cluster_name, df in results.items()],
             ignore_index=True,
         )
-        await faiss_update_queue.put((clustered_df, run_id))
+        faiss_update_queue.put((clustered_df, run_id))
 
     return results
 
@@ -621,15 +651,20 @@ async def async_sequential_process_by_type(df, update_faiss_and_sql=False, run_i
             [df.assign(cluster_type=cluster_name) for cluster_name, df in results.items()],
             ignore_index=True,
         )
-        analyzer.save_as_faiss(faiss_runner, clustered_df, run_id=run_id)
+        faiss_update_queue.put((clustered_df, run_id))
 
     return results
 
 
-async def faiss_update_worker():
+def faissdb_update_worker():
+    print("Starting faiss db update background job")
     while True:
-        await asyncio.sleep(5)
-        task = await faiss_update_queue.get()
+        try:
+            task = faiss_update_queue.get(timeout=5)
+        except queue.Empty:
+            # No task available, continue waiting
+            continue
+
         try:
             clustered_df, run_id = task
             from src.failure_analyzer import FailureAnalyzer
@@ -640,6 +675,7 @@ async def faiss_update_worker():
             logger.error(f"Error in FAISS update: {e}")
         finally:
             faiss_update_queue.task_done()
+            time.sleep(10)
 
 
 def filter_and_sort_by_embedded_datetime(strings: list[str], n_remove: int = 0) -> list[str]:

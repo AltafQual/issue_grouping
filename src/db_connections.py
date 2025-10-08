@@ -222,7 +222,7 @@ class ConnectToMySql(DatabaseConnection):
             input_df: DataFrame containing cluster_name, runtime, reason, and type columns
         """
         required_columns = [DataFrameKeys.cluster_name, "runtime", "reason", "type", DataFrameKeys.cluster_class]
-        unique_columns_subset = ["runtime", "type"]
+        unique_columns_subset = [DataFrameKeys.cluster_name, "runtime", "type"]
         if not all(col in input_df.columns for col in required_columns):
             logger.error(f"Input DataFrame must contain columns: {required_columns}")
             return
@@ -254,10 +254,8 @@ class ConnectToMySql(DatabaseConnection):
                     test_type = row["type"].lower()
                     cluster_class = row[DataFrameKeys.cluster_class].strip().lower()
 
-                    # TODO: debug log remove later
-                    logger.info(f"Pushing row to sql: {row}")
-
                     if (cluster_name, runtime, test_type) not in existing_pairs:
+                        logger.info(f"Pushing row to sql: {row}")
                         new_rows.append(
                             (
                                 cluster_name,
