@@ -14,6 +14,7 @@ regex_based_filteration_patterns = {
 @dataclass
 class DataFrameKeys:
     embeddings_key: str = "embeddings"
+    error_reason: str = "reason"
     preprocessed_text_key: str = "preprocessed_reason"
     cluster_type_int: str = "int_cluster"
     cluster_name: str = "clusters"
@@ -21,6 +22,7 @@ class DataFrameKeys:
     error_logs_length: str = "logs_length"
     index: str = "unique_id"
     grouped_from_faiss: str = "issue_already_occured"
+    cluster_class: str = "cluster_class"
 
 
 @dataclass
@@ -31,7 +33,7 @@ class ClusterSpecificKeys:
 
 @dataclass
 class FaissConfigurations:
-    base_path: str = "test_faiss_issue_grouping_db"
+    base_path: str = "faiss_issue_grouping_db_rerun"
     default_db_name: str = "issue_grouping_db"
 
 

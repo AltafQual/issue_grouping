@@ -141,7 +141,7 @@ def classify_cluster_based_of_type(cluster_logs: list[str]) -> dict:
     prompt_template = ChatPromptTemplate.from_messages(
         [("system", prompts.CLASSIFY_CLUSTER_TYPE_SYS_MESSAGE), ("human", prompts.CLASSIFY_CLUSTER_TYPE_LOG_MESSAGE)]
     )
-    chain = prompt_template | gemini_pro_model | classify_cluster_based_on_type
+    chain = prompt_template | model | classify_cluster_based_on_type
     result = chain.invoke({"logs": cluster_logs})
     return result
 
@@ -486,23 +486,18 @@ def inter_cluster_merging(df: pd.DataFrame) -> pd.DataFrame:
 @execution_timer
 def subcluster_verifier_failed(df: pd.DataFrame):
     """
-    Iteratively sub-cluster logs in batches of 50 using the SUBCLUSTER_VERIFIER_FAILED prompts.
+    Iteratively sub-cluster logs in batches of n using the SUBCLUSTER_VERIFIER_FAILED prompts.
     Maintains a previous_clusters registry across batches, and within each batch continues to
     refine subclusters until no new indices are added or a safety cap is hit.
-
-    Changes:
-    - Limits per-batch iterations to 5.
-    - Once an index is assigned, it is excluded from subsequent iterations within the same batch.
-    - Any logs not assigned to any subcluster by the end are grouped under the special key "-1".
 
     Returns:
     - dict[str, list[int]]: final consolidated mapping of subcluster name -> indices
     """
     if df is None or df.empty:
-        return {}
+        return pd.DataFrame()
 
     df = df.reset_index(drop=True)
-    logs = [{"index": int(idx), "error log": row[DataFrameKeys.preprocessed_text_key]} for idx, row in df.iterrows()]
+    logs = [{"index": int(idx), "error log": row[DataFrameKeys.error_reason]} for idx, row in df.iterrows()]
 
     # Helper to chunk logs into non-overlapping batches of 50
     def chunk_logs(items, size=30):
@@ -516,7 +511,7 @@ def subcluster_verifier_failed(df: pd.DataFrame):
             ("human", prompts.SUBCLUSTER_VERIFIER_FAILED_LOG_MESSAGE),
         ]
     )
-    chain = prompt_template | gemini_pro_model | subcluster_verifer_failed
+    chain = prompt_template | model | subcluster_verifer_failed
 
     # previous_clusters as a dict[str, set[int]] for consolidation
     previous_clusters_agg: dict[str, set[int]] = {}
@@ -634,6 +629,7 @@ def subcluster_verifier_failed(df: pd.DataFrame):
             df.loc[indices, DataFrameKeys.cluster_name] = ClusterSpecificKeys.non_grouped_key
 
     return df
+
 
 @execution_timer
 async def qgenie_post_processing(df: pd.DataFrame) -> pd.DataFrame:

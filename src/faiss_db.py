@@ -12,7 +12,6 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 from src.constants import ClusterSpecificKeys, DataFrameKeys, FaissConfigurations
 from src.embeddings import QGenieBGEM3Embedding
-from src.qgenie import classify_cluster_based_of_type
 
 
 class EmbeddingsDB(object):
@@ -115,19 +114,12 @@ class FaissIVFFlatIndex(EmbeddingsDB):
                 # Preserve existing entry (class, run_ids, etc.)
                 entry = metadata[cluster_name]
             else:
-                # New cluster – compute its class
-                from src.helpers import get_cluster_class, sql_connection
+                entry = {
+                    "class": dataframe[dataframe[DataFrameKeys.cluster_name] == cluster_name].iloc[0][
+                        DataFrameKeys.cluster_class
+                    ]
+                }
 
-                cluster_class = classify_cluster_based_of_type(
-                    dataframe[dataframe[DataFrameKeys.cluster_name] == cluster_name].reason.tolist()
-                )
-                cluster_class = get_cluster_class(cluster_class)
-                entry = {"class": cluster_class}
-                # Update DB for the new cluster
-                sql_connection.update_error_group_class(
-                    dataframe[dataframe[DataFrameKeys.cluster_name] == cluster_name],
-                    cluster_class,
-                )
             # Handle run_id accumulation
             if run_id:
                 entry.setdefault("run_ids", [])
@@ -135,9 +127,12 @@ class FaissIVFFlatIndex(EmbeddingsDB):
                 if not isinstance(entry["run_ids"], list):
                     entry["run_ids"] = list(entry["run_ids"])
                 entry["run_ids"].append(run_id)
-                # Optional trimming to keep list size reasonable
-                if len(entry["run_ids"]) > 50:
-                    entry["run_ids"] = entry["run_ids"][-45:]
+
+                if len(entry["run_ids"]) > 100:
+                    from src.helpers import filter_and_sort_by_embedded_datetime
+
+                    entry["run_ids"] = filter_and_sort_by_embedded_datetime(entry["run_ids"])
+
             ordered_metadata[cluster_name] = entry
 
         # Replace metadata with the ordered version
@@ -159,9 +154,9 @@ class FaissIVFFlatIndex(EmbeddingsDB):
 
         processed_runids.append(run_id)
 
-        # Keep only the latest 1000 entries (drop the oldest 10 if exceeded)
-        if len(processed_runids) > 1000:
-            processed_runids = processed_runids[10:]
+        # # Keep only the latest 1000 entries (drop the oldest 10 if exceeded)
+        # if len(processed_runids) > 1000:
+        #     processed_runids = processed_runids[10:]
 
         with open(os.path.join(faiss_dir_path, "processed_runids.json"), "w") as f:
             f.write(json.dumps(processed_runids, indent=3))
@@ -205,20 +200,14 @@ class FaissIVFFlatIndex(EmbeddingsDB):
                     faiss.write_index(faiss_db, os.path.join(base_path, "index.faiss").lower())
 
                     for cluster_name in embeddings_grouped.index.tolist():
-                        from src.helpers import get_cluster_class, sql_connection
-
-                        cluster_class = classify_cluster_based_of_type(
-                            filtered_df[filtered_df[DataFrameKeys.cluster_name] == cluster_name].reason.tolist()
-                        )
-                        cluster_class = get_cluster_class(cluster_class)
-                        metadata[cluster_name] = {"class": cluster_class}
+                        metadata[cluster_name] = {
+                            "class": filtered_df[filtered_df[DataFrameKeys.cluster_name] == cluster_name].iloc[0][
+                                DataFrameKeys.cluster_class
+                            ]
+                        }
                         metadata[cluster_name].setdefault("run_ids", [])
                         if run_id:
                             metadata[cluster_name]["run_ids"].append(run_id)
-
-                        sql_connection.update_error_group_class(
-                            filtered_df[filtered_df[DataFrameKeys.cluster_name] == cluster_name], cluster_class
-                        )
 
                     with open(os.path.join(base_path, "metadata.json"), "w") as f:
                         f.write(json.dumps(metadata, indent=3))
@@ -263,6 +252,7 @@ class SearchInExistingFaiss(object):
     def search(self, type: str, query: str, k: int = 2) -> Union[str, None]:
         faiss_db, metadata = self._load_faiss(type)
         key = ClusterSpecificKeys.non_grouped_key
+        class_key = np.nan
 
         if faiss_db is None:
             return key
@@ -274,33 +264,43 @@ class SearchInExistingFaiss(object):
         if score >= 0.95:
             # Use ordered keys from metadata to map index to cluster
             key = str(list(metadata.keys())[index])
+            class_key = metadata[key]["class"]
 
         print(f"For Query: {query}, score: {score}, cluster: {key}")
-        return key
+        return key, class_key
 
-    async def batch_search(self, type: str, query: Union[str, list[str]], k: int = 2) -> list[str]:
+    async def batch_search(self, type: str, query: Union[str, list[str]], k: int = 2):
         faiss_db, metadata = self._load_faiss(type)
         key = ClusterSpecificKeys.non_grouped_key
         queries = [query] if isinstance(query, str) else query
 
         if faiss_db is None:
-            return [key] * len(queries)
+            return [key] * len(queries), [np.nan] * len(queries)
 
         embeddings = await QGenieBGEM3Embedding().aembed_documents(queries)
 
         # Search in FAISS
         Distance, Index = faiss_db.search(np.array(embeddings), k=k)
+        all_cluster_names = list(metadata.keys())
+        total_cluster_names = len(all_cluster_names)
+        cluster_names, class_names = [], []
 
-        cluster_names = []
-        for i, query in enumerate(queries):
+        for i, q in enumerate(queries):
             index = int(Index[i][0])
             score = float(Distance[i][0])
-            cluster_name = str(list(metadata.keys())[index])
+            if index >= total_cluster_names:
+                print(f"index: {index} is greater than the overall custernames in metadata: {total_cluster_names}")
+                score = 0
+            else:
+                cluster_name = str(all_cluster_names[index])
+                class_name = metadata[cluster_name]["class"]
 
-            print(f"For Query: {query}, score: {score}, cluster: {cluster_name}")
+            print(f"For Query: {q}, score: {score}, cluster: {cluster_name}")
             if score >= 0.95:
                 cluster_names.append(cluster_name)
+                class_names.append(class_name)
             else:
                 cluster_names.append(ClusterSpecificKeys.non_grouped_key)
+                class_names.append(np.nan)
 
-        return cluster_names
+        return cluster_names, class_names

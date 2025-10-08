@@ -3,14 +3,15 @@ CLUSTER_NAMING_SYS_MESSAGE = """
 You are an expert in error log naming. You will be given a list of error logs from a cluster.
 
 Your task is to:
-- Suggest a meaningful cluster name that reflects the entire error type and context.
+- Suggest a highly precise, cause-based cluster name that reflects the entire error type and context (e.g., include relevant operation/module and failure mode when clear).
+- Names must be specific and descriptive, not vague. Prefer root-cause descriptors (e.g., Timeout, ConfigMissing, InitDeinit) over generic terms.
 - Use PascalCase formatting for the cluster name (no spaces, each word capitalized).
-- Don't include name `Cluster` for example TimeoutErrorCluster (should be TimeoutError), InitDeinitErrorCluster (should be InitDeinitError) ...
+- Do not include the word "Cluster" in the name (e.g., TimeoutErrorCluster -> TimeoutError, InitDeinitErrorCluster -> InitDeinitError).
+- Prohibited generic names: Never use generic or quantity-based names such as "ManyImages", "ManyVerifierImages", "VerifierFailedImagesList", "VerifierFailedManyImages", "ImagesList", or any name containing "Many" or "Multiple". Names must not describe volume; they must describe the failure cause.
 
 Return the result strictly as a JSON as shown below. Do not include any explanation or extra text:
-
   {{
-  "cluster_name": "<name in PascalCase>"
+  "cluster_name": "<name in PascalCase or empty string>"
     }}
 """
 CLUSTER_NAMING_LOG_MESSAGE = """Here are the logs:
@@ -110,16 +111,19 @@ Your task:
 - Always return an updated previous_clusters dictionary that merges the returned indices into the chosen subcluster. If a new subcluster is created, add it to previous_clusters.
 
 Rules:
-- Use PascalCase for cluster_name (short, no spaces, each word capitalized). Do not include the word "Cluster" in the name and Make sure the cluster name always starts with VerifierFailed<issue details> and no ManyImages/ManyVerifierImages should be added
+- Use PascalCase for cluster_name (short, no spaces, each word capitalized). Do not include the word "Cluster" in the name. The cluster_name must always start with VerifierFailed followed by a concise, specific failure descriptor (e.g., VerifierFailedTimeout, VerifierFailedConfigMissing, VerifierFailedInitDeinit).
 - indices must be the exact "index" values from the provided logs. INDEX SHOULD BE CORRECT IT IS VERY CRITICAL.
 - Only include logs that strongly fit the chosen subcluster; leave unrelated logs for later passes.
-- Accuracy enforcement: Clusters must be highly precise. Single-log subclusters are permitted only when that single log uniquely and correctly fits the subcluster theme; do not assign incorrect logs. Append a concise failure reason at the end of the PascalCase name (shortened and specific), e.g., VerifierFailedTimeout, VerifierFailedConfigMissing, VerifierFailedInitDeinit.
+- Accuracy enforcement: Clusters must be highly precise. Single-log subclusters are permitted only when that single log uniquely and correctly fits the subcluster theme; do not assign incorrect logs.
+- Prohibited generic names: NEVER USE generic or quantity-based names such as "ManyImages", "ManyVerifierImages", "VerifierFailedManyImages", "VerifierFailedImages", "ImagesList", or any name containing "Many" or "Multiple". Names must describe the root cause or failure mode, not the volume of items.
+- If you cannot confidently determine a specific, cause-based subcluster name, return an empty string "" for cluster_name and an empty list for indices. In that case, do not update or create any subcluster; such logs will be handled later.
+
 - Return strictly and only this JSON format (no extra text):
-{{
-  "cluster_name": "<name in PascalCase format: `VerifierFailed<sub cluster type>`>",
+{
+  "cluster_name": "<name in PascalCase format: `VerifierFailed<sub cluster type>` or empty string>",
   "indices": [<list of indices>],
-  "previous_clusters": {{ "<SubclusterName>": [<indices>], ... }}
-}}
+  "previous_clusters": { "<SubclusterName>": [<indices>], ... }
+}
 """
 
 SUBCLUSTER_VERIFIER_FAILED_LOG_MESSAGE = """

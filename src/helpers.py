@@ -30,7 +30,7 @@ from src.db_connections import ConnectToMySql
 from src.execution_timer_log import execution_timer
 from src.faiss_db import FaissIVFFlatIndex, SearchInExistingFaiss
 from src.logger import AppLogger
-from src.qgenie import generate_cluster_name
+from src.qgenie import classify_cluster_based_of_type, generate_cluster_name
 
 logger = AppLogger().get_logger(__name__)
 sql_connection = ConnectToMySql()
@@ -63,6 +63,74 @@ def get_cluster_class(cluster_dict):
             return cluster_class
 
     return ""
+
+
+def assign_cluster_class(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Assign a class to each cluster by classifying a single representative log per cluster.
+    - Groups by cluster_name
+    - Sends only one preprocessed log to the classifier
+    - Converts the classifier's boolean result to a single class string via get_cluster_class
+    - Assigns that class to all rows with the same cluster_name
+
+    Returns the updated DataFrame.
+    """
+    try:
+        if df is None or df.empty:
+            return df
+
+        # Ensure the target column exists
+        if DataFrameKeys.cluster_class not in df.columns:
+            df.loc[:, DataFrameKeys.cluster_class] = np.nan
+
+        # Exclude non-grouped and empty/no-error clusters
+        exclude_names = {
+            ClusterSpecificKeys.non_grouped_key,
+            str(ClusterSpecificKeys.non_grouped_key),
+            ErrorLogConfigurations.empty_error,
+            ErrorLogConfigurations.no_error,
+        }
+
+        unique_clusters = []
+        cluster_names = df[DataFrameKeys.cluster_name].dropna().unique().tolist()
+
+        for c in cluster_names:
+            if c in exclude_names:
+                continue
+
+            cluster_class = df[df[DataFrameKeys.cluster_name] == c].iloc[0][DataFrameKeys.cluster_class]
+            if pd.isna(cluster_class) or cluster_class == ClusterSpecificKeys.non_grouped_key:
+                unique_clusters.append(c)
+
+        for cluster_name in unique_clusters:
+            cluster_df = df[df[DataFrameKeys.cluster_name] == cluster_name]
+            if cluster_df.empty:
+                continue
+
+            # Use a single representative preprocessed log
+            representative_log = cluster_df.iloc[0][DataFrameKeys.preprocessed_text_key]
+            if not isinstance(representative_log, str) or representative_log.strip() == "":
+                continue
+
+            try:
+                if any(
+                    verifier_type in cluster_name.lower()
+                    for verifier_type in ["verifierfailed", "manyverifierfailed", "verifierlist", "verifierimages"]
+                ):
+                    class_str = "sdk_issue"
+                else:
+                    result = classify_cluster_based_of_type([representative_log])
+                    class_str = get_cluster_class(result) or ""
+                df.loc[cluster_df.index, DataFrameKeys.cluster_class] = class_str
+
+            except Exception as e:
+                logger.error(f"Failed to classify cluster '{cluster_name}': {e}")
+                continue
+
+    except Exception as e:
+        logger.error(f"assign_cluster_class error: {e}")
+
+    return df
 
 
 @execution_timer
@@ -350,13 +418,14 @@ async def check_if_issue_alread_grouped(df: pd.DataFrame) -> pd.DataFrame:
 
     if not ungrouped_df.empty:
         # Get cluster names using FAISS
-        new_cluster_names = await SearchInExistingFaiss().batch_search(
+        new_cluster_names, class_names = await SearchInExistingFaiss().batch_search(
             type=ungrouped_df.iloc[0]["type"],  # assuming same type for batch
             query=ungrouped_df[DataFrameKeys.preprocessed_text_key].tolist(),
         )
 
         # Update the original DataFrame
         df.loc[mask, DataFrameKeys.cluster_name] = new_cluster_names
+        df.loc[mask, DataFrameKeys.cluster_class] = class_names
         df.loc[mask, DataFrameKeys.grouped_from_faiss] = True
 
     return df
@@ -544,9 +613,8 @@ async def async_sequential_process_by_type(df, update_faiss_and_sql=False, run_i
 
     logger.info(f"All types in data: {df.type.unique()}")
     for t, group_df in df.groupby("type"):
-        if t == "verifier":
-            logger.info(f"Processing type: {t}  with {len(group_df)} rows")
-            await process_group(t, group_df)
+        logger.info(f"Processing type: {t}  with {len(group_df)} rows")
+        await process_group(t, group_df)
 
     if results and update_faiss_and_sql:
         clustered_df = pd.concat(
@@ -574,23 +642,50 @@ async def faiss_update_worker():
             faiss_update_queue.task_done()
 
 
-# TODO: test this and add this in the faiss logic or run ids removal
-def filter_and_sort_by_embedded_datetime(strings, n_remove=0):
-    def extract_datetime(s):
-        match = re.search(r"\d{12,}", s)
-        if match:
-            dt_str = match.group()
+def filter_and_sort_by_embedded_datetime(strings: list[str], n_remove: int = 0) -> list[str]:
+    """
+    Extract an embedded datetime from each string (supports 12-digit yymmddHHMMSS and 14-digit yyyymmddHHMMSS),
+    sort by that datetime, remove the first `n_remove` items (in the chosen order), and return the rest.
+    Strings without a parseable datetime are dropped.
+
+    Parameters:
+    - strings: list of input strings.
+    - n_remove: number of earliest (or latest if ascending is False) items to remove after sorting.
+    - ascending: sort order for the extracted datetime.
+
+    Returns:
+    - List of strings filtered and sorted by the extracted datetime.
+    """
+
+    def parse_candidate(token: str):
+        # Try 14-digit YYYYmmddHHMMSS first (if present)
+        if len(token) == 14:
             try:
-                # Parse the datetime string assuming format: yymmddHHMMSS
-                dt = datetime.strptime(dt_str[:12], "%y%m%d%H%M%S")
-                return dt
+                return datetime.strptime(token, "%Y%m%d%H%M%S")
             except ValueError:
-                return None
+                pass
+        # Fallback to 12-digit yymmddHHMMSS (try both ends if token is longer)
+        if len(token) >= 12:
+            for cand in (token[:12], token[-12:]):
+                try:
+                    return datetime.strptime(cand, "%y%m%d%H%M%S")
+                except ValueError:
+                    continue
         return None
 
-    dated_strings = [(extract_datetime(s), s) for s in strings]
-    dated_strings = [item for item in dated_strings if item[0] is not None]
-    dated_strings.sort(key=lambda x: x[0])
-    filtered_strings = [s for _, s in dated_strings[n_remove:]]
+    def extract_datetime(s: str):
+        # Find tokens of length 12 to 14; return the first that parses
+        for token in re.findall(r"\d{12,14}", str(s)):
+            dt = parse_candidate(token)
+            if dt is not None:
+                return dt
+        return None
 
-    return filtered_strings
+    dated = [(extract_datetime(s), s) for s in strings]
+    dated = [t for t in dated if t[0] is not None]
+
+    # Stable, deterministic ordering: by datetime, then by string as tiebreaker
+    dated.sort(key=lambda x: (x[0], x[1]))
+
+    # Drop the first n_remove in the chosen order
+    return [s for _, s in dated[n_remove:]]

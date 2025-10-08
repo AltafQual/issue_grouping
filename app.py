@@ -154,6 +154,7 @@ if st.session_state.processed_data and st.session_state.clustered_df_grouped is 
                     "model_name",
                     "tags",
                     "feature_name",
+                    DataFrameKeys.cluster_class,
                     DataFrameKeys.grouped_from_faiss,
                 ]
                 COL_TO_SHOW = [c for c in COL_TO_SHOW if c in clustered_df.columns]

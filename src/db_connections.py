@@ -221,7 +221,7 @@ class ConnectToMySql(DatabaseConnection):
         Args:
             input_df: DataFrame containing cluster_name, runtime, reason, and type columns
         """
-        required_columns = [DataFrameKeys.cluster_name, "runtime", "reason", "type"]
+        required_columns = [DataFrameKeys.cluster_name, "runtime", "reason", "type", DataFrameKeys.cluster_class]
         unique_columns_subset = ["runtime", "type"]
         if not all(col in input_df.columns for col in required_columns):
             logger.error(f"Input DataFrame must contain columns: {required_columns}")
@@ -247,31 +247,39 @@ class ConnectToMySql(DatabaseConnection):
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
             for _, row in unique_rows.iterrows():
-                cluster_name = row[DataFrameKeys.cluster_name].strip().lower()
-                runtime = row["runtime"].strip().lower()
-                reason = row["reason"].lower()
-                test_type = row["type"].lower()
+                try:
+                    cluster_name = row[DataFrameKeys.cluster_name].strip().lower()
+                    runtime = row["runtime"].strip().lower()
+                    reason = row["reason"].lower()
+                    test_type = row["type"].lower()
+                    cluster_class = row[DataFrameKeys.cluster_class].strip().lower()
 
-                if (cluster_name, runtime, test_type) not in existing_pairs:
-                    new_rows.append(
-                        (
-                            cluster_name,
-                            runtime,
-                            reason,
-                            test_type,
-                            self.generate_key_from_testcase(f"{cluster_name}_{test_type}_{runtime}"),
-                            now,
-                            now,
+                    # TODO: debug log remove later
+                    logger.info(f"Pushing row to sql: {row}")
+
+                    if (cluster_name, runtime, test_type) not in existing_pairs:
+                        new_rows.append(
+                            (
+                                cluster_name,
+                                runtime,
+                                reason,
+                                test_type,
+                                self.generate_key_from_testcase(f"{cluster_name}_{test_type}_{runtime}"),
+                                cluster_class,
+                                now,
+                                now,
+                            )
                         )
-                    )
-                else:
-                    update_rows.append((now, cluster_name, runtime, test_type))
+                    else:
+                        update_rows.append((now, cluster_name, runtime, test_type))
+                except Exception as e:
+                    raise Exception(f"Error: {e} while processing row: {row}")
 
             # Insert new rows
             if new_rows:
                 insert_query = """
-                    INSERT INTO error_map_qgenie (cluster_name, runtime, error_reason, test_type, error_group_id, createdAt, updatedAt)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s);
+                    INSERT INTO error_map_qgenie (cluster_name, runtime, error_reason, test_type, error_group_id, cluster_class, createdAt, updatedAt)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s);
                 """
                 cursor.executemany(insert_query, new_rows)
                 logger.info(f"Inserted {len(new_rows)} new entries into error_map_qgenie.")

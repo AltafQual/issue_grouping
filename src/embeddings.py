@@ -35,7 +35,9 @@ class QGenieBGEM3Embedding(Embeddings):
             except Exception as e:
                 logger.warning(f"Async attempt {attempt + 1} failed: {e}")
                 if attempt == 2:
-                    raise Exception(f"Failed to generate embeddings after 3 attempts: {e}")
+                    raise Exception(
+                        f"Failed to generate embeddings after 3 attempts: {e} \n for inputs: {args} {kwargs}"
+                    )
                 await asyncio.sleep(5)
 
     def embed(self, data: list):

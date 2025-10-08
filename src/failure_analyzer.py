@@ -102,7 +102,7 @@ class FailureAnalyzer:
             empty_log_df.loc[:, DataFrameKeys.embeddings_key] = np.nan
 
         failure_df = failure_df[~failure_df.index.isin(empty_log_df.index)]
-        # failure_df = await helpers.check_if_issue_alread_grouped(failure_df)
+        failure_df = await helpers.check_if_issue_alread_grouped(failure_df)
         non_clustered_df = failure_df[
             failure_df[DataFrameKeys.cluster_name] == ClusterSpecificKeys.non_grouped_key
         ].reset_index(drop=True)
@@ -154,6 +154,7 @@ class FailureAnalyzer:
             if non_clustered_df is not None:
                 failure_df = pd.concat([empty_log_df, non_clustered_df], axis=0)
 
+            failure_df = helpers.assign_cluster_class(failure_df)
             return failure_df
 
         # Split data into already clustered and non-clustered
@@ -217,6 +218,7 @@ class FailureAnalyzer:
                 lambda row: generate_cluster_name(row)["cluster_name"], axis=1
             )
 
+        final_df = helpers.assign_cluster_class(final_df)
         return final_df
 
     def save_results(self, data: pd.DataFrame, output_path: Optional[str] = None) -> None:
