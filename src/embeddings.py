@@ -1,16 +1,12 @@
-import abc
 import asyncio
 import time
 import threading
-from concurrent.futures import ThreadPoolExecutor
 
 from langchain.embeddings.base import Embeddings
-from sentence_transformers import SentenceTransformer
 from sentence_transformers import SentenceTransformer
 
 from qgenie.integrations.langchain import QGenieEmbeddings
 from src.constants import QGENEIE_API_KEY
-from src.execution_timer_log import execution_timer
 from src.execution_timer_log import execution_timer
 from src.logger import AppLogger
 
@@ -47,25 +43,51 @@ class QGenieBGEM3Embedding(Embeddings):
                 await asyncio.sleep(5)
 
     def embed(self, data: list):
-        return self._retry_sync(self.model.embed_documents, data)
+        logger.info(f"Starting embedding process for {len(data)} documents")
+        batch_size = 100
+        results = []
+
+        for i in range(0, len(data), batch_size):
+            batch = data[i:i+batch_size]
+            batch_end = min(i+batch_size, len(data))
+            logger.info(f"Processing batch: documents {i} to {batch_end-1}")
+            batch_result = self._retry_sync(self.model.embed_documents, batch)
+            logger.info(f"Completed batch with {len(batch)} documents")
+            results.extend(batch_result)
+
+        logger.info(f"Embedding process completed, returning {len(results)} embeddings")
+        return results
 
     def embed_documents(self, data: list[str]) -> list[list[float]]:
         return self._retry_sync(self.model.embed_documents, data)
 
     def embed_query(self, text: str) -> list[float]:
         return self._retry_sync(self.model.embed_query, text)
-
+    
     @execution_timer
+    def embed_without_retry(self, data: list):
+        logger.info(f"Starting embedding process without retry for {len(data)} documents")
+        batch_size = 100
+        results = []
+
+        for i in range(0, len(data), batch_size):
+            batch = data[i:i+batch_size]
+            batch_end = min(i+batch_size, len(data))
+            logger.info(f"Processing batch: documents {i} to {batch_end-1}")
+            batch_result = self.model.embed_documents(batch)
+            logger.info(f"Completed batch with {len(batch)} documents")
+            results.extend(batch_result)
+
+        logger.info(f"Embedding process completed, returning {len(results)} embeddings")
+        return results
+
     @execution_timer
     async def aembed(self, data: list):
         return await self._retry_async(self.model.aembed_documents, data)
 
     @execution_timer
-    @execution_timer
     async def aembed_query(self, text: str):
         return await self._retry_async(self.model.aembed_query, text)
-
-    @execution_timer
 
     @execution_timer
     async def aembed_query_batch(self, text: str):
@@ -100,7 +122,24 @@ class BGEM3Embeddings(object):
 
     @execution_timer
     def embed(self, data: list[str]):
-        return self.model.encode_document(data)
+        logger.info(f"Starting embedding process for {len(data)} documents")
+        batch_size = max(1, len(data) // 10)
+        results = []
+
+        for i in range(0, len(data), batch_size):
+            batch = data[i:i+batch_size]
+            batch_end = min(i+batch_size, len(data))
+            logger.info(f"Processing batch {i//batch_size + 1}/10: documents {i} to {batch_end-1}")
+            batch_result = self.model.encode_document(batch)
+            logger.info(f"Completed batch {i//batch_size + 1}/10")
+            results.append(batch_result)
+
+        combined_results = []
+        for batch_result in results:
+            combined_results.extend(batch_result.tolist())
+
+        logger.info(f"Embedding process completed, returning {len(combined_results)} embeddings")
+        return combined_results
 
 
 class FallbackEmbeddings(Embeddings):
@@ -109,7 +148,7 @@ class FallbackEmbeddings(Embeddings):
     def __init__(self):
         self.qgenie_embeddings = QGenieBGEM3Embedding()
         self.local_embeddings = BGEM3Embeddings()
-        self.timeout = 30  # 30 seconds timeout
+        self.timeout = 60
         super().__init__()
 
     def _run_with_timeout(self, func, *args, **kwargs):
@@ -142,8 +181,8 @@ class FallbackEmbeddings(Embeddings):
     def embed(self, data: list):
         if not data:
             return []
-        logger.info("Attempting to generate embeddings with QGenie")
-        qgenie_result = self._run_with_timeout(self.qgenie_embeddings.embed, data)
+        logger.info(f"Attempting to generate embeddings with QGenie: lenght of data: {len(data)}")
+        qgenie_result = self._run_with_timeout(self.qgenie_embeddings.embed_without_retry, data)
 
         if qgenie_result is not None:
             logger.info("Successfully generated embeddings with QGenie")

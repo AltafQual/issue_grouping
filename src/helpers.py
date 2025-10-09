@@ -511,7 +511,8 @@ def tc_id_scheduler():
         run_ids = sql_connection.fetch_runids()
         run_ids.to_parquet(parquet_file)
         logger.info("Background task updated Parquet file")
-        asyncio.run(process_tc_ids_async_bg_job(run_ids))
+        #NOTE: currently disabling the nightly processing background job, will do it manually for now
+        # asyncio.run(process_tc_ids_async_bg_job(run_ids))
 
     job_id = "update_tc_ids_job"
 
