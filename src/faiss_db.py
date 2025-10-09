@@ -9,7 +9,7 @@ import pandas as pd
 from sklearn.metrics.pairwise import cosine_similarity
 
 from src.constants import ClusterSpecificKeys, DataFrameKeys, FaissConfigurations
-from src.embeddings import BGEM3Embeddings
+from src.embeddings import FallbackEmbeddings
 
 
 class EmbeddingsDB(object):
@@ -229,7 +229,7 @@ class FaissIVFFlatIndex(EmbeddingsDB):
         if faiss_db is None:
             return []
         similar_clusters = faiss_db.search(
-            np.array(QGenieBGEM3Embedding().embed_query(query)).reshape(-1, 1),
+            np.array(FallbackEmbeddings().embed_query(query)).reshape(-1, 1),
             k=k,
         )
         return similar_clusters
@@ -255,7 +255,7 @@ class SearchInExistingFaiss(object):
         if faiss_db is None:
             return key
 
-        Distance, Index = faiss_db.search(np.array(QGenieBGEM3Embedding().embed_query(query)).reshape(1, -1), k=k)
+        Distance, Index = faiss_db.search(np.array(FallbackEmbeddings().embed_query(query)).reshape(1, -1), k=k)
         index = int(Index[0][0])
         score = float(Distance[0][0])
 
@@ -276,7 +276,7 @@ class SearchInExistingFaiss(object):
             return [key] * len(queries), [np.nan] * len(queries)
 
         print(f"Generating embeddings in batch search")
-        embeddings = BGEM3Embeddings().embed(queries)
+        embeddings = FallbackEmbeddings().embed(queries)
 
         # Search in FAISS
         print("Searching for closest index in faiss")

@@ -1,5 +1,6 @@
 import asyncio
 import threading
+import threading
 from typing import List, Optional
 
 import numpy as np
@@ -11,13 +12,12 @@ from sklearn.cluster import HDBSCAN
 from src import helpers
 from src.constants import ClusterSpecificKeys, DataFrameKeys, ErrorLogConfigurations
 from src.data_loader import ExcelLoader
-from src.embeddings import BGEM3Embeddings, QGenieBGEM3Embedding
+from src.embeddings import BGEM3Embeddings, QGenieBGEM3Embedding,FallbackEmbeddings
 from src.faiss_db import FaissIVFFlatIndex
 from src.logger import AppLogger
 from src.qgenie import generate_cluster_name, qgenie_post_processing, subcluster_verifier_failed
 
 threading.Thread(target=helpers.faissdb_update_worker, daemon=True).start()
-bge_embedding_model = BGEM3Embeddings()
 
 
 class FailureAnalyzer:
@@ -25,7 +25,7 @@ class FailureAnalyzer:
         """Initialize the failure analyzer with configurable parameters."""
         self.logger = AppLogger().get_logger(__name__)
         self.logger.info("loading model")
-        self.embedding_model = bge_embedding_model
+        self.embedding_model = FallbackEmbeddings()
 
     def load_data(self, file_path: str = None, st_obj=None, tc_id=None) -> pd.DataFrame:
         """Load data from the specified Excel file."""
@@ -42,37 +42,9 @@ class FailureAnalyzer:
     def generate_embeddings(self, texts: List[str]) -> np.ndarray:
         """Generate embeddings for the provided texts."""
         self.logger.info(f"Generating embeddings for {len(texts)} texts")
-        try:
-            embeddings = self.embedding_model.embed(texts)
-        except Exception as e:
-            self.logger.exception(
-                f"Exception occured while generating embeddings using local model falling back to qgenie: {e}"
-            )
-            embeddings = QGenieBGEM3Embedding().embed(texts)
-
+        embeddings = self.embedding_model.embed(texts)
         if isinstance(embeddings, np.ndarray):
             return list(embeddings)
-        return list(np.array(embeddings))
-
-    async def agenerate_embeddings(self, texts: List[str]) -> np.ndarray:
-        """Generate embeddings for the provided texts."""
-        self.logger.info(f"Generating embeddings for {len(texts)} texts")
-        if not texts:
-            return []
-
-        if len(texts) > 10:
-            embeddings = await self.embedding_model.aembed(texts)
-        else:
-            return await self._agenerate_single_embeddings(texts)
-        return list(np.array(embeddings))
-
-    async def _agenerate_single_embeddings(self, texts: List[str]) -> np.ndarray:
-        """Generate embeddings for the provided texts."""
-        if not isinstance(texts, list):
-            texts = [texts]
-        self.logger.info(f"Generating embeddings for {len(texts)} texts")
-        embeddings = [self.embedding_model.aembed_query(text) for text in texts]
-        embeddings = await asyncio.gather(*embeddings)
         return list(np.array(embeddings))
 
     def cluster_embeddings(self, embeddings: np.ndarray) -> np.ndarray:
@@ -128,6 +100,7 @@ class FailureAnalyzer:
                     ~non_clustered_df[DataFrameKeys.cluster_name].isin(
                         {ErrorLogConfigurations.empty_error, ErrorLogConfigurations.no_error}
                     )
+                &(non_clustered_df[DataFrameKeys.grouped_from_faiss] != True)
                 )
             ]
 
@@ -135,7 +108,8 @@ class FailureAnalyzer:
                 self.generate_embeddings(fuzzy_clustered_df[DataFrameKeys.preprocessed_text_key].tolist()),
                 index=fuzzy_clustered_df.index,
             )
-            non_clustered_df = non_clustered_df[~non_clustered_df.index.isin(fuzzy_clustered_df.index)]
+            non_clustered_df = non_clustered_df[~non_clustered_df.index.isin(fuzzy_clustered_df.index)
+                                                &(non_clustered_df[DataFrameKeys.grouped_from_faiss] != True)]
 
         faiss_grouped = failure_df[failure_df[DataFrameKeys.grouped_from_faiss] == True]
         self.logger.info(
