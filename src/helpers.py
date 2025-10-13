@@ -68,14 +68,15 @@ def get_cluster_class(cluster_dict):
 
     return ""
 
-
-def assign_cluster_class(df: pd.DataFrame) -> pd.DataFrame:
+@execution_timer
+async def assign_cluster_class(df: pd.DataFrame) -> pd.DataFrame:
     """
     Assign a class to each cluster by classifying a single representative log per cluster.
     - Groups by cluster_name
     - Sends only one preprocessed log to the classifier
     - Converts the classifier's boolean result to a single class string via get_cluster_class
     - Assigns that class to all rows with the same cluster_name
+    - Uses semaphores to limit concurrent requests to 5 at a time
 
     Returns the updated DataFrame.
     """
@@ -89,8 +90,6 @@ def assign_cluster_class(df: pd.DataFrame) -> pd.DataFrame:
 
         # Exclude non-grouped and empty/no-error clusters
         exclude_names = {
-            ClusterSpecificKeys.non_grouped_key,
-            str(ClusterSpecificKeys.non_grouped_key),
             ErrorLogConfigurations.empty_error,
             ErrorLogConfigurations.no_error,
         }
@@ -106,33 +105,56 @@ def assign_cluster_class(df: pd.DataFrame) -> pd.DataFrame:
             if pd.isna(cluster_class) or cluster_class == ClusterSpecificKeys.non_grouped_key:
                 unique_clusters.append(c)
 
-        for cluster_name in unique_clusters:
-            cluster_df = df[df[DataFrameKeys.cluster_name] == cluster_name]
-            if cluster_df.empty:
+        logger.info(f"Found {len(unique_clusters)} clusters that need classification")
+
+        # Create a semaphore to limit concurrent requests
+        semaphore = asyncio.Semaphore(3)
+
+        async def classify_cluster(cluster_name):
+            async with semaphore:
+                logger.info(f"Processing classification for cluster: {cluster_name}")
+                cluster_df = df[df[DataFrameKeys.cluster_name] == cluster_name]
+                if cluster_df.empty:
+                        logger.warning(f"Empty cluster dataframe for {cluster_name}")
+                        return None, None
+                # Use a single representative preprocessed log
+                representative_log = cluster_df.iloc[0][DataFrameKeys.preprocessed_text_key]
+                if not isinstance(representative_log, str) or representative_log.strip() == "":
+                        logger.warning(f"Invalid representative log for cluster {cluster_name}")
+                        return None, None
+                try:
+                    if any(
+                        verifier_type in cluster_name.lower()
+                        for verifier_type in ["verifierfailed", "manyverifierfailed", "verifierlist", "verifierimages"]
+                    ):
+                        class_str = "sdk_issue"
+                        logger.info(f"Classified {cluster_name} as 'sdk_issue' based on name pattern")
+                    else:
+                        logger.info(f"Sending classification request for cluster: {cluster_name}")
+                        result = await classify_cluster_based_of_type([representative_log])
+                        class_str = get_cluster_class(result) or ""
+                        logger.info(f"Received classification for {cluster_name}: {class_str}")
+                    
+                        return cluster_df.index, class_str
+                except Exception as e:
+                    logger.error(f"Failed to classify cluster '{cluster_name}': {e}")
+                    return None, None
+
+        # Process clusters in batches of 5
+        tasks = [classify_cluster(cluster_name) for cluster_name in unique_clusters]
+        results = await asyncio.gather(*tasks)
+
+        # Update the DataFrame with classification results
+        for result in results:
+            if not result:
                 continue
-
-            # Use a single representative preprocessed log
-            representative_log = cluster_df.iloc[0][DataFrameKeys.preprocessed_text_key]
-            if not isinstance(representative_log, str) or representative_log.strip() == "":
-                continue
-
-            try:
-                if any(
-                    verifier_type in cluster_name.lower()
-                    for verifier_type in ["verifierfailed", "manyverifierfailed", "verifierlist", "verifierimages"]
-                ):
-                    class_str = "sdk_issue"
-                else:
-                    result = classify_cluster_based_of_type([representative_log])
-                    class_str = get_cluster_class(result) or ""
-                df.loc[cluster_df.index, DataFrameKeys.cluster_class] = class_str
-
-            except Exception as e:
-                logger.error(f"Failed to classify cluster '{cluster_name}': {e}")
-                continue
-
+            indices, class_str = result
+            df.loc[indices, DataFrameKeys.cluster_class] = class_str
+            logger.info(f"Updated {len(indices)} rows with class '{class_str}'")
+            
     except Exception as e:
         logger.error(f"assign_cluster_class error: {e}")
+        logger.error(traceback.format_exc())
 
     return df
 
@@ -228,7 +250,7 @@ def remove_empty_and_misc_rows(df: pd.DataFrame, errors: list, error_column_name
     return df
 
 
-def update_rows_by_regex_patterns(df: pd.DataFrame) -> pd.DataFrame:
+async def update_rows_by_regex_patterns(df: pd.DataFrame) -> pd.DataFrame:
     for name, pattern in regex_based_filteration_patterns.items():
         matched_df = df[
             df[DataFrameKeys.preprocessed_text_key].astype(str).str.contains(pattern, flags=re.IGNORECASE, regex=True)
@@ -238,7 +260,7 @@ def update_rows_by_regex_patterns(df: pd.DataFrame) -> pd.DataFrame:
             if "verifier failed" in pattern:
                 cluster_name = {"cluster_name": "VerifierFailed"}
             else:
-                cluster_name = generate_cluster_name(matched_df)
+                cluster_name = await generate_cluster_name(matched_df)
             df.loc[matched_df.index, DataFrameKeys.cluster_name] = cluster_name["cluster_name"]
 
 
@@ -362,7 +384,7 @@ def group_similar_errors(df: pd.DataFrame, column: str, threshold) -> list:
 
 
 @execution_timer
-def fuzzy_cluster_grouping(
+async def fuzzy_cluster_grouping(
     failures_dataframe: pd.DataFrame, threshold=100, bin_intervals=[[0, 50], [50, 110]]
 ) -> pd.DataFrame:
     failures_dataframe.loc[:, DataFrameKeys.error_logs_length] = failures_dataframe[
@@ -385,12 +407,18 @@ def fuzzy_cluster_grouping(
             threshold,
         )
 
-        for group in grouped_indices:
-            result = generate_cluster_name(failures_dataframe.iloc[group])
-            failures_dataframe.loc[group, DataFrameKeys.cluster_name] = result["cluster_name"]
+        # Process groups in parallel using asyncio.gather
+        if grouped_indices:
+            # Create tasks for each group
+            tasks = [generate_cluster_name(failures_dataframe.iloc[group]) for group in grouped_indices]
+            # Execute all tasks concurrently
+            results = await asyncio.gather(*tasks)
+            # Update the dataframe with results
+            for group, result in zip(grouped_indices, results):
+                failures_dataframe.loc[group, DataFrameKeys.cluster_name] = result["cluster_name"]
 
     # regex based common errors mapping
-    update_rows_by_regex_patterns(failures_dataframe)
+    await update_rows_by_regex_patterns(failures_dataframe)
     return failures_dataframe
 
 
@@ -441,14 +469,14 @@ def detect_cluster_outlier(df: pd.DataFrame) -> pd.DataFrame:
 
 
 @execution_timer
-def check_if_issue_alread_grouped(df: pd.DataFrame) -> pd.DataFrame:
+async def check_if_issue_alread_grouped(df: pd.DataFrame) -> pd.DataFrame:
     # Identify rows that are not yet grouped
     mask = df[DataFrameKeys.cluster_name].isin([ClusterSpecificKeys.non_grouped_key, np.nan])
     ungrouped_df = df[mask]
 
     if not ungrouped_df.empty:
         # Get cluster names using FAISS
-        new_cluster_names, class_names = SearchInExistingFaiss().batch_search(
+        new_cluster_names, class_names= await SearchInExistingFaiss().batch_search(
             type=ungrouped_df.iloc[0]["type"],  # assuming same type for batch
             query=ungrouped_df[DataFrameKeys.preprocessed_text_key].tolist(),
         )
@@ -653,6 +681,23 @@ async def async_sequential_process_by_type(df, update_faiss_and_sql=False, run_i
             ignore_index=True,
         )
         faiss_update_queue.put((clustered_df, run_id))
+
+    return results
+
+@execution_timer
+async def generate_cluster_name_for_single_rows(df_subset):
+    async def process_row(row):
+        result = await generate_cluster_name(row)
+        return result["cluster_name"]
+    semaphore = asyncio.Semaphore(3)
+    results = []
+
+    async def process_with_semaphore(row):
+        async with semaphore:
+            return await process_row(row)
+
+    tasks = [process_with_semaphore(row) for _, row in df_subset.iterrows()]
+    results = await asyncio.gather(*tasks)
 
     return results
 

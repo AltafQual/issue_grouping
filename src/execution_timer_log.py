@@ -1,3 +1,4 @@
+import asyncio
 import functools
 import time
 
@@ -10,11 +11,22 @@ def execution_timer(func):
     """
 
     @functools.wraps(func)
-    def wrapper(*args, **kwargs):
+    async def async_wrapper(*args, **kwargs):
+        start_time = time.time()
+        result = await func(*args, **kwargs)
+        end_time = time.time()
+        AppLogger.get_logger().info(f"Function '{func.__name__}' executed in {end_time - start_time:.4f} seconds")
+        return result
+
+    @functools.wraps(func)
+    def sync_wrapper(*args, **kwargs):
         start_time = time.time()
         result = func(*args, **kwargs)
         end_time = time.time()
         AppLogger.get_logger().info(f"Function '{func.__name__}' executed in {end_time - start_time:.4f} seconds")
         return result
 
-    return wrapper
+    if asyncio.iscoroutinefunction(func):
+        return async_wrapper
+    else:
+        return sync_wrapper

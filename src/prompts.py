@@ -92,13 +92,21 @@ CLASSIFY_CLUSTER_TYPE_SYS_MESSAGE = """
 You are an expert in log analysis and classification. Your task is to analyze the provided error logs and classify them into one of the following categories:
 
 1. **Environment Issue**: Logs indicating timeouts during operations, such as connection timeouts, request timeouts, or process timeouts or even some variable missing in the environment
-2. **Code related Issue**: all the error related to failure of test due to bug in code, indexing error, value error are some example
+2. **Setup related Issue**: all the error related to:
+      - no such file or directory
+      - failed to open input list
+      - Model Not Found
+      - has bad ELF magic
+      - Failed to open input file
+      - cannot unpack non-iterable NoneType object
+      - ValueError: cannot reshape array.
+      can be classified as setup related issues
 3. **SDK related Issue**: logs related to hardware failures, sub modules failed or any type of failure in legacy code. All the errors which doesn't belong to either environment/code will fall in this category
 
 Return your response in the following JSON format and out of 3 failure only one can be true at any given instance:
 {{
-  "environment_issue": true/false,
-  "code_failure": true/false,
+  "env_issue": true/false,
+  "setup_issue": true/false,
   "sdk_issue": true/false
 }}
 """

@@ -87,13 +87,13 @@ class FailureAnalyzer:
             empty_log_df.loc[:, DataFrameKeys.embeddings_key] = np.nan
 
         failure_df = failure_df[~failure_df.index.isin(empty_log_df.index)]
-        failure_df = helpers.check_if_issue_alread_grouped(failure_df)
+        failure_df = await helpers.check_if_issue_alread_grouped(failure_df)
         non_clustered_df = failure_df[
             failure_df[DataFrameKeys.cluster_name] == ClusterSpecificKeys.non_grouped_key
         ].reset_index(drop=True)
         fuzzy_clustered_df = pd.DataFrame()
         if not non_clustered_df.empty:
-            non_clustered_df = helpers.fuzzy_cluster_grouping(non_clustered_df)
+            non_clustered_df = await helpers.fuzzy_cluster_grouping(non_clustered_df)
             fuzzy_clustered_df = non_clustered_df[
                 (non_clustered_df[DataFrameKeys.cluster_name] != ClusterSpecificKeys.non_grouped_key)
                 & (
@@ -141,7 +141,8 @@ class FailureAnalyzer:
             if non_clustered_df is not None:
                 failure_df = pd.concat([empty_log_df, non_clustered_df], axis=0)
 
-            failure_df = helpers.assign_cluster_class(failure_df)
+            failure_df = await helpers.assign_cluster_class(failure_df)
+            self.logger.info(f"Finished processing: {current_type}")
             return failure_df
 
         # Split data into already clustered and non-clustered
@@ -199,13 +200,15 @@ class FailureAnalyzer:
             {ClusterSpecificKeys.non_grouped_key, str(ClusterSpecificKeys.non_grouped_key)}
         )
 
-        # Apply get_name to each matching row and update the cluster_name
+     
         if not final_df.loc[mask].empty:
-            final_df.loc[mask, DataFrameKeys.cluster_name] = final_df[mask].swifter.apply(
-                lambda row: generate_cluster_name(row)["cluster_name"], axis=1
-            )
+            # Process rows with semaphore
+            cluster_names = await helpers.generate_cluster_name_for_single_rows(final_df.loc[mask])
+            # Update the dataframe with results
+            final_df.loc[mask, DataFrameKeys.cluster_name] = cluster_names
 
-        final_df = helpers.assign_cluster_class(final_df)
+        final_df = await helpers.assign_cluster_class(final_df)
+        self.logger.info(f"Finished processing: {current_type}")
         return final_df
 
     def save_results(self, data: pd.DataFrame, output_path: Optional[str] = None) -> None:

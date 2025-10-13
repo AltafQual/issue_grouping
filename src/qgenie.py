@@ -23,7 +23,7 @@ from src.logger import AppLogger
 logger = AppLogger().get_logger(__name__)
 
 
-def get_exponential_backoff_delay(attempt: int, base_delay: int = 1, max_delay: int = 60) -> int:
+def get_exponential_backoff_delay(attempt: int, base_delay: int = 5, max_delay: int = 200) -> int:
     """
     Returns the number of seconds to wait before the next retry using exponential backoff.
 
@@ -47,7 +47,7 @@ class CustomQGenieChat(QGenieChat):
         run_manager: CallbackManagerForLLMRun | None = None,
         **kwargs: Any,
     ) -> ChatResult:
-        retry_count = 5
+        retry_count = 10
         while retry_count:
             try:
                 message_dicts, params = self._create_message_dicts(messages)
@@ -72,7 +72,7 @@ class CustomQGenieChat(QGenieChat):
         stream: bool | None = None,
         **kwargs: Any,
     ) -> ChatResult:
-        retry_count = 5
+        retry_count = 10
         message_dicts, params = self._create_message_dicts(messages)
         params = {**params, **kwargs}
         params.pop("stream", "")
@@ -92,10 +92,10 @@ class CustomQGenieChat(QGenieChat):
 
 # pro_model = CustomQGenieChat(model="Pro", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=200)
 gemini_pro_model = CustomQGenieChat(
-    model="vertexai::gemini-2.5-pro", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=200
+    model="vertexai::gemini-2.5-pro", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=500
 )
 model = CustomQGenieChat(
-    model="vertexai::gemini-2.5-flash", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=200
+    model="vertexai::gemini-2.5-flash", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=500
 )
 
 
@@ -119,7 +119,7 @@ class ReclusterResult(BaseModel):
 
 class ClassifyClusterGroup(BaseModel):
     environment_issue: bool = Field(description="Whether this cluster is an environment issue or not")
-    code_failure: bool = Field(description="Whether this cluster is a code failure or not")
+    setup_issue: bool = Field(description="Whether this cluster is a setup failure or not")
     sdk_issue: bool = Field(description="Whether this is a sdk related issue or not")
 
 
@@ -138,17 +138,17 @@ subcluster_verifer_failed = JsonOutputParser(pydantic_object=SubClusterVerifierF
 
 
 @execution_timer
-def classify_cluster_based_of_type(cluster_logs: list[str]) -> dict:
+async def classify_cluster_based_of_type(cluster_logs: list[str]) -> dict:
     prompt_template = ChatPromptTemplate.from_messages(
         [("system", prompts.CLASSIFY_CLUSTER_TYPE_SYS_MESSAGE), ("human", prompts.CLASSIFY_CLUSTER_TYPE_LOG_MESSAGE)]
     )
     chain = prompt_template | model | classify_cluster_based_on_type
-    result = chain.invoke({"logs": cluster_logs})
+    result = await chain.ainvoke({"logs": cluster_logs})
     return result
 
 
 @execution_timer
-def generate_cluster_name(grouped_cluster: pd.DataFrame) -> dict:
+async def generate_cluster_name(grouped_cluster: pd.DataFrame) -> dict:
     prompt_template = ChatPromptTemplate.from_messages(
         [("system", prompts.CLUSTER_NAMING_SYS_MESSAGE), ("human", prompts.CLUSTER_NAMING_LOG_MESSAGE)]
     )
@@ -160,7 +160,7 @@ def generate_cluster_name(grouped_cluster: pd.DataFrame) -> dict:
         logs = [logs]
     logs = logs[:5] if len(logs) > 5 else logs
     chain = prompt_template | model | nameparser
-    response = chain.invoke({"logs": logs})
+    response = await chain.ainvoke({"logs": logs})
     return response
 
 

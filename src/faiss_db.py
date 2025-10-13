@@ -267,7 +267,7 @@ class SearchInExistingFaiss(object):
         print(f"For Query: {query}, score: {score}, cluster: {key}")
         return key, class_key
 
-    def batch_search(self, type: str, query: Union[str, list[str]], k: int = 2):
+    async def batch_search(self, type: str, query: Union[str, list[str]], k: int = 2):
         faiss_db, metadata = self._load_faiss(type)
         key = ClusterSpecificKeys.non_grouped_key
         queries = [query] if isinstance(query, str) else query
@@ -276,7 +276,7 @@ class SearchInExistingFaiss(object):
             return [key] * len(queries), [np.nan] * len(queries)
 
         print(f"Generating embeddings in batch search")
-        embeddings = FallbackEmbeddings().embed(queries)
+        embeddings = await FallbackEmbeddings().aembed(queries)
 
         # Search in FAISS
         print("Searching for closest index in faiss")
