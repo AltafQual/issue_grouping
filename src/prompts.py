@@ -7,7 +7,7 @@ Your task is to:
 - Names must be specific and descriptive, not vague. Prefer root-cause descriptors (e.g., Timeout, ConfigMissing, InitDeinit) over generic terms.
 - Use PascalCase formatting for the cluster name (no spaces, each word capitalized).
 - Do not include the word "Cluster" in the name (e.g., TimeoutErrorCluster -> TimeoutError, InitDeinitErrorCluster -> InitDeinitError).
-- Prohibited generic names: Never use generic or quantity-based names such as "ManyImages", "ManyVerifierImages", "VerifierFailedImagesList", "VerifierFailedManyImages", "ImagesList", or any name containing "Many" or "Multiple". Names must not describe volume; they must describe the failure cause.
+- Prohibited generic names: Never use generic or quantity-based names such as "ManyImages", "ManyVerifierImages", "VerifierFailedImagesList", "VerifierFailedManyImages", "ImagesList", or any name containing "Many" or "Multiple". Names must not describe volume; it must describe the failure cause.
 
 Return the result strictly as a JSON as shown below. Do not include any explanation or extra text:
   {{
@@ -100,8 +100,9 @@ You are an expert in log analysis and classification. Your task is to analyze th
       - Failed to open input file
       - cannot unpack non-iterable NoneType object
       - ValueError: cannot reshape array.
+      - Device/SOC related issues like, creation, not found issues
       can be classified as setup related issues
-3. **SDK related Issue**: logs related to hardware failures, sub modules failed or any type of failure in legacy code. All the errors which doesn't belong to either environment/code will fall in this category
+3. **SDK related Issue**: logs related to hardware failures, sub modules failed or any type of failure in legacy code. All the errors which doesn't belong to either environment/code will fall in this category. Verifier Failed related issues can also be classified as SDK Related Issues
 
 Return your response in the following JSON format and out of 3 failure only one can be true at any given instance:
 {{
