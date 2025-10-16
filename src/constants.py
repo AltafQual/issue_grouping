@@ -8,6 +8,7 @@ regex_based_filteration_patterns = {
     "Wait timeout": r"wait timeout",
     "Batch Timer Expired": r"batchtimerexpired",
     "Scheduled on Same worker": r"scheduledonsameworker",
+    "Device creation Failure": r"device creation failure",
 }
 
 
@@ -33,7 +34,7 @@ class ClusterSpecificKeys:
 
 @dataclass
 class FaissConfigurations:
-    base_path: str = "faiss_issue_grouping_db_rerun"
+    base_path: str = "faiss_issue_grouping_db"
     default_db_name: str = "issue_grouping_db"
 
 

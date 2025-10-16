@@ -30,6 +30,7 @@ from src.constants import (
     FaissConfigurations,
     regex_based_filteration_patterns
 )
+from src.custom_clustering import CustomEmbeddingCluster
 from src.db_connections import ConnectToMySql
 from src.execution_timer_log import execution_timer
 from src.faiss_db import FaissIVFFlatIndex, SearchInExistingFaiss
@@ -66,7 +67,9 @@ def get_cluster_class(cluster_dict):
         if cluster_dict[cluster_class]:
             return cluster_class
 
-    return ""
+    # by default mark the class for error as sdk_issue (can be changed)
+    return "sdk_issue"
+
 
 @execution_timer
 async def assign_cluster_class(df: pd.DataFrame) -> pd.DataFrame:
@@ -102,7 +105,11 @@ async def assign_cluster_class(df: pd.DataFrame) -> pd.DataFrame:
                 continue
 
             cluster_class = df[df[DataFrameKeys.cluster_name] == c].iloc[0][DataFrameKeys.cluster_class]
-            if pd.isna(cluster_class) or cluster_class == ClusterSpecificKeys.non_grouped_key:
+            if (
+                pd.isna(cluster_class)
+                or cluster_class == ClusterSpecificKeys.non_grouped_key
+                or (isinstance(cluster_class, str) and not cluster_class.strip())
+            ):
                 unique_clusters.append(c)
 
         logger.info(f"Found {len(unique_clusters)} clusters that need classification")
@@ -115,27 +122,21 @@ async def assign_cluster_class(df: pd.DataFrame) -> pd.DataFrame:
                 logger.info(f"Processing classification for cluster: {cluster_name}")
                 cluster_df = df[df[DataFrameKeys.cluster_name] == cluster_name]
                 if cluster_df.empty:
-                        logger.warning(f"Empty cluster dataframe for {cluster_name}")
-                        return None, None
+                    logger.warning(f"Empty cluster dataframe for {cluster_name}")
+                    return None, None
                 # Use a single representative preprocessed log
                 representative_log = cluster_df.iloc[0][DataFrameKeys.preprocessed_text_key]
                 if not isinstance(representative_log, str) or representative_log.strip() == "":
-                        logger.warning(f"Invalid representative log for cluster {cluster_name}")
-                        return None, None
+                    logger.warning(f"Invalid representative log for cluster {cluster_name}")
+                    return None, None
                 try:
-                    if any(
-                        verifier_type in cluster_name.lower()
-                        for verifier_type in ["verifierfailed", "manyverifierfailed", "verifierlist", "verifierimages"]
-                    ):
-                        class_str = "sdk_issue"
-                        logger.info(f"Classified {cluster_name} as 'sdk_issue' based on name pattern")
-                    else:
-                        logger.info(f"Sending classification request for cluster: {cluster_name}")
-                        result = await classify_cluster_based_of_type([representative_log])
-                        class_str = get_cluster_class(result) or ""
-                        logger.info(f"Received classification for {cluster_name}: {class_str}")
-                    
-                        return cluster_df.index, class_str
+
+                    logger.info(f"Sending classification request for cluster: {cluster_name}")
+                    result = await classify_cluster_based_of_type([representative_log])
+                    class_str = get_cluster_class(result)
+                    logger.info(f"Received classification for {cluster_name}: {class_str}")
+
+                    return cluster_df.index, class_str
                 except Exception as e:
                     logger.error(f"Failed to classify cluster '{cluster_name}': {e}")
                     return None, None
@@ -151,7 +152,7 @@ async def assign_cluster_class(df: pd.DataFrame) -> pd.DataFrame:
             indices, class_str = result
             df.loc[indices, DataFrameKeys.cluster_class] = class_str
             logger.info(f"Updated {len(indices)} rows with class '{class_str}'")
-            
+
     except Exception as e:
         logger.error(f"assign_cluster_class error: {e}")
         logger.error(traceback.format_exc())
@@ -476,15 +477,19 @@ async def check_if_issue_alread_grouped(df: pd.DataFrame) -> pd.DataFrame:
 
     if not ungrouped_df.empty:
         # Get cluster names using FAISS
-        new_cluster_names, class_names= await SearchInExistingFaiss().batch_search(
-            type=ungrouped_df.iloc[0]["type"],  # assuming same type for batch
-            query=ungrouped_df[DataFrameKeys.preprocessed_text_key].tolist(),
+        new_cluster_names, class_names = await CustomEmbeddingCluster().batch_search(
+            type_=ungrouped_df.iloc[0]["type"],  # assuming same type for batch
+            queries=ungrouped_df[DataFrameKeys.preprocessed_text_key].tolist(),
         )
 
         # Update the original DataFrame
         df.loc[mask, DataFrameKeys.cluster_name] = new_cluster_names
         df.loc[mask, DataFrameKeys.cluster_class] = class_names
-        df.loc[mask, DataFrameKeys.grouped_from_faiss] = True
+
+        # Create a boolean mask for rows that were successfully grouped (not non_grouped_key)
+        successfully_grouped_mask = mask & df[DataFrameKeys.cluster_name].ne(ClusterSpecificKeys.non_grouped_key)
+        if any(successfully_grouped_mask):
+            df.loc[successfully_grouped_mask, DataFrameKeys.grouped_from_faiss] = True
 
     return df
 
@@ -539,7 +544,7 @@ def tc_id_scheduler():
         run_ids = sql_connection.fetch_runids()
         run_ids.to_parquet(parquet_file)
         logger.info("Background task updated Parquet file")
-        #NOTE: currently disabling the nightly processing background job, will do it manually for now
+        # NOTE: currently disabling the nightly processing background job, will do it manually for now
         # asyncio.run(process_tc_ids_async_bg_job(run_ids))
 
     job_id = "update_tc_ids_job"
@@ -576,7 +581,7 @@ async def process_tc_ids_async_bg_job(run_ids):
                 await async_sequential_process_by_type(
                     FailureAnalyzer().load_data(tc_id=run_id), update_faiss_and_sql=True, run_id=run_id
                 )
-                await asyncio.sleep(5)
+                await asyncio.sleep(15)
             else:
                 logger.info(f"Skipping processing: {run_id} already processed")
         except Exception as e:
@@ -684,11 +689,13 @@ async def async_sequential_process_by_type(df, update_faiss_and_sql=False, run_i
 
     return results
 
+
 @execution_timer
 async def generate_cluster_name_for_single_rows(df_subset):
     async def process_row(row):
         result = await generate_cluster_name(row)
         return result["cluster_name"]
+
     semaphore = asyncio.Semaphore(3)
     results = []
 
@@ -703,7 +710,13 @@ async def generate_cluster_name_for_single_rows(df_subset):
 
 
 def faissdb_update_worker():
-    print("Starting faiss db update background job")
+    logger.info("Starting faiss db update background job")
+
+    # Create a lock for thread safety
+    from threading import Lock
+
+    save_lock = Lock()
+
     while True:
         try:
             task = faiss_update_queue.get(timeout=5)
@@ -713,15 +726,29 @@ def faissdb_update_worker():
 
         try:
             clustered_df, run_id = task
+            logger.info(f"Running faiss db updation task for run id: {run_id} with types: {clustered_df.type.unique()}")
             from src.failure_analyzer import FailureAnalyzer
 
             analyzer = FailureAnalyzer()
-            analyzer.save_as_faiss(faiss_runner, clustered_df, run_id=run_id)
+
+            # Use a lock to ensure only one thread is saving at a time
+            with save_lock:
+                analyzer.save_as_faiss(faiss_runner, clustered_df, run_id=run_id)
+
+            logger.info(f"Successfully processed run_id: {run_id}")
         except Exception as e:
             logger.error(f"Error in FAISS update: {e}")
+            logger.error(traceback.format_exc())
+
+            error_log_path = os.path.join(FaissConfigurations.base_path, "failed_processing_runids_log.txt")
+            with open(error_log_path, "a") as log_file:
+                log_file.write(f"\nRun ID: {run_id} Failed While Saving to FAISS \n")
+                log_file.write(f"\nFailed with error: {e}\n")
+                log_file.write(traceback.format_exc())
+                log_file.write("\n" + "-" * 80 + "\n")
+
         finally:
             faiss_update_queue.task_done()
-            time.sleep(10)
 
 
 def filter_and_sort_by_embedded_datetime(strings: list[str], n_remove: int = 0) -> list[str]:
@@ -771,3 +798,124 @@ def filter_and_sort_by_embedded_datetime(strings: list[str], n_remove: int = 0) 
 
     # Drop the first n_remove in the chosen order
     return [s for _, s in dated[n_remove:]]
+
+
+def get_bu_name(soc_name: str) -> str:
+    auto = {
+        "Lemans8775IVI",
+        "Lemans_QOS224Q",
+        "LemansIVI",
+        "LemansQ",
+        "Makena8295Q",
+        "MakenaIVI",
+        "MakenaQ",
+        "Monaco7775Q",
+        "Monaco8620LE",
+        "Monaco_qnx710Q",
+        "MonacoQ",
+        "NordLE",
+        "QCM8538",
+        "AIC100_x86",
+    }
+
+    cbn = {"KobukLE"}
+
+    compute = {"GlymurW", "HamoaW", "KodiakW", "MakenaW", "PoipuW", "PurwaW", "windowshost"}
+
+    host = {"host"}
+
+    iot = {
+        "ClarenceIOT",
+        "DivarIOT",
+        "KamortaIOT",
+        "KodiakIOT",
+        "KodiakIOTU",
+        "KodiakIOTU2",
+        "KodiakWIOT",
+        "LemansLE",
+        "MilosIOT",
+        "QCM2290",
+        "QCM4290A1",
+        "QCM4290A3",
+        "QCM6125",
+        "QCM6490K2L",
+        "QCM6490LE",
+        "QCS410",
+        "QCS410LE2",
+        "QCS610",
+        "QCS610LE",
+        "QCS610LE2",
+        "QCS610LE3",
+        "QCS615LE",
+        "QCS7230LE",
+        "QCS8250",
+        "QCS8300K2L",
+        "QCS8300LE",
+        "QCS8550",
+        "QCS8550LE",
+        "QCS8550N",
+        "QCS8550U",
+        "QCS8625",
+        "QCS8625LE",
+        "QCS9100K2L",
+        "QCS9100LE",
+        "QCS9100LEC1",
+        "QRB4210LE",
+        "QRB5165LE2",
+        "QRB5165U2",
+    }
+
+    mobile = {
+        "Bitra",
+        "Bonito",
+        "Camano",
+        "Clarence",
+        "Divar",
+        "Eliza",
+        "Fillmore",
+        "Fraser",
+        "Kaanapali",
+        "Kailua",
+        "Kalpeni",
+        "Kam",
+        "Kamorta",
+        "Kodiak",
+        "Kona",
+        "Lahaina",
+        "LahainaPro",
+        "Lamma",
+        "Lanai",
+        "Mannar",
+        "Milos",
+        "Molokai",
+        "Netrani",
+        "Pakala",
+        "Palawan",
+        "Palima",
+        "Strait",
+        "Tofino",
+        "Waipio",
+    }
+
+    wearables = {"AspenLAW", "AspenLW"}
+
+    xr = {"Aurora", "AuroraLE", "AuroraLE2", "Balsam", "Halliday", "Halliday2", "Luna", "Matrix", "WaipioLE"}
+
+    if soc_name in auto:
+        return "AUTO"
+    elif soc_name in cbn:
+        return "CBN"
+    elif soc_name in compute:
+        return "Compute"
+    elif soc_name in host:
+        return "Tools"
+    elif soc_name in iot:
+        return "IOT"
+    elif soc_name in mobile:
+        return "Mobile"
+    elif soc_name in wearables:
+        return "Wearables"
+    elif soc_name in xr:
+        return "XR"
+    else:
+        return "Unknown"

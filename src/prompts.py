@@ -4,8 +4,10 @@ You are an expert in error log naming. You will be given a list of error logs fr
 
 Your task is to:
 - Suggest a highly precise, cause-based cluster name that reflects the entire error type and context (e.g., include relevant operation/module and failure mode when clear).
+- Give preference to device-related errors, platform-specific issues, DSP-related errors, GPU errors, aborted processes, and any specific keys in traceback when generating names.
 - Names must be specific and descriptive, not vague. Prefer root-cause descriptors (e.g., Timeout, ConfigMissing, InitDeinit) over generic terms.
 - Use PascalCase formatting for the cluster name (no spaces, each word capitalized).
+- Limit names to a maximum of 5 words in PascalCase format.
 - Do not include the word "Cluster" in the name (e.g., TimeoutErrorCluster -> TimeoutError, InitDeinitErrorCluster -> InitDeinitError).
 - Prohibited generic names: Never use generic or quantity-based names such as "ManyImages", "ManyVerifierImages", "VerifierFailedImagesList", "VerifierFailedManyImages", "ImagesList", or any name containing "Many" or "Multiple". Names must not describe volume; it must describe the failure cause.
 
@@ -24,7 +26,9 @@ You are an expert in log analysis and clustering. You will be given a list of er
 Your task is to:
 - Thoroughly Analyze the logs and identify a common theme/pattern.
 - Suggest a meaningful cluster name that reflects the entire error type and context
+- Give preference to device-related errors, platform-specific issues, DSP-related errors, GPU errors, aborted processes, Ops failure and any specific keys in traceback when generating names.
 - Use PascalCase formatting for the cluster name (no spaces, each word capitalized).
+- Limit names to a maximum of 5 words in PascalCase format.
 - Identify any logs that appear misclassified or unrelated to that cluster and return there ids as `misclassified_ids`.
 - Do not include the word "Cluster" in the name (e.g., TimeoutErrorCluster -> TimeoutError, InitDeinitErrorCluster -> InitDeinitError).
 - Prohibited generic names: Never use generic or quantity-based names such as "ManyImages", "ManyVerifierImages", "VerifierFailedImagesList", "VerifierFailedManyImages", "ImagesList", or any name containing "Many" or "Multiple". Names must not describe volume; they must describe the failure cause.
@@ -46,7 +50,9 @@ You are an expert in log clustering. You will be given two clusters with similar
 Your task is to:
 - Thoroughly Analyze the logs and identify a common theme/pattern.
 - Suggest a short, meaningful name for the merged cluster that reflects the nature of the grouped errors.
+- Give preference to device-related errors, platform-specific issues, DSP-related errors, GPU errors, aborted processes, Ops failure and any specific keys in traceback when generating names.
 - Use PascalCase formatting for the cluster name (no spaces, each word capitalized).
+- Limit names to a maximum of 5 words in PascalCase format.
 - Identify any logs that appear unrelated or wrongly grouped and doesn't match the theme/context of the merged cluster. These should be flagged as outliers and indices should be returned as `outlier_indices` (INDEX SHOULD BE CORRECT IT IS VERY CRITICAL)
 - Do not include the word "Cluster" in the name (e.g., TimeoutErrorCluster -> TimeoutError, InitDeinitErrorCluster -> InitDeinitError).
 - Prohibited generic names: Never use generic or quantity-based names such as "ManyImages", "ManyVerifierImages", "VerifierFailedImagesList", "VerifierFailedManyImages", "ImagesList", or any name containing "Many" or "Multiple". Names must not describe volume; they must describe the failure cause.
@@ -74,6 +80,8 @@ Your task is to:
 - Group similar logs together based on shared characteristics such as error type, affected module.
 - Retun the correct index of the error logs to group together as `log_indices` (INDEX SHOULD BE CORRECT IT IS VERY CRITICAL)
 - Suggest a meaningful cluster name that reflects the entire error type and context.
+- Give preference to device-related errors, platform-specific issues, DSP-related errors, GPU errors, aborted processes, Ops failure and any specific keys in traceback when generating names.
+- Limit names to a maximum of 5 words in PascalCase format.
 - Return the result strictly as a JSON list. Do not include any explanation or text
 - Do not include the word "Cluster" in the name (e.g., TimeoutErrorCluster -> TimeoutError, InitDeinitErrorCluster -> InitDeinitError).
 - Prohibited generic names: Never use generic or quantity-based names such as "ManyImages", "ManyVerifierImages", "VerifierFailedImagesList", "VerifierFailedManyImages", "ImagesList", or any name containing "Many" or "Multiple". Names must not describe volume; they must describe the failure cause.
@@ -100,7 +108,6 @@ You are an expert in log analysis and classification. Your task is to analyze th
       - Failed to open input file
       - cannot unpack non-iterable NoneType object
       - ValueError: cannot reshape array.
-      - Device/SOC related issues like, creation, not found issues
       can be classified as setup related issues
 3. **SDK related Issue**: logs related to hardware failures, sub modules failed or any type of failure in legacy code. All the errors which doesn't belong to either environment/code will fall in this category. Verifier Failed related issues can also be classified as SDK Related Issues
 
@@ -126,7 +133,9 @@ Your task:
 - Always return an updated previous_clusters dictionary that merges the returned indices into the chosen subcluster. If a new subcluster is created, add it to previous_clusters.
 
 Rules:
+- Give preference to device-related errors, platform-specific issues, DSP-related errors, GPU errors, aborted processes, Ops failure and any specific keys in traceback when generating names.
 - Use PascalCase for cluster_name (short, no spaces, each word capitalized). Do not include the word "Cluster" in the name. The cluster_name must always start with VerifierFailed followed by a concise, specific failure descriptor (e.g., VerifierFailedTimeout, VerifierFailedConfigMissing, VerifierFailedInitDeinit).
+- Limit names to a maximum of 5 words in PascalCase format.
 - indices must be the exact "index" values from the provided logs. INDEX SHOULD BE CORRECT IT IS VERY CRITICAL.
 - Only include logs that strongly fit the chosen subcluster; leave unrelated logs for later passes.
 - Accuracy enforcement: Clusters must be highly precise. Single-log subclusters are permitted only when that single log uniquely and correctly fits the subcluster theme; do not assign incorrect logs.

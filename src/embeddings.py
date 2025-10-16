@@ -1,6 +1,6 @@
 import asyncio
-import time
 import threading
+import time
 
 from langchain.embeddings.base import Embeddings
 from sentence_transformers import SentenceTransformer
@@ -48,8 +48,8 @@ class QGenieBGEM3Embedding(Embeddings):
         results = []
 
         for i in range(0, len(data), batch_size):
-            batch = data[i:i+batch_size]
-            batch_end = min(i+batch_size, len(data))
+            batch = data[i : i + batch_size]
+            batch_end = min(i + batch_size, len(data))
             logger.info(f"Processing batch: documents {i} to {batch_end-1}")
             batch_result = self._retry_sync(self.model.embed_documents, batch)
             logger.info(f"Completed batch with {len(batch)} documents")
@@ -57,18 +57,17 @@ class QGenieBGEM3Embedding(Embeddings):
 
         logger.info(f"Embedding process completed, returning {len(results)} embeddings")
         return results
-    
 
     def embed_documents(self, data: list[str]) -> list[list[float]]:
         return self._retry_sync(self.model.embed_documents, data)
 
     def embed_query(self, text: str) -> list[float]:
         return self._retry_sync(self.model.embed_query, text)
-    
+
     @execution_timer
     def embed_without_retry(self, data: list):
         return self.model.embed_documents(data)
-    
+
     @execution_timer
     async def aembed_without_retry(self, data: list):
         return await self.model.aembed_documents(data)
@@ -93,11 +92,13 @@ class QGenieBGEM3Embedding(Embeddings):
 class BGEM3Embeddings(object):
     _instance = None
     _model = None
+
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super(BGEM3Embeddings, cls).__new__(cls)
-            
+
         from src.helpers import load_cached_model
+
         cls._model = load_cached_model()
         if cls._model is None:
             logger.info("Unable to find model locally downloading model")
@@ -115,7 +116,7 @@ class BGEM3Embeddings(object):
     @execution_timer
     def embed(self, data: list[str]):
         return self.model.encode_document(data).tolist()
-        
+
 
 class FallbackEmbeddings(Embeddings):
     """Embedding class that tries QGenie first and falls back to local BGEM3 if timeout occurs."""
@@ -159,31 +160,26 @@ class FallbackEmbeddings(Embeddings):
         results = []
         logger.info(f"Attempting to generate embeddings with QGenie: lenght of data: {len(data)}")
         batch_size = 500
-        
+
         for i in range(0, len(data), batch_size):
-            batch = data[i:i+batch_size]
-            batch_end = min(i+batch_size, len(data))
+            batch = data[i : i + batch_size]
+            batch_end = min(i + batch_size, len(data))
             logger.info(f"Processing batch: documents {i} to {batch_end-1}")
             qgenie_result = self._run_with_timeout(self.qgenie_embeddings.embed_without_retry, batch)
-            # if qgenie_result is not None:
-            logger.info("Successfully generated embeddings with QGenie")
             results.extend(qgenie_result)
-            # else:
-            #     logger.info("Falling back to local BGEM3 model for embeddings")
-            #     results.extend(self.local_embeddings.embed(data))
-                
+
             logger.info(f"Completed batch with {len(batch)} documents")
 
         return results
-    
+
     @execution_timer
     async def aembed(self, data: list):
         if not data:
             return []
         logger.info(f"Attempting to generate embeddings with QGenie: lenght of data: {len(data)}")
         batch_size = 500
-        
-        batches = [data[i:i+batch_size] for i in range(0, len(data), batch_size)]
+
+        batches = [data[i : i + batch_size] for i in range(0, len(data), batch_size)]
 
         async def process_batch(batch, index):
             batch_end = min((index * batch_size) + batch_size, len(data))

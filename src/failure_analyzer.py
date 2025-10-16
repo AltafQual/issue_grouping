@@ -1,6 +1,5 @@
 import asyncio
 import threading
-import threading
 from typing import List, Optional
 
 import numpy as np
@@ -11,8 +10,9 @@ from sklearn.cluster import HDBSCAN
 
 from src import helpers
 from src.constants import ClusterSpecificKeys, DataFrameKeys, ErrorLogConfigurations
+from src.custom_clustering import CustomEmbeddingCluster
 from src.data_loader import ExcelLoader
-from src.embeddings import BGEM3Embeddings, QGenieBGEM3Embedding,FallbackEmbeddings
+from src.embeddings import BGEM3Embeddings, FallbackEmbeddings, QGenieBGEM3Embedding
 from src.faiss_db import FaissIVFFlatIndex
 from src.logger import AppLogger
 from src.qgenie import generate_cluster_name, qgenie_post_processing, subcluster_verifier_failed
@@ -57,7 +57,7 @@ class FailureAnalyzer:
         self, file_path: str = None, st_object=None, dataframe=None, failure_column: str = "reason"
     ) -> pd.DataFrame:
         """Perform the complete analysis workflow."""
-
+        # TODO: convert everything ot self variables and use OOP properly, try extracting run id from dataframe if not provided
         if file_path:
             dataframe = self.load_data(file_path)
         elif st_object:
@@ -67,7 +67,6 @@ class FailureAnalyzer:
         current_type = dataframe.iloc[0]["type"]
 
         # Initialize all rows as non-grouped
-        dataframe = helpers.add_hashed_unique_id(dataframe)
         dataframe.loc[:, DataFrameKeys.cluster_name] = ClusterSpecificKeys.non_grouped_key
         dataframe.loc[:, DataFrameKeys.cluster_type_int] = ClusterSpecificKeys.non_grouped_key
         dataframe.loc[:, DataFrameKeys.grouped_from_faiss] = np.nan
@@ -80,14 +79,18 @@ class FailureAnalyzer:
         # Apply preprocessing steps
         failure_df = helpers.remove_empty_and_misc_rows(dataframe, failure_texts, DataFrameKeys.preprocessed_text_key)
         failure_df = helpers.trim_error_logs(failure_df)
+        failure_df_copy = failure_df.copy()
 
         # dataframe with empty/no logs
         empty_log_df = failure_df[failure_df[DataFrameKeys.cluster_name] != ClusterSpecificKeys.non_grouped_key]
-        if not empty_log_df.empty:
-            empty_log_df.loc[:, DataFrameKeys.embeddings_key] = np.nan
 
         failure_df = failure_df[~failure_df.index.isin(empty_log_df.index)]
         failure_df = await helpers.check_if_issue_alread_grouped(failure_df)
+        faiss_grouped = failure_df[
+            (failure_df[DataFrameKeys.grouped_from_faiss] == True)
+            & (failure_df[DataFrameKeys.cluster_name] != ClusterSpecificKeys.non_grouped_key)
+        ]
+
         non_clustered_df = failure_df[
             failure_df[DataFrameKeys.cluster_name] == ClusterSpecificKeys.non_grouped_key
         ].reset_index(drop=True)
@@ -100,20 +103,23 @@ class FailureAnalyzer:
                     ~non_clustered_df[DataFrameKeys.cluster_name].isin(
                         {ErrorLogConfigurations.empty_error, ErrorLogConfigurations.no_error}
                     )
-                &(non_clustered_df[DataFrameKeys.grouped_from_faiss] != True)
+                    & (non_clustered_df[DataFrameKeys.grouped_from_faiss] != True)
                 )
             ]
 
-            fuzzy_clustered_df[DataFrameKeys.embeddings_key] = pd.Series(
-                self.generate_embeddings(fuzzy_clustered_df[DataFrameKeys.preprocessed_text_key].tolist()),
-                index=fuzzy_clustered_df.index,
-            )
-            non_clustered_df = non_clustered_df[~non_clustered_df.index.isin(fuzzy_clustered_df.index)
-                                                &(non_clustered_df[DataFrameKeys.grouped_from_faiss] != True)]
+            if not fuzzy_clustered_df.empty:
+                fuzzy_clustered_df[DataFrameKeys.embeddings_key] = pd.Series(
+                    self.generate_embeddings(fuzzy_clustered_df[DataFrameKeys.preprocessed_text_key].tolist()),
+                    index=fuzzy_clustered_df.index,
+                )
 
-        faiss_grouped = failure_df[failure_df[DataFrameKeys.grouped_from_faiss] == True]
+                non_clustered_df = non_clustered_df[
+                    (~non_clustered_df.index.isin(fuzzy_clustered_df.index))
+                    & (non_clustered_df[DataFrameKeys.cluster_name] == ClusterSpecificKeys.non_grouped_key)
+                ]
+
         self.logger.info(
-            f"\nType: {current_type} \ntotal errors: {failure_df.shape[0]}, \nEmpty logs grouped: {empty_log_df.shape[0]}, \nFuzzy grouped: {fuzzy_clustered_df.shape[0]}, \nNot grouped: {non_clustered_df.shape[0]} \nFaiss Grouped: {faiss_grouped.shape[0]}"
+            f"\nType: {current_type} \ntotal errors: {failure_df_copy.shape[0]}, \nEmpty logs grouped: {empty_log_df.shape[0]}, \nFuzzy grouped: {fuzzy_clustered_df.shape[0]}, \nFaiss Grouped: {faiss_grouped.shape[0]}, \nNot grouped: {non_clustered_df.shape[0]}"
         )
         failure_df = pd.concat([empty_log_df, fuzzy_clustered_df, non_clustered_df, faiss_grouped], axis=0)
 
@@ -139,7 +145,31 @@ class FailureAnalyzer:
                     non_clustered_df = None
 
             if non_clustered_df is not None:
-                failure_df = pd.concat([empty_log_df, non_clustered_df], axis=0)
+                failure_df = pd.concat(
+                    [
+                        failure_df[failure_df[DataFrameKeys.cluster_name] != ClusterSpecificKeys.non_grouped_key],
+                        non_clustered_df,
+                    ],
+                    axis=0,
+                )
+
+            verifier_failed_df = subcluster_verifier_failed(
+                failure_df[
+                    (failure_df[DataFrameKeys.cluster_name] == "VerifierFailed")
+                    & (failure_df[DataFrameKeys.grouped_from_faiss] != True)
+                ]
+            )
+            if verifier_failed_df is not None and not verifier_failed_df.empty:
+                failure_df = pd.concat(
+                    [failure_df[failure_df[DataFrameKeys.cluster_name] != "VerifierFailed"], verifier_failed_df], axis=0
+                ).reset_index(drop=True)
+
+            mask = failure_df[DataFrameKeys.cluster_name].isin(
+                {ClusterSpecificKeys.non_grouped_key, str(ClusterSpecificKeys.non_grouped_key)}
+            )
+            if not failure_df.loc[mask].empty:
+                cluster_names = await helpers.generate_cluster_name_for_single_rows(failure_df.loc[mask])
+                failure_df.loc[mask, DataFrameKeys.cluster_name] = cluster_names
 
             failure_df = await helpers.assign_cluster_class(failure_df)
             self.logger.info(f"Finished processing: {current_type}")
@@ -184,23 +214,31 @@ class FailureAnalyzer:
             # Apply Qgenie post-processing
             non_clustered_df = await qgenie_post_processing(non_clustered_df)
 
-        verifier_failed_df = subcluster_verifier_failed(
-            already_clustered_df[already_clustered_df[DataFrameKeys.cluster_name] == "VerifierFailed"]
-        )
-        # Combine results and reset index
-        dfs_to_concat = [
-            non_clustered_df,
-            already_clustered_df[already_clustered_df[DataFrameKeys.cluster_name] != "VerifierFailed"],
-        ]
-        if verifier_failed_df is not None and not verifier_failed_df.empty:
-            dfs_to_concat.append(verifier_failed_df)
+        dfs_to_concat = []
+        if not already_clustered_df.empty:
+            verifier_failed_df = subcluster_verifier_failed(
+                already_clustered_df[
+                    (already_clustered_df[DataFrameKeys.cluster_name] == "VerifierFailed")
+                    & (already_clustered_df[DataFrameKeys.grouped_from_faiss] != True)
+                ]
+            )
+            # Combine results and reset index
+            dfs_to_concat = [
+                non_clustered_df,
+                already_clustered_df[already_clustered_df[DataFrameKeys.cluster_name] != "VerifierFailed"],
+            ]
+            if verifier_failed_df is not None and not verifier_failed_df.empty:
+                dfs_to_concat.append(verifier_failed_df)
 
-        final_df = pd.concat(dfs_to_concat, axis=0).reset_index(drop=True)
+        if dfs_to_concat:
+            final_df = pd.concat(dfs_to_concat, axis=0).reset_index(drop=True)
+        else:
+            final_df = already_clustered_df.copy()
+
         mask = final_df[DataFrameKeys.cluster_name].isin(
             {ClusterSpecificKeys.non_grouped_key, str(ClusterSpecificKeys.non_grouped_key)}
         )
 
-     
         if not final_df.loc[mask].empty:
             # Process rows with semaphore
             cluster_names = await helpers.generate_cluster_name_for_single_rows(final_df.loc[mask])
@@ -222,4 +260,4 @@ class FailureAnalyzer:
         self.logger.info(f"Results saved to {output_path}")
 
     def save_as_faiss(self, db: "FaissIVFFlatIndex", data: pd.DataFrame, run_id=None):
-        db.save(data, run_id=run_id)
+        CustomEmbeddingCluster().save_threaded(data, run_id=run_id)

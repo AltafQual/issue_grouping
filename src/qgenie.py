@@ -293,7 +293,9 @@ async def async_merge_clusters(
 @execution_timer
 async def get_clusters_name_and_misclassified_errors(df: pd.DataFrame) -> dict:
     results = {}
-    for cluster_id in df[DataFrameKeys.cluster_type_int].unique():
+    unique_cluster_ids = df[DataFrameKeys.cluster_type_int].unique()
+    logger.info(f"Length of Unique cluster ids: {len(unique_cluster_ids)} for getting misclassified errors")
+    for cluster_id in unique_cluster_ids:
         # avoid the miscellaneous cluster, that will be dealt with later
         if cluster_id == ClusterSpecificKeys.non_grouped_key:
             continue
@@ -301,6 +303,10 @@ async def get_clusters_name_and_misclassified_errors(df: pd.DataFrame) -> dict:
         cluster_df = df[df[DataFrameKeys.cluster_type_int] == cluster_id]
         result = await analyze_cluster(cluster_df)
         results[int(cluster_id)] = result
+
+        if len(unique_cluster_ids) > 5:
+            await asyncio.sleep(5)
+
     return results
 
 
@@ -319,6 +325,7 @@ def get_duplicate_clusters(results: dict) -> dict:
 async def merge_duplicate_clusters(
     df: pd.DataFrame, duplicate_clusters: dict, cluster_results: dict
 ) -> tuple[pd.DataFrame, dict]:
+
     for duplicate_name, cluster_ids in duplicate_clusters.items():
         # Start with the first cluster as base
         base_cluster_id = cluster_ids[0]
@@ -326,7 +333,6 @@ async def merge_duplicate_clusters(
         for next_cluster_id in cluster_ids[1:]:
             print(f"Merging {base_cluster_id} and {next_cluster_id} for name '{duplicate_name}'")
 
-            # TODO: getting input token exceed error, have to update this
             response = await async_merge_clusters(df, cluster_id_a=base_cluster_id, cluster_id_b=next_cluster_id)
 
             # Update base cluster name
@@ -344,6 +350,9 @@ async def merge_duplicate_clusters(
             # Remove next_cluster from results
             if next_cluster_id in cluster_results:
                 del cluster_results[next_cluster_id]
+
+            if len(duplicate_clusters) > 3:
+                await asyncio.sleep(5)
 
     return df, cluster_results
 
@@ -626,17 +635,14 @@ def subcluster_verifier_failed(df: pd.DataFrame):
     generic_pattern = r"^(verifierfailedimageslist|manyverifierfailedimageslist|verifierfailedimages)$"
 
     for cluster_name, indices in finalized.items():
+        logger.info(f"Verifier Failed Processing :- Cluster name: {cluster_name} for indices: {indices}")
+        cluster_name_to_update = ClusterSpecificKeys.non_grouped_key
         if cluster_name != str(ClusterSpecificKeys.non_grouped_key):
-            if re.match(generic_pattern, cluster_name.lower()):
-                logger.info(
-                    f"Generic cluster name detected via regex: '{cluster_name}'. Marking {len(indices)} rows as non-grouped for separate processing."
-                )
-                df.loc[indices, DataFrameKeys.cluster_name] = ClusterSpecificKeys.non_grouped_key
-            else:
-                df.loc[indices, DataFrameKeys.cluster_name] = cluster_name
-        else:
-            df.loc[indices, DataFrameKeys.cluster_name] = ClusterSpecificKeys.non_grouped_key
 
+            if not re.match(generic_pattern, cluster_name.lower()) and cluster_name.strip():
+                cluster_name_to_update = cluster_name
+
+        df.loc[indices, DataFrameKeys.cluster_name] = cluster_name_to_update
     return df
 
 

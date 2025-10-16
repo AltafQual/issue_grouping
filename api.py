@@ -55,6 +55,8 @@ class RegressionResponse(BaseModel):
 class ClusterInfoResponse(BaseModel):
     status: int = 200
     time_taken: float = 0
+    run_id_a: str = ""
+    run_id_b: str = ""
     type: Dict[str, Any] = {}
     model: Dict[str, Any] = {}
 
@@ -196,11 +198,12 @@ async def get_two_run_ids_cluster_info(cluster_info_object: ClusterInfo) -> Dict
     print(f"Received run ids: {cluster_info_object}")
     start_time = time.time()
     response = ClusterInfoResponse()
+    response.run_id_a = cluster_info_object.run_id_a
+    response.run_id_b = cluster_info_object.run_id_b
     try:
         results = helpers.find_regressions_between_two_tests(cluster_info_object.run_id_a, cluster_info_object.run_id_b)
-
         if not results.empty:
-            new_cluster = await helpers.concurrent_process_by_type(results, update_faiss_and_sql=True)
+            new_cluster = await helpers.concurrent_process_by_type(results)
             for test_type, df in new_cluster.items():
                 df = df.drop(
                     columns=[
@@ -216,26 +219,24 @@ async def get_two_run_ids_cluster_info(cluster_info_object: ClusterInfo) -> Dict
                         if col in df.columns
                     ]
                 )
-                for runtime, runtime_df in df.groupby("runtime"):
-                    for cluster_name, cluster_df in runtime_df.groupby(DataFrameKeys.cluster_name):
-                        new_entry = cluster_df.to_dict(orient="records")
 
-                        response.type.setdefault(test_type, {})
-                        response.type[test_type].setdefault(runtime, {})
-                        response.type[test_type][runtime].setdefault(cluster_name, [])
-                        response.type[test_type][runtime][cluster_name].extend(new_entry)
+                response.type[test_type] = {}
+                for runtime, runtime_df in df.groupby("runtime"):
+                    response.type[test_type][runtime] = {}
+                    for cluster_name, cluster_df in runtime_df.groupby(DataFrameKeys.cluster_name):
+                        cluster_entries = cluster_df.to_dict(orient="records")
+                        response.type[test_type][runtime][cluster_name] = cluster_entries
 
                 for model_name, model_df in df.groupby("name"):
-                    response.model.setdefault(model_name, [])
                     model_cluster_details = model_df.to_dict(orient="records")
+                    if model_name not in response.model:
+                        response.model[model_name] = []
                     response.model[model_name].extend(model_cluster_details)
         else:
             response.status = 404
-
     except Exception as e:
         print(f"Exception occured while finding regression: {e}")
         print(traceback.format_exc())
         response.status = 500
-
     response.time_taken = round(time.time() - start_time, 2)
     return response.to_dict()

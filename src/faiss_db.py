@@ -25,6 +25,28 @@ def calculate_nlist(num_embeddings: int) -> int:
     return max(1, int(math.sqrt(num_embeddings)))
 
 
+def _normalize_vectors(vectors):
+    """Normalize vectors to unit length for cosine similarity."""
+    norms = np.linalg.norm(vectors, axis=1, keepdims=True)
+    # Avoid division by zero
+    norms[norms == 0] = 1
+    return vectors / norms
+
+
+def build_faiss_index(embeddings):
+    embeddings = _normalize_vectors(embeddings)
+    d = 1024
+    nlist = calculate_nlist(len(embeddings))
+    quantizer = faiss.IndexFlatIP(d)
+    if len(embeddings) < nlist:
+        nlist = max(1, len(embeddings) // 4)
+    faiss_db = faiss.IndexIVFFlat(quantizer, d, nlist, faiss.METRIC_INNER_PRODUCT)
+    faiss_db.train(embeddings)
+    faiss_db.add(embeddings)
+    faiss_db.nprobe = min(100, nlist)
+    return faiss_db
+
+
 class FaissIVFFlatIndex(EmbeddingsDB):
 
     def _check_existing_faiss_for_type(self, type):
@@ -95,12 +117,7 @@ class FaissIVFFlatIndex(EmbeddingsDB):
         final_cluster_names = merged_cluster_names
 
         # Rebuild FAISS index
-        nlist = calculate_nlist(len(final_embeddings))
-        quantizer = faiss.IndexFlatIP(d)
-        faiss_db = faiss.IndexIVFFlat(quantizer, d, nlist, faiss.METRIC_INNER_PRODUCT)
-        faiss_db.train(final_embeddings)
-        faiss_db.add(final_embeddings)
-        faiss_db.nprobe = 100
+        faiss_db = build_faiss_index(final_embeddings)
 
         faiss.write_index(faiss_db, os.path.join(base_path, "index.faiss").lower())
 
@@ -186,12 +203,7 @@ class FaissIVFFlatIndex(EmbeddingsDB):
                         print(f"No embeddings found for type: {t} skipping...")
                         continue
                     embeddings = np.array(embeddings_grouped.tolist())
-                    nlist = calculate_nlist(len(embeddings))
-                    quantizer = faiss.IndexFlatIP(d)
-                    faiss_db = faiss.IndexIVFFlat(quantizer, d, nlist, faiss.METRIC_INNER_PRODUCT)
-                    faiss_db.train(embeddings)
-                    faiss_db.add(embeddings)
-                    faiss_db.nprobe = 100
+                    faiss_db = build_faiss_index(embeddings)
                     base_path = os.path.join(faiss_dir_path, f"{t}_faiss")
                     os.makedirs(base_path, exist_ok=True)
 
@@ -280,7 +292,7 @@ class SearchInExistingFaiss(object):
 
         # Search in FAISS
         print("Searching for closest index in faiss")
-        Distance, Index = faiss_db.search(np.array(embeddings), k=k)
+        Distance, Index = faiss_db.search(_normalize_vectors(np.array(embeddings)), k=k)
         all_cluster_names = list(metadata.keys())
         total_cluster_names = len(all_cluster_names)
         cluster_names, class_names = [], []
@@ -288,6 +300,7 @@ class SearchInExistingFaiss(object):
         for i, q in enumerate(queries):
             index = int(Index[i][0])
             score = float(Distance[i][0])
+            cluster_name = ""
             if index >= total_cluster_names:
                 print(f"index: {index} is greater than the overall custernames in metadata: {total_cluster_names}")
                 score = 0
@@ -295,7 +308,7 @@ class SearchInExistingFaiss(object):
                 cluster_name = str(all_cluster_names[index])
                 class_name = metadata[cluster_name]["class"]
 
-            print(f"For Query: {q}, score: {score}")
+            print(f"For Query: {q}, score: {score} | Cluster name: {cluster_name}")
             if score >= 0.95:
                 cluster_names.append(cluster_name)
                 class_names.append(class_name)
