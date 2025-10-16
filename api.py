@@ -17,6 +17,7 @@ from src import helpers
 from src.constants import DataFrameKeys, FaissConfigurations
 from src.embeddings import QGenieBGEM3Embedding
 from src.failure_analyzer import FailureAnalyzer
+from src.custom_clustering import CustomEmbeddingCluster
 
 analyzer = FailureAnalyzer()
 
@@ -105,19 +106,11 @@ async def get_error_cluster_name(error_object: ErrorLog) -> Dict:
     response_metadata = {
         "runtime": error_object.runtime,
     }
+    cluster_name, cluster_class = CustomEmbeddingCluster().search(error_object.type, error)
 
-    base_path = os.path.join(FaissConfigurations.base_path, f"{error_object.type}_faiss")
-    faiss_db = faiss.read_index(os.path.join(base_path, "index.faiss").lower())
-    metadata = json.loads(open(os.path.join(base_path, "metadata.json")).read())
-
-    # distance, indices
-    D, I = faiss_db.search(np.array(QGenieBGEM3Embedding().embed_query(error)).reshape(1, -1), 1)
-    index = int(I[0][0])
-    score = round(float(D[0][0]), 2)
-    if score >= 80:
-        cluster_name = metadata["cluster_names"][index]
+    if cluster_class != -1:
         response_metadata["cluster_name"] = cluster_name
-        response_metadata["cluster_score"] = score
+        response_metadata["cluster_class"] = cluster_class
         error_group_id = helpers.get_error_group_id(error_object.type, error_object.runtime, cluster_name)
         return {"id": error_group_id, "metadata": response_metadata}
 
@@ -130,12 +123,13 @@ async def get_error_cluster_name(error_object: ErrorLog) -> Dict:
             "soc_name": [""],
         }
     )
-    new_cluster = await helpers.async_sequential_process_by_type(dataframe, update_faiss_and_sql=True)
+    new_cluster = await helpers.async_sequential_process_by_type(dataframe)
     clustered_df = new_cluster[error_object.type]
     cluster_name = clustered_df.iloc[0][DataFrameKeys.cluster_name]
+    class_name = clustered_df.iloc[0][DataFrameKeys.cluster_class]
     _id = helpers.get_error_group_id(error_object.type, error_object.runtime, cluster_name)
     response_metadata["cluster_name"] = cluster_name
-    response_metadata["cluster_score"] = 1
+    response_metadata["cluster_class"] = class_name
     return {"id": _id, "metadata": response_metadata}
 
 
