@@ -1,5 +1,8 @@
+import concurrent.futures
 import json
 import os
+import traceback
+from threading import Lock
 from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
@@ -63,14 +66,16 @@ class CustomEmbeddingCluster:
         print(f"Existing FAISS index not found for type: {type}. Creating a new one.")
         return False
 
-    def _get_run_ids_metadata_dict(self, run_id, data, df):
+    def _get_run_ids_metadata_dict(self, data, df):
         from src.helpers import get_bu_name
 
         columns = ["runtime", "jira_id", "soc_name", "log", "model_name"]
         tc_ids_dict = {}
         for tc_uuid in data["tc_uuids"]:
             tc_uuid_df = df[df["tc_uuid"].isin([tc_uuid])]
-            tc_uuid_df = tc_uuid_df[[col for col in columns if col in tc_uuid_df.columns]]
+            tc_uuid_df = tc_uuid_df[
+                [col for col in columns if col in tc_uuid_df.columns]
+            ]
             records = tc_uuid_df.to_dict(orient="records")
 
             logger.info(f"Adding records for tc_id {tc_uuid}: {records}")
@@ -87,7 +92,9 @@ class CustomEmbeddingCluster:
 
         return tc_ids_dict
 
-    def save_threaded(self, dataframe: pd.DataFrame, type_: str = None, run_id: Optional[str] = None) -> None:
+    def save_threaded(
+        self, dataframe: pd.DataFrame, type_: str = None, run_id: Optional[str] = None
+    ) -> None:
         """
         Save embeddings and metadata for the given type.
         Args:
@@ -95,34 +102,13 @@ class CustomEmbeddingCluster:
             type_: Type of data (e.g., 'benchmark', 'test')
             run_id: Optional run ID to track
         """
-        import concurrent.futures
-        from threading import Lock
 
-        if run_id:
-            self._update_processed_runids(self.base_path, run_id)
-
-        # Filter out rows without embeddings and non-grouped entries
-        filtered_df = dataframe[
-            (dataframe[DataFrameKeys.embeddings_key].notna())
-            & (dataframe[DataFrameKeys.cluster_name] != ClusterSpecificKeys.non_grouped_key)
-        ].copy()
-
-        if filtered_df.empty:
-            print(f"No valid clustered embeddings found DataFrame: {run_id}: skipping...")
-            return
-
-        # Create a lock for thread-safe operations
-        lock = Lock()
-
-        # Define the function to process each type
-        def process_type(type_group):
+        def _process_type(type_group):
             type_, typed_dataframe = type_group
             try:
                 # Create directory for this type
                 type_dir = os.path.join(self.base_path, f"{type_}_custom")
                 os.makedirs(type_dir, exist_ok=True)
-
-                from src.helpers import update_error_map_qgenie_table
 
                 # Use lock for database operations
                 with lock:
@@ -141,8 +127,8 @@ class CustomEmbeddingCluster:
                     metadata[cluster_name] = {"class": data["class"], "run_ids": {}}
 
                     if run_id:
-                        metadata[cluster_name]["run_ids"][run_id] = self._get_run_ids_metadata_dict(
-                            run_id, data, typed_dataframe
+                        metadata[cluster_name]["run_ids"][run_id] = (
+                            self._get_run_ids_metadata_dict(data, typed_dataframe)
                         )
 
                 assert len(centroids) == len(metadata), (
@@ -152,7 +138,12 @@ class CustomEmbeddingCluster:
 
                 # Save centroids
                 with open(os.path.join(type_dir, "centroids.npy"), "wb") as f:
-                    np.save(f, np.array([centroids[name]["centroid"] for name in centroids.keys()]))
+                    np.save(
+                        f,
+                        np.array(
+                            [centroids[name]["centroid"] for name in centroids.keys()]
+                        ),
+                    )
 
                 # Save metadata
                 with open(os.path.join(type_dir, "metadata.json"), "w") as f:
@@ -160,32 +151,116 @@ class CustomEmbeddingCluster:
 
                 return f"Saved {len(centroids)} clusters for type: {type_}"
             except Exception as e:
-                import traceback
+                return (
+                    f"Error processing type {type_}: {str(e)}\n{traceback.format_exc()}"
+                )
 
-                return f"Error processing type {type_}: {str(e)}\n{traceback.format_exc()}"
+        def _update_metadata(already_grouped):
+            type_, grouped_df = already_grouped
+            print(f"Updating metadata for type: {type_}")
+            type_dir = os.path.join(self.base_path, f"{type_}_custom")
 
-        # Get all type groups
+            try:
+                with open(os.path.join(type_dir, "metadata.json"), "r") as f:
+                    existing_metadata = json.load(f)
+
+                for cluster_name, group in grouped_df.groupby(
+                    DataFrameKeys.cluster_name
+                ):
+                    if cluster_name not in existing_metadata:
+                        print(
+                            f"Cluster name: {cluster_name} didn't exists in metadata, but marked as already grouped for run_id {run_id} !!!!"
+                        )
+                        continue
+                    
+                    print(f"updating metadata for {type_} in cluster name: {cluster_name}")
+                    new_cluster_meta = self._get_run_ids_metadata_dict(
+                        {"tc_uuids": group["tc_uuid"].tolist()}, group
+                    )
+
+                    existing_metadata[cluster_name]["run_ids"].update({run_id: new_cluster_meta})
+
+                with open(os.path.join(type_dir, "metadata.json"), "w") as f:
+                    json.dump(existing_metadata, f, indent=3)
+                    
+            except Exception as e:
+                return f"Failure while updating metadata for id: {run_id} : {traceback.format_exc()}"
+
+            return f"Sucessfully updated metadata for run id: {run_id}'s type: {type_}"
+
+        
+        from src.helpers import update_error_map_qgenie_table
+        if run_id is None:
+            if "testplan_id" in dataframe.columns:
+                run_id = dataframe.testplan_id.tolist()[0]
+
+        if run_id:
+            self._update_processed_runids(self.base_path, run_id)
+
+        # Filter out rows without embeddings and non-grouped entries
+        filtered_df = dataframe[
+            (dataframe[DataFrameKeys.embeddings_key].notna())
+            & (
+                dataframe[DataFrameKeys.cluster_name]
+                != ClusterSpecificKeys.non_grouped_key
+            )
+            & (pd.isna(dataframe[DataFrameKeys.grouped_from_faiss]))
+        ].copy()
+
+        already_existing_issues = dataframe[
+            ~(pd.isna(dataframe[DataFrameKeys.grouped_from_faiss]))
+        ].copy()
+
+        lock = Lock()
         type_groups = list(filtered_df.groupby("type"))
         print(f"Processing {len(type_groups)} types in parallel")
 
-        # Use ThreadPoolExecutor to process types in parallel
-        # Adjust max_workers based on your system capabilities
-        max_workers = min(10, len(type_groups))  # Limit to 10 threads or number of types, whichever is smaller
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # Submit all tasks
-            future_to_type = {executor.submit(process_type, type_group): type_group[0] for type_group in type_groups}
+        if not filtered_df.empty:
+            max_workers = min(10, len(type_groups))
+            with concurrent.futures.ThreadPoolExecutor(
+                max_workers=max_workers
+            ) as executor:
+                future_to_type = {
+                    executor.submit(_process_type, type_group): type_group[0]
+                    for type_group in type_groups
+                }
 
-            # Process results as they complete
-            for future in concurrent.futures.as_completed(future_to_type):
-                type_ = future_to_type[future]
-                try:
-                    result = future.result()
-                    print(result)
-                except Exception as e:
-                    print(f"Exception processing type {type_}: {str(e)}")
+                # Process results as they complete
+                for future in concurrent.futures.as_completed(future_to_type):
+                    type_ = future_to_type[future]
+                    try:
+                        result = future.result()
+                        print(result)
+                    except Exception as e:
+                        print(f"Exception processing type {type_}: {str(e)}")
+        else:
+            print(
+                f"No valid clustered embeddings found DataFrame: {run_id}: Updating metadata"
+            )
+            already_grouped_dfs = list(already_existing_issues.groupby("type"))
+            max_workers = min(10, len(already_grouped_dfs))
+            with concurrent.futures.ThreadPoolExecutor(
+                max_workers=max_workers
+            ) as executor:
+                future_to_type = {
+                    executor.submit(
+                        _update_metadata, already_grouped_df
+                    ): already_grouped_df[0]
+                    for already_grouped_df in already_grouped_dfs
+                }
 
-    def save(self, dataframe: pd.DataFrame, type_: str = None, run_id: Optional[str] = None) -> None:
+                for future in concurrent.futures.as_completed(future_to_type):
+                    type_ = future_to_type[future]
+                    try:
+                        result = future.result()
+                        print(result)
+                    except Exception as e:
+                        print(f"Exception saving metadat for {type_}: {str(e)}")
+
+    def save(
+        self, dataframe: pd.DataFrame, type_: str = None, run_id: Optional[str] = None
+    ) -> None:
         """
         Save embeddings and metadata for the given type.
 
@@ -194,17 +269,22 @@ class CustomEmbeddingCluster:
             type_: Type of data (e.g., 'benchmark', 'test')
             run_id: Optional run ID to track
         """
-        # TODO: add logic to only update metadata here when the faiss updated db grouped
 
         # Filter out rows without embeddings and non-grouped entries
         filtered_df = dataframe[
             (dataframe[DataFrameKeys.embeddings_key].notna())
-            & (dataframe[DataFrameKeys.cluster_name] != ClusterSpecificKeys.non_grouped_key)
+            & (
+                dataframe[DataFrameKeys.cluster_name]
+                != ClusterSpecificKeys.non_grouped_key
+            )
         ].copy()
 
         if filtered_df.empty:
-            print(f"No valid clustered embeddings found DataFrame: {run_id}: skipping...")
-            return
+            print(f"No valid clustered embeddings found DataFrame: {run_id}")
+
+        already_existing_issues = dataframe[
+            ~(pd.isna(dataframe[DataFrameKeys.grouped_from_faiss]))
+        ].copy()
 
         if run_id:
             self._update_processed_runids(self.base_path, run_id)
@@ -231,8 +311,8 @@ class CustomEmbeddingCluster:
                 metadata[cluster_name] = {"class": data["class"], "run_ids": {}}
 
                 if run_id:
-                    metadata[cluster_name]["run_ids"][run_id] = self._get_run_ids_metadata_dict(
-                        run_id, data, typed_dataframe
+                    metadata[cluster_name]["run_ids"][run_id] = (
+                        self._get_run_ids_metadata_dict(data, typed_dataframe)
                     )
 
             assert len(centroids) == len(metadata), (
@@ -241,7 +321,12 @@ class CustomEmbeddingCluster:
             )
             # Save centroids
             with open(os.path.join(type_dir, "centroids.npy"), "wb") as f:
-                np.save(f, np.array([centroids[name]["centroid"] for name in centroids.keys()]))
+                np.save(
+                    f,
+                    np.array(
+                        [centroids[name]["centroid"] for name in centroids.keys()]
+                    ),
+                )
 
             # Save metadata
             with open(os.path.join(type_dir, "metadata.json"), "w") as f:
@@ -250,7 +335,11 @@ class CustomEmbeddingCluster:
             print(f"Saved {len(centroids)} clusters for type: {type_}")
 
     def update(
-        self, filtered_df: pd.DataFrame, type_: str, similarity_threshold: float = 0.93, run_id: Optional[str] = None
+        self,
+        filtered_df: pd.DataFrame,
+        type_: str,
+        similarity_threshold: float = 0.93,
+        run_id: Optional[str] = None,
     ) -> None:
         """
         Update existing embeddings with new data.
@@ -292,7 +381,9 @@ class CustomEmbeddingCluster:
                 max_sim_idx = np.argmax(similarities)
                 max_sim = similarities[max_sim_idx]
 
-                if (max_sim >= similarity_threshold) or cluster_name in updated_metadata:
+                if (
+                    max_sim >= similarity_threshold
+                ) or cluster_name in updated_metadata:
 
                     # Merge with existing cluster
                     if cluster_name not in updated_metadata:
@@ -302,27 +393,35 @@ class CustomEmbeddingCluster:
                         )
                     else:
                         existing_cluster_name = cluster_name
-                        print(f"Cluster Name: {cluster_name} already exists in metadata updating with same")
+                        print(
+                            f"Cluster Name: {cluster_name} already exists in metadata updating with same"
+                        )
                         for idx, _cluster_name in enumerate(existing_cluster_names):
                             if _cluster_name == cluster_name:
                                 max_sim_idx = idx
                                 break
 
                     # Update centroid (weighted average)
-                    updated_centroids[max_sim_idx] = 0.7 * updated_centroids[max_sim_idx] + 0.3 * new_centroid
+                    updated_centroids[max_sim_idx] = (
+                        0.7 * updated_centroids[max_sim_idx] + 0.3 * new_centroid
+                    )
 
                     # Update run_ids in metadata
-                    if run_id and run_id not in updated_metadata[existing_cluster_name]["run_ids"]:
-                        updated_metadata[existing_cluster_name]["run_ids"][run_id] = self._get_run_ids_metadata_dict(
-                            run_id, data, filtered_df
+                    if (
+                        run_id
+                        and run_id
+                        not in updated_metadata[existing_cluster_name]["run_ids"]
+                    ):
+                        updated_metadata[existing_cluster_name]["run_ids"][run_id] = (
+                            self._get_run_ids_metadata_dict(data, filtered_df)
                         )
                 else:
                     # Add as new cluster
                     updated_centroids = np.vstack([updated_centroids, [new_centroid]])
                     updated_metadata[cluster_name] = {"class": new_class, "run_ids": {}}
                     if run_id:
-                        updated_metadata[cluster_name]["run_ids"][run_id] = self._get_run_ids_metadata_dict(
-                            run_id, data, filtered_df
+                        updated_metadata[cluster_name]["run_ids"][run_id] = (
+                            self._get_run_ids_metadata_dict(data, filtered_df)
                         )
                     existing_cluster_names.append(cluster_name)
             else:
@@ -330,8 +429,8 @@ class CustomEmbeddingCluster:
                 updated_centroids = np.array([new_centroid])
                 updated_metadata[cluster_name] = {"class": new_class, "run_ids": {}}
                 if run_id:
-                    updated_metadata[cluster_name]["run_ids"][run_id] = self._get_run_ids_metadata_dict(
-                        run_id, data, filtered_df
+                    updated_metadata[cluster_name]["run_ids"][run_id] = (
+                        self._get_run_ids_metadata_dict(data, filtered_df)
                     )
                 existing_cluster_names.append(cluster_name)
 
@@ -349,7 +448,9 @@ class CustomEmbeddingCluster:
 
         print(f"Updated to {len(updated_metadata)} clusters for type: {type_}")
 
-    def search(self, type_: str, query: str, similarity_threshold: float = 0.93) -> Tuple[str, str]:
+    def search(
+        self, type_: str, query: str, similarity_threshold: float = 0.93
+    ) -> Tuple[str, str]:
         """
         Search for similar clusters for a single query.
 
@@ -365,17 +466,25 @@ class CustomEmbeddingCluster:
         query_embedding = FallbackEmbeddings().embed_query(query)
         query_embedding = self._normalize_vectors(np.array([query_embedding]))[0]
 
-        return self._search_with_embedding(type_, query_embedding, query, similarity_threshold)
+        return self._search_with_embedding(
+            type_, query_embedding, query, similarity_threshold
+        )
 
     def _search_with_embedding(
-        self, type_: str, query_embedding: np.ndarray, original_query: str = "", similarity_threshold: float = 0.93
+        self,
+        type_: str,
+        query_embedding: np.ndarray,
+        original_query: str = "",
+        similarity_threshold: float = 0.93,
     ) -> Tuple[str, str]:
         """
         Search using a precomputed embedding.
         """
         type_dir = os.path.join(self.base_path, f"{type_}_custom")
 
-        if not os.path.exists(type_dir) or not os.path.exists(os.path.join(type_dir, "metadata.json")):
+        if not os.path.exists(type_dir) or not os.path.exists(
+            os.path.join(type_dir, "metadata.json")
+        ):
             print(f"No data found for type: {type_}")
             return ClusterSpecificKeys.non_grouped_key, np.nan
 
@@ -399,7 +508,9 @@ class CustomEmbeddingCluster:
                 cluster_name = cluster_names[max_sim_idx]
                 class_name = metadata[cluster_name]["class"]
 
-                print(f"For query: '{original_query}', found match: {cluster_name} with similarity {max_sim:.3f}")
+                print(
+                    f"For query: '{original_query}', found match: {cluster_name} with similarity {max_sim:.3f}"
+                )
                 return cluster_name, class_name
 
         print(
@@ -408,7 +519,10 @@ class CustomEmbeddingCluster:
         return ClusterSpecificKeys.non_grouped_key, np.nan
 
     async def batch_search(
-        self, type_: str, queries: Union[str, List[str]], similarity_threshold: float = 0.93
+        self,
+        type_: str,
+        queries: Union[str, List[str]],
+        similarity_threshold: float = 0.93,
     ) -> Tuple[List[str], List[str]]:
         """
         Search for similar clusters for multiple queries.
@@ -432,7 +546,9 @@ class CustomEmbeddingCluster:
         class_names = []
 
         for i, (query, embedding) in enumerate(zip(queries, embeddings)):
-            cluster_name, class_name = self._search_with_embedding(type_, embedding, query, similarity_threshold)
+            cluster_name, class_name = self._search_with_embedding(
+                type_, embedding, query, similarity_threshold
+            )
             cluster_names.append(cluster_name)
             class_names.append(class_name)
 
@@ -452,7 +568,9 @@ class CustomEmbeddingCluster:
         """
         type_dir = os.path.join(self.base_path, f"{type_}_custom")
 
-        if not os.path.exists(type_dir) or not os.path.exists(os.path.join(type_dir, "metadata.json")):
+        if not os.path.exists(type_dir) or not os.path.exists(
+            os.path.join(type_dir, "metadata.json")
+        ):
             print(f"No data found for type: {type_}")
             return False
 
@@ -487,7 +605,9 @@ class CustomEmbeddingCluster:
         """
         type_dir = os.path.join(self.base_path, f"{type_}_custom")
 
-        if not os.path.exists(type_dir) or not os.path.exists(os.path.join(type_dir, "metadata.json")):
+        if not os.path.exists(type_dir) or not os.path.exists(
+            os.path.join(type_dir, "metadata.json")
+        ):
             print(f"No data found for type: {type_}")
             return {}
 
