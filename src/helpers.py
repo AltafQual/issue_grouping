@@ -266,7 +266,7 @@ async def update_rows_by_regex_patterns(df: pd.DataFrame) -> pd.DataFrame:
 
 
 @execution_timer
-def merge_similar_clusters(embeddings, labels, threshold=0.95):
+def merge_similar_clusters(embeddings, labels, threshold=0.93):
     unique_labels = set(labels) - {-1}
     centroids = {
         label: np.mean([embeddings[i] for i in range(len(labels)) if labels[i] == label], axis=0)
@@ -290,7 +290,7 @@ def merge_similar_clusters(embeddings, labels, threshold=0.95):
 
 
 @execution_timer
-def reassign_unclustered_logs(df: pd.DataFrame, threshold=0.95):
+def reassign_unclustered_logs(df: pd.DataFrame, threshold=0.93):
     # Step 1: Compute centroids for all valid clusters
     valid_clusters = set(df[DataFrameKeys.cluster_name]) - {-1}
     logger.info(f"Valid clusters for reassigning unclustered logs: {valid_clusters}")
@@ -621,7 +621,7 @@ async def async_process_by_type(df, update_faiss_and_sql=False, run_id=None):
             [df.assign(cluster_type=cluster_name) for cluster_name, df in results.items()],
             ignore_index=True,
         )
-        faiss_update_queue.put((clustered_df, run_id))
+        faiss_update_queue.put((clustered_df, run_id, "update"))
 
     return results
 
@@ -658,7 +658,7 @@ async def concurrent_process_by_type(df, update_faiss_and_sql=False, run_id=None
             [df.assign(cluster_type=cluster_name) for cluster_name, df in results.items()],
             ignore_index=True,
         )
-        faiss_update_queue.put((clustered_df, run_id))
+        faiss_update_queue.put((clustered_df, run_id, "update"))
 
     return results
 
@@ -685,7 +685,7 @@ async def async_sequential_process_by_type(df, update_faiss_and_sql=False, run_i
             [df.assign(cluster_type=cluster_name) for cluster_name, df in results.items()],
             ignore_index=True,
         )
-        faiss_update_queue.put((clustered_df, run_id))
+        faiss_update_queue.put((clustered_df, run_id, "update"))
 
     return results
 
@@ -711,10 +711,7 @@ async def generate_cluster_name_for_single_rows(df_subset):
 
 def faissdb_update_worker():
     logger.info("Starting faiss db update background job")
-
-    # Create a lock for thread safety
     from threading import Lock
-
     save_lock = Lock()
 
     while True:
@@ -725,7 +722,7 @@ def faissdb_update_worker():
             continue
 
         try:
-            clustered_df, run_id = task
+            clustered_df, run_id, _ = task
             logger.info(f"Running faiss db updation task for run id: {run_id} with types: {clustered_df.type.unique()}")
             from src.failure_analyzer import FailureAnalyzer
 

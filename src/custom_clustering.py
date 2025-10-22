@@ -177,8 +177,11 @@ class CustomEmbeddingCluster:
                     new_cluster_meta = self._get_run_ids_metadata_dict(
                         {"tc_uuids": group["tc_uuid"].tolist()}, group
                     )
-
-                    existing_metadata[cluster_name]["run_ids"].update({run_id: new_cluster_meta})
+                    
+                    if run_id not in existing_metadata[cluster_name]["run_ids"]: 
+                        existing_metadata[cluster_name]["run_ids"].update({run_id: new_cluster_meta})
+                    else:
+                        print(f"Run id: {run_id} already processed exists in metadata, avoiding updating metadata")
 
                 with open(os.path.join(type_dir, "metadata.json"), "w") as f:
                     json.dump(existing_metadata, f, indent=3)
@@ -209,6 +212,7 @@ class CustomEmbeddingCluster:
 
         already_existing_issues = dataframe[
             ~(pd.isna(dataframe[DataFrameKeys.grouped_from_faiss]))
+            & (dataframe[DataFrameKeys.embeddings_key].isna())
         ].copy()
 
         lock = Lock()
@@ -234,9 +238,10 @@ class CustomEmbeddingCluster:
                         print(result)
                     except Exception as e:
                         print(f"Exception processing type {type_}: {str(e)}")
-        else:
+        
+        if not already_existing_issues.empty:
             print(
-                f"No valid clustered embeddings found DataFrame: {run_id}: Updating metadata"
+                f"found DataFrame with already existing issues: {run_id}: Updating metadata"
             )
             already_grouped_dfs = list(already_existing_issues.groupby("type"))
             max_workers = min(10, len(already_grouped_dfs))
@@ -338,7 +343,7 @@ class CustomEmbeddingCluster:
         self,
         filtered_df: pd.DataFrame,
         type_: str,
-        similarity_threshold: float = 0.93,
+        similarity_threshold: float = 0.98,
         run_id: Optional[str] = None,
     ) -> None:
         """
@@ -449,7 +454,7 @@ class CustomEmbeddingCluster:
         print(f"Updated to {len(updated_metadata)} clusters for type: {type_}")
 
     def search(
-        self, type_: str, query: str, similarity_threshold: float = 0.93
+        self, type_: str, query: str, similarity_threshold: float = 0.98
     ) -> Tuple[str, str]:
         """
         Search for similar clusters for a single query.
@@ -475,54 +480,115 @@ class CustomEmbeddingCluster:
         type_: str,
         query_embedding: np.ndarray,
         original_query: str = "",
-        similarity_threshold: float = 0.93,
+        similarity_threshold: float = 0.98,
     ) -> Tuple[str, str]:
         """
         Search using a precomputed embedding.
         """
-        type_dir = os.path.join(self.base_path, f"{type_}_custom")
+        try:
+            type_dir = os.path.join(self.base_path, f"{type_}_custom")
 
-        if not os.path.exists(type_dir) or not os.path.exists(
-            os.path.join(type_dir, "metadata.json")
-        ):
-            print(f"No data found for type: {type_}")
-            return ClusterSpecificKeys.non_grouped_key, np.nan
+            if not os.path.exists(type_dir) or not os.path.exists(
+                os.path.join(type_dir, "metadata.json")
+            ):
+                print(f"No data found for type: {type_}")
+                return ClusterSpecificKeys.non_grouped_key, np.nan
 
-        # Load data
-        with open(os.path.join(type_dir, "metadata.json"), "r") as f:
-            metadata = json.load(f)
+            # Load data
+            with open(os.path.join(type_dir, "metadata.json"), "r") as f:
+                metadata = json.load(f)
 
-        with open(os.path.join(type_dir, "centroids.npy"), "rb") as f:
-            centroids = np.load(f)
+            with open(os.path.join(type_dir, "centroids.npy"), "rb") as f:
+                centroids = np.load(f)
 
-        cluster_names = list(metadata.keys())
-        # Compute similarities
-        similarities = cosine_similarity([query_embedding], centroids)[0]
+            cluster_names = list(metadata.keys())
+            # Compute similarities
+            similarities = cosine_similarity([query_embedding], centroids)[0]
+            cluster_name = ""
+            
+            # Get best match
+            if len(similarities) > 0:
+                max_sim_idx = np.argmax(similarities)
+                max_sim = similarities[max_sim_idx]
 
-        # Get best match
-        if len(similarities) > 0:
-            max_sim_idx = np.argmax(similarities)
-            max_sim = similarities[max_sim_idx]
+                if max_sim >= similarity_threshold:
+                    cluster_name = cluster_names[max_sim_idx]
+                    class_name = metadata[cluster_name]["class"]
 
-            if max_sim >= similarity_threshold:
-                cluster_name = cluster_names[max_sim_idx]
-                class_name = metadata[cluster_name]["class"]
+                    print(
+                        f"For query: '{original_query}', found match: {cluster_name} with similarity {max_sim:.3f}"
+                    )
+                    return cluster_name, class_name
 
-                print(
-                    f"For query: '{original_query}', found match: {cluster_name} with similarity {max_sim:.3f}"
-                )
-                return cluster_name, class_name
-
-        print(
-            f"No match found for query: '{original_query}' (best similarity: {max(similarities) if len(similarities) > 0 else 0:.3f})"
-        )
+            print(
+                f"No match found for query: '{original_query}' (best similarity: {max(similarities) if len(similarities) > 0 else 0:.3f}) for: {cluster_name}"
+            )
+        except Exception as e:
+            raise Exception(traceback.format_exc())
+            
         return ClusterSpecificKeys.non_grouped_key, np.nan
+
+    def _batch_search_with_embeddings(
+        self,
+        type_: str,
+        query_embeddings: np.ndarray,
+        original_queries: List[str],
+        similarity_threshold: float = 0.98,
+    ) -> Tuple[List[str], List[str]]:
+        """
+        Search using precomputed embeddings for multiple queries at once.
+        """
+        try:
+            type_dir = os.path.join(self.base_path, f"{type_}_custom")
+            if not os.path.exists(type_dir) or not os.path.exists(
+                os.path.join(type_dir, "metadata.json")
+            ):
+                print(f"No data found for type: {type_}")
+                return [ClusterSpecificKeys.non_grouped_key] * len(original_queries), [np.nan] * len(original_queries)
+            
+            # Load data
+            with open(os.path.join(type_dir, "metadata.json"), "r") as f:
+                metadata = json.load(f)
+            with open(os.path.join(type_dir, "centroids.npy"), "rb") as f:
+                centroids = np.load(f)
+            cluster_names = list(metadata.keys())
+            
+            # Compute similarities for all queries at once
+            similarities = cosine_similarity(query_embeddings, centroids)
+            
+            result_cluster_names = []
+            result_class_names = []
+            
+            # Process each query's results
+            for i, (query, sim_row) in enumerate(zip(original_queries, similarities)):
+                cluster_name = ""
+                if len(sim_row) > 0:
+                    max_sim_idx = np.argmax(sim_row)
+                    max_sim = sim_row[max_sim_idx]
+                    if max_sim >= similarity_threshold:
+                        cluster_name = cluster_names[max_sim_idx]
+                        class_name = metadata[cluster_name]["class"]
+                        print(
+                            f"For query: '{query}', found match: {cluster_name} with similarity {max_sim:.3f}"
+                        )
+                        result_cluster_names.append(cluster_name)
+                        result_class_names.append(class_name)
+                        continue
+                    print(
+                        f"No match found for query: '{query}' (best similarity: {max(sim_row):.3f}): for: {cluster_name}"
+                    )
+                result_cluster_names.append(ClusterSpecificKeys.non_grouped_key)
+                result_class_names.append(np.nan)
+                
+            return result_cluster_names, result_class_names
+        except Exception as e:
+            raise Exception(traceback.format_exc())
 
     async def batch_search(
         self,
         type_: str,
         queries: Union[str, List[str]],
-        similarity_threshold: float = 0.93,
+        similarity_threshold: float = 0.98,
     ) -> Tuple[List[str], List[str]]:
         """
         Search for similar clusters for multiple queries.
@@ -545,12 +611,11 @@ class CustomEmbeddingCluster:
         cluster_names = []
         class_names = []
 
-        for i, (query, embedding) in enumerate(zip(queries, embeddings)):
-            cluster_name, class_name = self._search_with_embedding(
-                type_, embedding, query, similarity_threshold
-            )
-            cluster_names.append(cluster_name)
-            class_names.append(class_name)
+        cluster_name, class_name = self._batch_search_with_embeddings(
+            type_, embeddings, queries, similarity_threshold
+        )
+        cluster_names.extend(cluster_name)
+        class_names.extend(class_name)
 
         return cluster_names, class_names
 
