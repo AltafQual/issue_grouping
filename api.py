@@ -92,7 +92,7 @@ def redirect_to_docs():
     return RedirectResponse(url="/api")
 
 
-@app.post("/api/get_error_cluster_name/")
+@app.get("/api/get_error_cluster_name/")
 async def get_error_cluster_name(error_object: ErrorLog) -> Dict:
     """
     This API provides the cluster name to which the error belongs to.
@@ -134,7 +134,7 @@ async def get_error_cluster_name(error_object: ErrorLog) -> Dict:
 
 
 @app.post("/api/initiate_issue_grouping/")
-async def get_error_cluster_name(tc_id_object: InitiateIssueGrouping, background_tasks: BackgroundTasks) -> Dict:
+async def inititate_issue_grouping(tc_id_object: InitiateIssueGrouping, background_tasks: BackgroundTasks) -> Dict:
     run_id = tc_id_object.run_id
     data = helpers.sql_connection.fetch_result_based_on_runid(run_id)
     if data.empty:
@@ -197,7 +197,7 @@ async def get_two_run_ids_cluster_info(cluster_info_object: ClusterInfo) -> Dict
     try:
         results = helpers.find_regressions_between_two_tests(cluster_info_object.run_id_a, cluster_info_object.run_id_b)
         if not results.empty:
-            new_cluster = await helpers.concurrent_process_by_type(results)
+            new_cluster = await helpers.async_sequential_process_by_type(results)
             for test_type, df in new_cluster.items():
                 df = df.drop(
                     columns=[
