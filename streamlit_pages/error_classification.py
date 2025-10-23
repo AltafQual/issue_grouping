@@ -44,11 +44,10 @@ with st.expander("How to use this tool"):
     st.markdown(
         """
     1. Select the type of classification from the dropdown
-    2. Enter one or more queries in the text area (one per line)
+    2. Enter one query in the text area per test and make sure to change type accordingly
     3. Adjust the similarity threshold in the sidebar if needed
     4. Click the "Classify" button to see results
-    5. Results will show the matched cluster and class for each query
-    6. Detailed information about each matched cluster will be displayed below the results table
+    5. Results will show the matched cluster and class for each query along with metadata about that cluster
     """
     )
 
