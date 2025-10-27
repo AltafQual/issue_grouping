@@ -371,6 +371,7 @@ class ConnectToMySql(DatabaseConnection):
             r1.graph_prepare as graph_prepare,
             r1.graph_execute as graph_execute,
             r1.jira_id as jira_id
+            r1.log as log_path
                            
         FROM result r1
         JOIN result r2 ON r1.tc_uuid = r2.tc_uuid
