@@ -370,7 +370,7 @@ class ConnectToMySql(DatabaseConnection):
             r1.inference_options as inference_options,
             r1.graph_prepare as graph_prepare,
             r1.graph_execute as graph_execute,
-            r1.jira_id as jira_id
+            r1.jira_id as jira_id,
             r1.log as log_path
                            
         FROM result r1
