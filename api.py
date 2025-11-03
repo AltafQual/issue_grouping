@@ -18,8 +18,7 @@ from src.failure_analyzer import FailureAnalyzer
 analyzer = FailureAnalyzer()
 
 # 24hrs(in seconds) * 15 days
-TTL_CACHE = TTLCache(ttl=(86400 * 15), maxsize=100)
-
+TTL_CACHE = TTLCache(ttl=(86400 * 15), maxsize=500)
 
 class ErrorLog(BaseModel):
     type: str = Field(description="Type to which error belongs ex: SaveContext, Converter, Quantizer etc..")
