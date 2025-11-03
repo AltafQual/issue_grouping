@@ -1,26 +1,24 @@
 import asyncio
-import json
-import os
 import time
 import traceback
 from contextlib import asynccontextmanager
 from typing import Any, Dict
 
-import faiss
-import numpy as np
 import pandas as pd
+from cachetools import TTLCache
 from fastapi import BackgroundTasks, FastAPI
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
 from src import helpers
-from src.constants import DataFrameKeys, FaissConfigurations
-from src.embeddings import QGenieBGEM3Embedding
-from src.failure_analyzer import FailureAnalyzer
+from src.constants import DataFrameKeys
 from src.custom_clustering import CustomEmbeddingCluster
+from src.failure_analyzer import FailureAnalyzer
 
 analyzer = FailureAnalyzer()
 
+# 24hrs(in seconds) * 15 days
+TTL_CACHE = TTLCache(ttl=(86400 * 15), maxsize=500)
 
 class ErrorLog(BaseModel):
     type: str = Field(description="Type to which error belongs ex: SaveContext, Converter, Quantizer etc..")
@@ -55,6 +53,7 @@ class RegressionResponse(BaseModel):
 
 class ClusterInfoResponse(BaseModel):
     status: int = 200
+    error_message: str = ""
     time_taken: float = 0
     run_id_a: str = ""
     run_id_b: str = ""
@@ -146,47 +145,6 @@ async def inititate_issue_grouping(tc_id_object: InitiateIssueGrouping, backgrou
     return {"status": f"Successfully Started processing: {run_id}"}
 
 
-@app.post("/api/regression_between_two_tests/", response_model=RegressionResponse)
-async def get_regression_between_two_tests(regression_object: Regression) -> Dict:
-    response = RegressionResponse()
-    try:
-        results = helpers.find_regressions_between_two_tests(regression_object.run_id_a, regression_object.run_id_b)
-
-        if not results.empty:
-            new_cluster = await helpers.async_sequential_process_by_type(results)
-            clustered_df = pd.concat(
-                [df.assign(cluster_type=cluster_name) for cluster_name, df in new_cluster.items()],
-                ignore_index=True,
-            )
-
-            clustered_df = clustered_df.drop(
-                columns=[
-                    col
-                    for col in [
-                        DataFrameKeys.embeddings_key,
-                        DataFrameKeys.bins,
-                        DataFrameKeys.error_logs_length,
-                        DataFrameKeys.cluster_type_int,
-                        DataFrameKeys.preprocessed_text_key,
-                        DataFrameKeys.grouped_from_faiss,
-                    ]
-                    if col in clustered_df.columns
-                ]
-            )
-            grouped = clustered_df.groupby(DataFrameKeys.cluster_name)
-            for cluster_name, group in grouped:
-                response.data[cluster_name] = group.to_dict(orient="records")
-
-        else:
-            response.status = 204
-
-    except Exception as e:
-        print(f"Exception occured while finding regression: {e}")
-        response.status = 500
-
-    return response.to_dict()
-
-
 @app.post("/api/get_two_run_ids_cluster_info/", response_model=ClusterInfoResponse)
 async def get_two_run_ids_cluster_info(cluster_info_object: ClusterInfo) -> Dict:
     print(f"Received run ids: {cluster_info_object}")
@@ -194,6 +152,10 @@ async def get_two_run_ids_cluster_info(cluster_info_object: ClusterInfo) -> Dict
     response = ClusterInfoResponse()
     response.run_id_a = cluster_info_object.run_id_a
     response.run_id_b = cluster_info_object.run_id_b
+    if (cluster_info_object.run_id_a, cluster_info_object.run_id_b) in TTL_CACHE:
+        result = TTL_CACHE[(cluster_info_object.run_id_a, cluster_info_object.run_id_b)]
+        result['time_taken'] = round(time.time() - start_time)
+        return result 
     try:
         results = helpers.find_regressions_between_two_tests(cluster_info_object.run_id_a, cluster_info_object.run_id_b)
         if not results.empty:
@@ -228,9 +190,15 @@ async def get_two_run_ids_cluster_info(cluster_info_object: ClusterInfo) -> Dict
                     response.model[model_name].extend(model_cluster_details)
         else:
             response.status = 404
+            response.error_message = (
+                f"No data Found for regression between: {cluster_info_object.run_id_a} - {cluster_info_object.run_id_b}"
+            )
     except Exception as e:
         print(f"Exception occured while finding regression: {e}")
         print(traceback.format_exc())
         response.status = 500
     response.time_taken = round(time.time() - start_time, 2)
-    return response.to_dict()
+    result = response.to_dict()
+    if response.status == 200:
+        TTL_CACHE[(cluster_info_object.run_id_a, cluster_info_object.run_id_b)] = result
+    return result
