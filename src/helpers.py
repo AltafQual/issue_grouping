@@ -428,11 +428,12 @@ def create_excel_with_clusters(df: pd.DataFrame, cluster_column: str, columns_to
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         for cluster in df[cluster_column].unique():
-            sheet_name = str(cluster)[:31]
-            cluster_df = df[df[cluster_column] == cluster]
-            if columns_to_include:
-                cluster_df = cluster_df[columns_to_include]
-            cluster_df.to_excel(writer, sheet_name=sheet_name, index=False)
+            if isinstance(cluster, str) and cluster.strip():
+                sheet_name = str(cluster)[:31]
+                cluster_df = df[df[cluster_column] == cluster]
+                if columns_to_include:
+                    cluster_df = cluster_df[columns_to_include]
+                cluster_df.to_excel(writer, sheet_name=sheet_name, index=False)
     output.seek(0)
     return output
 
