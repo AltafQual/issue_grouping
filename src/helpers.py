@@ -279,11 +279,11 @@ def replace_limiting_reason_with_actual_reason(df, error_reason_column):
     results = []
     for path in df["log"]:
         log_data = get_log_tail(path)
-        parsed = extract_errors(preprocess_error_log(log_data))
+        parsed = extract_errors(log_data)
         results.append(parsed)
-    df[error_reason_column] = results
+    df[error_reason_column] = [preprocess_error_log(r) for r in results]
+    df[DataFrameKeys.error_reason] = results
     return df
-
 
 @execution_timer
 def remove_empty_and_misc_rows(df: pd.DataFrame, errors: list, error_column_name: str):
