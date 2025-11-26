@@ -276,6 +276,8 @@ def get_log_tail(log_path):
 
 
 def replace_limiting_reason_with_actual_reason(df, error_reason_column):
+    if df.empty:
+        return df
     results = []
     log_path_key = "log"
     if "log_path" in df.columns:
