@@ -277,7 +277,10 @@ def get_log_tail(log_path):
 
 def replace_limiting_reason_with_actual_reason(df, error_reason_column):
     results = []
-    for path in df["log"]:
+    log_path_key = "log"
+    if "log_path" in df.columns:
+        log_path_key = "log_path"
+    for path in df[log_path_key]:
         log_data = get_log_tail(path)
         parsed = extract_errors(log_data)
         results.append(parsed)
