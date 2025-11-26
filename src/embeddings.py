@@ -123,8 +123,7 @@ class FallbackEmbeddings(Embeddings):
 
     def __init__(self):
         self.qgenie_embeddings = QGenieBGEM3Embedding()
-        # self.local_embeddings = BGEM3Embeddings()
-        self.timeout = 100
+        self.timeout = 600
         super().__init__()
 
     def _run_with_timeout(self, func, *args, **kwargs):
@@ -159,7 +158,7 @@ class FallbackEmbeddings(Embeddings):
             return []
         results = []
         logger.info(f"Attempting to generate embeddings with QGenie: lenght of data: {len(data)}")
-        batch_size = 500
+        batch_size = 100
 
         for i in range(0, len(data), batch_size):
             batch = data[i : i + batch_size]
@@ -177,7 +176,7 @@ class FallbackEmbeddings(Embeddings):
         if not data:
             return []
         logger.info(f"Attempting to generate embeddings with QGenie: lenght of data: {len(data)}")
-        batch_size = 500
+        batch_size = 100
 
         batches = [data[i : i + batch_size] for i in range(0, len(data), batch_size)]
 

@@ -5,7 +5,7 @@ import os
 import queue
 import random
 import re
-import time
+import subprocess
 import traceback
 from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime
@@ -15,9 +15,9 @@ from queue import Queue
 
 import numpy as np
 import pandas as pd
-import swifter
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.schedulers.base import STATE_RUNNING
+from cachetools import TTLCache
 from rapidfuzz import fuzz
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -43,8 +43,8 @@ faiss_runner = FaissIVFFlatIndex()
 faiss_update_queue = Queue()
 scheduler = BackgroundScheduler()
 
-# in-memory tc id data cache
-_tc_id_cache = {}
+# in-memory tc id data cache for 10 hours at max 500 items
+_tc_id_cache = TTLCache(ttl=36000, maxsize=500)
 parquet_file = "run_ids.parquet"
 
 
@@ -61,7 +61,7 @@ def add_hashed_unique_id(df: pd.DataFrame) -> pd.DataFrame:
 
 def get_cluster_class(cluster_dict):
     if not isinstance(cluster_dict, dict):
-        return ""
+        return "sdk_issue"
 
     for cluster_class in cluster_dict:
         if cluster_dict[cluster_class]:
@@ -233,18 +233,70 @@ def mask_numbers(text: str) -> str:
     return final_masked
 
 
+def extract_errors(raw_log, chunk_size=250, overlap=50):
+    # Normalize text
+    text = raw_log.replace("\\n", "\n")
+
+    # Split into chunks with overlap
+    chunks = []
+    start = 0
+    while start < len(text):
+        end = min(start + chunk_size, len(text))
+        chunks.append(text[start:end])
+        start += chunk_size - overlap
+
+    # Patterns for errors and warnings
+    error_patterns = [
+        r"error.*",
+        r"encountered error.*",
+        r"command exited with non-zero status.*",
+        r"traceback.*",
+        r"filenotfounderror.*",
+    ]
+
+    error_segments = []
+
+    for chunk in chunks:
+        for pattern in error_patterns:
+            matches = re.findall(pattern, chunk, flags=re.IGNORECASE)
+            if matches:
+                error_segments.extend(matches)
+
+    errors = list(dict.fromkeys(error_segments))  # preserve order, remove duplicates
+    return " ".join(errors)
+
+
+def get_log_tail(log_path):
+    try:
+        cmd = f"tail -n 10000 {log_path}/console.txt"
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        return result.stdout if result.returncode == 0 else ""
+    except Exception as e:
+        return f"Error reading log: {e}"
+
+
+def replace_limiting_reason_with_actual_reason(df, error_reason_column):
+    results = []
+    for path in df["log"]:
+        log_data = get_log_tail(path)
+        parsed = extract_errors(preprocess_error_log(log_data))
+        results.append(parsed)
+    df[error_reason_column] = results
+    return df
+
+
 @execution_timer
 def remove_empty_and_misc_rows(df: pd.DataFrame, errors: list, error_column_name: str):
 
     df[error_column_name] = errors
-    # Apply filters
-    df = df[
-        ~df[error_column_name]
-        .str.strip()
-        .str.lower()
-        .str.startswith("limiting reason to 3000 chars")  # not starting with that phrase
+    df_with_error_reason = df[
+        ~df[error_column_name].str.startswith("limiting reason to 3000")  # not starting with that phrase
     ]
-    # add
+    partial_error_reasons = replace_limiting_reason_with_actual_reason(
+        df[df[error_column_name].str.startswith("limiting reason to 3000")],  # not starting with that phrase
+        error_column_name,
+    )
+    df = pd.concat([df_with_error_reason, partial_error_reasons], axis=0).reset_index(drop=True)
     df.loc[:, DataFrameKeys.cluster_name] = df[error_column_name].apply(is_empty_error_log)
     df.loc[:, error_column_name] = df[error_column_name].apply(mask_numbers)
     df = df.reset_index(drop=True)
@@ -266,7 +318,7 @@ async def update_rows_by_regex_patterns(df: pd.DataFrame) -> pd.DataFrame:
 
 
 @execution_timer
-def merge_similar_clusters(embeddings, labels, threshold=0.93):
+def merge_similar_clusters(embeddings, labels, threshold=0.95):
     unique_labels = set(labels) - {-1}
     centroids = {
         label: np.mean([embeddings[i] for i in range(len(labels)) if labels[i] == label], axis=0)
@@ -290,7 +342,7 @@ def merge_similar_clusters(embeddings, labels, threshold=0.93):
 
 
 @execution_timer
-def reassign_unclustered_logs(df: pd.DataFrame, threshold=0.93):
+def reassign_unclustered_logs(df: pd.DataFrame, threshold=0.95):
     # Step 1: Compute centroids for all valid clusters
     valid_clusters = set(df[DataFrameKeys.cluster_name]) - {-1}
     logger.info(f"Valid clusters for reassigning unclustered logs: {valid_clusters}")
@@ -331,7 +383,7 @@ def update_labels_with_merged_clusters(df: pd.DataFrame, merged_clusters: dict, 
     return df
 
 
-def trim(log, head_ratio=0.3, max_length=1000):
+def trim(log, head_ratio=0.3, max_length=5000):
     try:
         log_str = str(log)
         if len(log_str) > max_length:
@@ -423,6 +475,17 @@ async def fuzzy_cluster_grouping(
     return failures_dataframe
 
 
+def clean_excel_string(text):
+    # Remove all illegal XML characters (Excel uses XML internally)
+    # Covers ASCII control chars and DEL
+    cleaned = re.sub(r"[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]", "", text)
+
+    # Optionally remove non-characters like U+FFFE, U+FFFF
+    cleaned = re.sub(r"[\uFFFE\uFFFF]", "", cleaned)
+
+    return cleaned
+
+
 @execution_timer
 def create_excel_with_clusters(df: pd.DataFrame, cluster_column: str, columns_to_include=None) -> pd.ExcelFile:
     output = BytesIO()
@@ -433,7 +496,17 @@ def create_excel_with_clusters(df: pd.DataFrame, cluster_column: str, columns_to
                 cluster_df = df[df[cluster_column] == cluster]
                 if columns_to_include:
                     cluster_df = cluster_df[columns_to_include]
+                if DataFrameKeys.preprocessed_text_key in cluster_df.columns:
+                    cluster_df[DataFrameKeys.preprocessed_text_key] = cluster_df[
+                        DataFrameKeys.preprocessed_text_key
+                    ].apply(clean_excel_string)
+                if DataFrameKeys.error_reason in cluster_df.columns:
+                    cluster_df[DataFrameKeys.error_reason] = cluster_df[DataFrameKeys.error_reason].apply(
+                        clean_excel_string
+                    )
                 cluster_df.to_excel(writer, sheet_name=sheet_name, index=False)
+            else:
+                print(f"Empty/No cluster name exists in {cluster_column}")
     output.seek(0)
     return output
 
@@ -557,7 +630,7 @@ def tc_id_scheduler():
     # Check if job is already scheduled
     existing_job = scheduler.get_job(job_id)
     if existing_job is None:
-        scheduler.add_job(update_tc_ids, "interval", hours=5, id=job_id)
+        scheduler.add_job(update_tc_ids, "interval", hours=12, id=job_id)
         logger.info("Scheduled TC ID update job.")
     else:
         logger.info("TC ID update job is already scheduled. Skipping re-scheduling.")
@@ -713,6 +786,7 @@ async def generate_cluster_name_for_single_rows(df_subset):
 def faissdb_update_worker():
     logger.info("Starting faiss db update background job")
     from threading import Lock
+
     save_lock = Lock()
 
     while True:
