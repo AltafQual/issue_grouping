@@ -1,13 +1,14 @@
 import asyncio
 import hashlib
 import json
+import math
 import os
 import queue
 import random
 import re
 import subprocess
 import traceback
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from datetime import datetime
 from functools import wraps
 from io import BytesIO
@@ -275,6 +276,7 @@ def get_log_tail(log_path):
         return f"Error reading log: {e}"
 
 
+@execution_timer
 def replace_limiting_reason_with_actual_reason(df, error_reason_column):
     if df.empty:
         return df
@@ -290,6 +292,58 @@ def replace_limiting_reason_with_actual_reason(df, error_reason_column):
     df[DataFrameKeys.error_reason] = results
     return df
 
+
+@execution_timer
+def replace_limiting_reason_with_actual_reason_concurrently(df, error_reason_column, max_workers=None):
+    """
+    Concurrently read logs, extract errors, and fill two columns:
+      - error_reason_column: preprocessed (cleaned/short) error text
+      - DataFrameKeys.error_reason: raw parsed error text
+
+    Fallback: on any failure per row, inserts "" and continues.
+    """
+    if df is None or df.empty:
+        return df
+
+    log_path_key = "log_path" if "log_path" in df.columns else "log"
+    if log_path_key not in df.columns:
+        # Nothing to do if neither column exists
+        return df
+
+    paths = df[log_path_key].tolist()
+
+    # Reasonable default for I/O-bound tasks
+    if max_workers is None:
+        max_workers = min(32, (os.cpu_count() or 2) * 5)
+
+    def _process_one(i, path):
+        """Return (index, (preprocessed, parsed)) with safe fallbacks."""
+        try:
+            # Skip NaN or empty paths
+            if path is None or (isinstance(path, float) and math.isnan(path)) or str(path).strip() == "":
+                return i, ("", "")
+            log_data = get_log_tail(path)
+            parsed = extract_errors(log_data)
+            preprocessed = preprocess_error_log(parsed)
+            return i, (preprocessed, parsed)
+        except Exception as e:
+            print(f"[WARN] Failed for row {i} ({path}): {e}")
+            return i, ("", "")
+
+    # Collect results in the same order as input
+    results = [("", "")] * len(paths)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(_process_one, i, p) for i, p in enumerate(paths)]
+        for fut in as_completed(futures):
+            idx, pair = fut.result()
+            results[idx] = pair
+
+    # Unpack to columns
+    df[error_reason_column] = [pre for pre, _ in results]
+    df[DataFrameKeys.error_reason] = [raw for _, raw in results]
+    return df
+
+
 @execution_timer
 def remove_empty_and_misc_rows(df: pd.DataFrame, errors: list, error_column_name: str):
 
@@ -297,7 +351,7 @@ def remove_empty_and_misc_rows(df: pd.DataFrame, errors: list, error_column_name
     df_with_error_reason = df[
         ~df[error_column_name].str.startswith("limiting reason to 3000")  # not starting with that phrase
     ]
-    partial_error_reasons = replace_limiting_reason_with_actual_reason(
+    partial_error_reasons = replace_limiting_reason_with_actual_reason_concurrently(
         df[df[error_column_name].str.startswith("limiting reason to 3000")],  # not starting with that phrase
         error_column_name,
     )
@@ -586,7 +640,10 @@ def get_tc_ids_from_sql():
 
 @execution_timer
 def update_error_map_qgenie_table(df):
-    sql_connection.update_qgenie_error_map_table(df)
+    try:
+        sql_connection.update_qgenie_error_map_table(df)
+    except Exception as e:
+        print(f"Failed to update SQL Table: {e}")
 
 
 @execution_timer
@@ -624,7 +681,7 @@ def tc_id_scheduler():
         run_ids.to_parquet(parquet_file)
         logger.info("Background task updated Parquet file")
         # NOTE: currently disabling the nightly processing background job, will do it manually for now
-        # asyncio.run(process_tc_ids_async_bg_job(run_ids))
+        asyncio.run(process_tc_ids_async_bg_job(run_ids))
 
     job_id = "update_tc_ids_job"
 
@@ -660,7 +717,7 @@ async def process_tc_ids_async_bg_job(run_ids):
                 await async_sequential_process_by_type(
                     FailureAnalyzer().load_data(tc_id=run_id), update_faiss_and_sql=True, run_id=run_id
                 )
-                await asyncio.sleep(15)
+                await asyncio.sleep(30)
             else:
                 logger.info(f"Skipping processing: {run_id} already processed")
         except Exception as e:
@@ -724,7 +781,7 @@ async def concurrent_process_by_type(df, update_faiss_and_sql=False, run_id=None
 
     loop = asyncio.get_running_loop()
     grouped_df = df.groupby("type")
-    with ProcessPoolExecutor(max_workers=5) as executor:
+    with ThreadPoolExecutor(max_workers=5) as executor:
         tasks = [loop.run_in_executor(executor, run_analysis_in_process, group_df) for t, group_df in grouped_df]
         analysis_results = await asyncio.gather(*tasks)
 

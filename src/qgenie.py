@@ -7,11 +7,11 @@ from collections import defaultdict
 from typing import Any
 
 import pandas as pd
-from langchain.prompts import ChatPromptTemplate
 from langchain_core.callbacks import AsyncCallbackManagerForLLMRun, CallbackManagerForLLMRun
 from langchain_core.messages import BaseMessage
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.outputs import ChatResult
+from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
 from qgenie.integrations.langchain import QGenieChat

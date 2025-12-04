@@ -34,7 +34,7 @@ class ClusterSpecificKeys:
 
 @dataclass
 class FaissConfigurations:
-    base_path: str = "faiss_issue_grouping_db"
+    base_path: str = "issue_grouping_db"
     default_db_name: str = "issue_grouping_db"
 
 
