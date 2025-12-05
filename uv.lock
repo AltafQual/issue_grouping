@@ -1087,6 +1087,7 @@ dependencies = [
     { name = "black" },
     { name = "faiss-cpu" },
     { name = "fastapi" },
+    { name = "httptools" },
     { name = "ipykernel" },
     { name = "isort" },
     { name = "langchain" },
@@ -1102,6 +1103,7 @@ dependencies = [
     { name = "streamlit" },
     { name = "swifter" },
     { name = "uvicorn", extra = ["standard"] },
+    { name = "uvloop" },
 ]
 
 [package.metadata]
@@ -1110,6 +1112,7 @@ requires-dist = [
     { name = "black", specifier = ">=25.1.0" },
     { name = "faiss-cpu", specifier = ">=1.12.0" },
     { name = "fastapi", specifier = ">=0.116.1" },
+    { name = "httptools", specifier = ">=0.6.4" },
     { name = "ipykernel", specifier = ">=6.30.1" },
     { name = "isort", specifier = ">=6.0.1" },
     { name = "langchain", specifier = ">=0.3.27" },
@@ -1125,6 +1128,7 @@ requires-dist = [
     { name = "streamlit", specifier = "==1.47.0" },
     { name = "swifter", specifier = ">=1.4.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.35.0" },
+    { name = "uvloop", specifier = ">=0.21.0" },
 ]
 
 [[package]]
