@@ -1,6 +1,7 @@
 import concurrent.futures
 import json
 import os
+import time
 import traceback
 from threading import Lock
 from typing import Dict, List, Optional, Tuple, Union
@@ -490,12 +491,24 @@ class CustomEmbeddingCluster:
                 return [ClusterSpecificKeys.non_grouped_key] * len(original_queries), [np.nan] * len(original_queries)
 
             # Load data
-            with open(os.path.join(type_dir, "metadata.json"), "r") as f:
-                metadata = json.load(f)
-            with open(os.path.join(type_dir, "centroids.npy"), "rb") as f:
-                centroids = np.load(f)
-            cluster_names = list(metadata.keys())
+            data_loading_retry = 3
+            metadata, centroids = None, None
+            while data_loading_retry:
+                try:
+                    with open(os.path.join(type_dir, "metadata.json"), "r") as f:
+                        metadata = json.load(f)
+                    with open(os.path.join(type_dir, "centroids.npy"), "rb") as f:
+                        centroids = np.load(f)
+                except Exception as e:
+                    print(f"Exception occured while loading data for batch search: {e}")
+                    print(f"retrying in 5 seconds")
+                    time.sleep(5)
 
+                if metadata:
+                    break
+                data_loading_retry -= 1
+
+            cluster_names = list(metadata.keys())
             # Compute similarities for all queries at once
             similarities = cosine_similarity(query_embeddings, centroids)
 
