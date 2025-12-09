@@ -678,6 +678,7 @@ def get_tc_id_df(tc_id: str):
 
 
 def swap_issue_grouping_db_to_prod(src=FaissDBPath.local, dst=FaissDBPath.prod):
+    logger.info("pushing the updated embedding data to production")
     # Validate source path
     if not os.path.exists(src):
         raise FileNotFoundError(f"Source path does not exist: {src}")
@@ -686,7 +687,7 @@ def swap_issue_grouping_db_to_prod(src=FaissDBPath.local, dst=FaissDBPath.prod):
 
     # Copy contents from src to dst, overwriting existing files
     shutil.copytree(src, dst, dirs_exist_ok=True)
-    print(f"Copied {src} -> {dst} (overwrite enabled)")
+    logger.info(f"Copied {src} -> {dst} (overwrite enabled)")
 
 
 def tc_id_scheduler():
@@ -696,8 +697,7 @@ def tc_id_scheduler():
         run_ids.to_parquet(parquet_file)
         logger.info("Background task updated Parquet file")
         # NOTE: currently disabling the nightly processing background job, will do it manually for now
-        asyncio.run(process_tc_ids_async_bg_job(run_ids))
-        swap_issue_grouping_db_to_prod()
+        # asyncio.run(process_tc_ids_async_bg_job(run_ids))
 
     job_id = "update_tc_ids_job"
 
@@ -750,7 +750,8 @@ async def process_tc_ids_async_bg_job(run_ids):
                 log_file.write("\n" + "-" * 80 + "\n")
 
             continue
-
+    
+    swap_issue_grouping_db_to_prod()
     logger.info("Finished background job processing of TC IDs")
 
 

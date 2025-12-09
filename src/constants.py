@@ -39,8 +39,8 @@ class FaissConfigurations:
 
 @dataclass
 class FaissDBPath:
-    local: str = "/prj/qct/webtech_scratch29/altaf/issue_grouping/issue_grouping/"
-    prod: str = "/prj/qct/webtech_scratch29/altaf/issue_grouping/issue_grouping/issue_grouping_hosting/issue_grouping"
+    local: str = os.path.join("/prj/qct/webtech_scratch29/altaf/issue_grouping/issue_grouping/", FaissConfigurations.base_path)
+    prod: str = os.path.join("/prj/qct/webtech_scratch29/altaf/issue_grouping/issue_grouping/issue_grouping_hosting/issue_grouping", FaissConfigurations.base_path)
 
 
 @dataclass
