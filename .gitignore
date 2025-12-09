@@ -10,6 +10,5 @@ issue_grouping_hosting/
 .ipynb_checkpoints
 UNKNOWN.egg-info
 *.ipynb
-faiss_issue_grouping_db
+issue_grouping_db
 .vscode
-test_faiss_issue_grouping_db

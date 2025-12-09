@@ -844,6 +844,18 @@ wheels = [
 ]
 
 [[package]]
+name = "gunicorn"
+version = "23.0.0"
+source = { registry = "https://devpi.qualcomm.com/qcom/dev/+simple" }
+dependencies = [
+    { name = "packaging" },
+]
+sdist = { url = "https://devpi.qualcomm.com/root/pypi/+f/f01/4447a0101dc57/gunicorn-23.0.0.tar.gz", hash = "sha256:f014447a0101dc57e294f6c18ca6b40227a4c90e9bdb586042628030cba004ec" }
+wheels = [
+    { url = "https://devpi.qualcomm.com/root/pypi/+f/ec4/00d38950de4df/gunicorn-23.0.0-py3-none-any.whl", hash = "sha256:ec400d38950de4dfd418cff8328b2c8faed0edb0d517d3394e457c317908ca4d" },
+]
+
+[[package]]
 name = "h11"
 version = "0.16.0"
 source = { registry = "https://devpi.qualcomm.com/qcom/dev/+simple" }
@@ -1087,6 +1099,7 @@ dependencies = [
     { name = "black" },
     { name = "faiss-cpu" },
     { name = "fastapi" },
+    { name = "gunicorn" },
     { name = "httptools" },
     { name = "ipykernel" },
     { name = "isort" },
@@ -1112,6 +1125,7 @@ requires-dist = [
     { name = "black", specifier = ">=25.1.0" },
     { name = "faiss-cpu", specifier = ">=1.12.0" },
     { name = "fastapi", specifier = ">=0.116.1" },
+    { name = "gunicorn", specifier = ">=23.0.0" },
     { name = "httptools", specifier = ">=0.6.4" },
     { name = "ipykernel", specifier = ">=6.30.1" },
     { name = "isort", specifier = ">=6.0.1" },

@@ -2,3 +2,6 @@ streamlit==1.47.0
 mysql-connector-python==9.4.0
 apscheduler==3.11.0
 rapidfuzz===3.14.0
+
+# preeeti api
+export QGENIE_API_KEY=febfd391-6464-4b5a-a9c3-4377fa68c602

@@ -35,10 +35,18 @@ class ClusterSpecificKeys:
 @dataclass
 class FaissConfigurations:
     base_path: str = "issue_grouping_db"
-    default_db_name: str = "issue_grouping_db"
+
+
+@dataclass
+class FaissDBPath:
+    local: str = "/prj/qct/webtech_scratch29/altaf/issue_grouping/issue_grouping/"
+    prod: str = "/prj/qct/webtech_scratch29/altaf/issue_grouping/issue_grouping/issue_grouping_hosting/issue_grouping"
 
 
 @dataclass
 class ErrorLogConfigurations:
     empty_error: str = "EmptyErrorLog"
     no_error: str = "NoErrorLog"
+
+
+GERRIT_INFO_PATH = "/prj/qct/webtech_hyd11/pgbs/output/tag_info.json"

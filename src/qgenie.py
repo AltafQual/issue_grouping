@@ -90,7 +90,6 @@ class CustomQGenieChat(QGenieChat):
         return self._create_chat_result({})
 
 
-# pro_model = CustomQGenieChat(model="Pro", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=200)
 gemini_pro_model = CustomQGenieChat(
     model="vertexai::gemini-2.5-pro", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=500
 )
