@@ -1,5 +1,6 @@
 import os
 from dataclasses import dataclass
+from typing import ClassVar, Dict, Tuple
 
 QGENEIE_API_KEY = os.getenv("QGENIE_API_KEY")
 regex_based_filteration_patterns = {
@@ -54,7 +55,18 @@ class ErrorLogConfigurations:
     no_error: str = "NoErrorLog"
 
 
-GERRIT_INFO_PATH = "/prj/qct/webtech_hyd11/pgbs/output/tag_info.json"
+@dataclass
+class GERRIT_CONFIGURATION:
+    gerrit_info_path: str = "/prj/qct/webtech_hyd11/pgbs/output/tag_info.json"
+    gerrit_backend_configuration: ClassVar[Dict[Tuple[str, ...], str]] = {
+        ("mlg-infra", "qnn-htp", "manifest", "genie"): "htp",
+        ("qnn-cpu",): "cpu",
+        ("qnn-gpu",): "gpu",
+        ("qnn-eai",): "lpai",
+        ("qnn", "qnn_qti", "mlg", "ml", "api"): "common",
+        ("modeltools",): "converter",
+        ("modeltools", "qnn-cpu"): "quantizer",
+    }
 
 
 @dataclass

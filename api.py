@@ -16,7 +16,7 @@ from src import helpers
 from src.constants import DataFrameKeys
 from src.custom_clustering import CustomEmbeddingCluster
 from src.failure_analyzer import FailureAnalyzer
-from src.gerrit_data_fetching_helpers import get_gerrit_info_between_2_runids
+from src.gerrit_data_fetching_helpers import get_gerrit_info_between_2_runids, get_regression_gerrits_based_of_type
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("memlog")
@@ -62,6 +62,7 @@ class ClusterInfoResponse(BaseModel):
     run_id_b: str = ""
     type: Dict[str, Any] = {}
     model: Dict[str, Any] = {}
+    gerrit_info: Dict[str, Any] = {}
 
     def add(self, key: str, value: Any, data_type: str) -> None:
         if data_type == "type":
@@ -183,10 +184,12 @@ async def get_two_run_ids_cluster_info(cluster_info_object: ClusterInfo) -> Dict
         result["time_taken"] = round(time.time() - start_time)
         return result
     try:
+        backend_type_mapping = {}
         results = helpers.find_regressions_between_two_tests(cluster_info_object.run_id_a, cluster_info_object.run_id_b)
         if not results.empty:
             new_cluster = await helpers.async_sequential_process_by_type(results)
             for test_type, df in new_cluster.items():
+                backend_type_mapping[test_type] = pd.unique(df["runtime"])
                 df = df.drop(
                     columns=[
                         col
@@ -213,6 +216,12 @@ async def get_two_run_ids_cluster_info(cluster_info_object: ClusterInfo) -> Dict
                     if model_name not in response.model:
                         response.model[model_name] = []
                     response.model[model_name].extend(model_cluster_details)
+
+            gerrit_info = await get_regression_gerrits_based_of_type(
+                cluster_info_object.run_id_a, cluster_info_object.run_id_b, backend_type_mapping
+            )
+            if gerrit_info:
+                response.gerrit_info = dict(gerrit_info)
         else:
             response.status = 404
             response.error_message = (
@@ -229,7 +238,12 @@ async def get_two_run_ids_cluster_info(cluster_info_object: ClusterInfo) -> Dict
 
     return result
 
+
 @app.post("/api/get_gerrits_merged_between_two_run_ids/")
 async def get_gerrits_merged_between_two_run_ids(cluster_info_object: ClusterInfo) -> Dict:
     logger.info(f"Received run ids: {cluster_info_object}")
-    return {"gerrit_data": await get_gerrit_info_between_2_runids(cluster_info_object.run_id_a, cluster_info_object.run_id_b)}
+    return {
+        "gerrit_data": await get_gerrit_info_between_2_runids(
+            cluster_info_object.run_id_a, cluster_info_object.run_id_b
+        )
+    }

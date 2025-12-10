@@ -4,7 +4,7 @@ import re
 from datetime import datetime
 from typing import Dict, Iterable, List, Optional, Tuple
 
-from src.constants import GERRIT_API_CONFIG, GERRIT_INFO_PATH
+from src.constants import GERRIT_API_CONFIG, GERRIT_CONFIGURATION
 from src.logger import AppLogger
 
 logger = AppLogger().get_logger(__name__)
@@ -165,7 +165,7 @@ def aggregate_gerrit_ids_for_range_string(
 ) -> Tuple[List[int], List[str], Dict[str, List[int]]]:
     # read gerrit information
     run_to_ids = {}
-    with open(GERRIT_INFO_PATH, "r") as f:
+    with open(GERRIT_CONFIGURATION.gerrit_info_path, "r") as f:
         run_to_ids = json.loads(f.read())
 
     all_ids, selected_runs, ids_by_run = aggregate_gerrit_ids_between(
@@ -224,3 +224,32 @@ async def get_gerrit_info_between_2_runids(run_id_a, run_id_b):
             gerrit_data_response.append(inner_response)
 
     return gerrit_data_response
+
+
+async def get_regression_gerrits_based_of_type(run_id_a, run_id_b, type_backend_mapping):
+    gerrits_data_list = await get_gerrit_info_between_2_runids(run_id_a, run_id_b)
+    from collections import defaultdict
+
+    backend_based_gerrit_data = defaultdict(list)
+    for gerrit_data in gerrits_data_list:
+        repo_name = gerrit_data.get("repository_name", "")
+        if repo_name:
+            repo_name = repo_name.split("/")[1].lower()
+        backend_names = []
+        for list_of_config, bck_name in GERRIT_CONFIGURATION.gerrit_backend_configuration.items():
+            if repo_name in list_of_config:
+                backend_names.append(bck_name)
+        for backend_name in backend_names:
+            backend_based_gerrit_data[backend_name].append(gerrit_data)
+
+    response_data = defaultdict(list)
+    for _type, backend_list in type_backend_mapping.items():
+        gerrit_data_dict = {}
+        if _type in {"converter", "quantizer"}:
+            gerrit_data_dict[_type] = backend_based_gerrit_data.get(_type, [])
+        else:
+            for backend in backend_list:
+                gerrit_data_dict[backend] = backend_based_gerrit_data.get(backend, [])
+        response_data[_type].append(gerrit_data_dict)
+
+    return response_data
