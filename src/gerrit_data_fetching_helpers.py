@@ -1,6 +1,7 @@
+import asyncio
 import json
-import os
 import re
+from collections import defaultdict
 from datetime import datetime
 from typing import Dict, Iterable, List, Optional, Tuple
 
@@ -185,50 +186,62 @@ from src.async_gerrit_client import GerritClientAsync
 gerrit_client = GerritClientAsync()
 
 
+async def _process_gerrit_id(_id: int) -> Optional[Dict]:
+    """Helper to fetch and process a single Gerrit ID."""
+    response = await gerrit_client.get_change_detail(_id)
+    if not isinstance(response, dict):
+        return None
+
+    inner_response = {
+        "commit_url": f"{GERRIT_API_CONFIG.host}/{_id}",
+        "commit_message": response.get("subject", ""),
+        "repository_name": response.get("project", ""),
+        "gerrit_raised_by": [
+            {
+                "name": response.get("owner", {}).get("name", ""),
+                "email": response.get("owner", {}).get("email", ""),
+                "QC_name": response.get("owner", {}).get("username", ""),
+            }
+        ],
+    }
+
+    gerrit_raised_by = response.get("owner", {}).get("username", "")
+    gerrit_reviewed_by = []
+    gerrit_merged_by = []
+
+    all_reviewers = response.get("labels", {}).get("Code-Review", {}).get("all", []) + response.get("labels", {}).get(
+        "Developer-Verified", {}
+    ).get("all", [])
+
+    for reviewer in all_reviewers:
+        if reviewer.get("value", 0) and "username" in reviewer:
+            reviewer_info = {
+                "name": reviewer.get("name"),
+                "email": reviewer.get("email"),
+                "QC_name": reviewer.get("username"),
+            }
+            if reviewer["value"] == 2:
+                gerrit_merged_by.append(reviewer_info)
+            elif reviewer["value"] == 1 and reviewer["username"] != gerrit_raised_by:
+                gerrit_reviewed_by.append(reviewer_info)
+
+    inner_response["gerrit_reviewed_by"] = gerrit_reviewed_by
+    inner_response["gerrit_merged_by"] = gerrit_merged_by
+    return inner_response
+
+
 async def get_gerrit_info_between_2_runids(run_id_a, run_id_b):
-    gerrit_data_response = []
     all_gerrit_ids = aggregate_gerrit_ids_for_range_string(run_id_a, run_id_b)
-    for _id in all_gerrit_ids:
-        response = await gerrit_client.get_change_detail(_id)
-        if isinstance(response, dict):
-            inner_response, gerrit_raised_by = {}, ""
-            inner_response["commit_url"] = GERRIT_API_CONFIG.host + "/" + str(_id)
-            inner_response["commit_message"] = response.get("subject", "")
-            inner_response["repository_name"] = response.get("project", "")
-            inner_response["gerrit_raised_by"] = [
-                {
-                    "name": response.get("owner", {}).get("name", ""),
-                    "email": response.get("owner", {}).get("email", ""),
-                    "QC_name": response.get("owner", {}).get("username", ""),
-                }
-            ]
-            gerrit_raised_by = response.get("owner", {}).get("username", "")
-            gerrit_reviewed_by = []
-            gerrit_merged_by = []
-            for reviewer in response.get("labels", {}).get("Code-Review", {}).get("all", []) + response.get(
-                "labels", {}
-            ).get("Developer-Verified", {}).get("all", []):
-                reviewers_info_dict = {"name": "", "email": "", "QC_name": ""}
-                if reviewer.get("value", 0):
-                    reviewers_info_dict["name"] = reviewer.get("name")
-                    reviewers_info_dict["email"] = reviewer.get("email")
-                    reviewers_info_dict["QC_name"] = reviewer.get("username")
 
-                    if reviewer.get("value") == 2:
-                        gerrit_merged_by.append(reviewers_info_dict)
-                    elif reviewer.get("value") == 1 and reviewer.get("username", "") != gerrit_raised_by:
-                        gerrit_reviewed_by.append(reviewers_info_dict)
+    tasks = [_process_gerrit_id(gerrit_id) for gerrit_id in all_gerrit_ids]
+    results = await asyncio.gather(*tasks)
 
-            inner_response["gerrit_reviewed_by"] = gerrit_reviewed_by
-            inner_response["gerrit_merged_by"] = gerrit_merged_by
-            gerrit_data_response.append(inner_response)
-
-    return gerrit_data_response
+    # Filter out None results from failed API calls
+    return [result for result in results if result is not None]
 
 
 async def get_regression_gerrits_based_of_type(run_id_a, run_id_b, type_backend_mapping):
     gerrits_data_list = await get_gerrit_info_between_2_runids(run_id_a, run_id_b)
-    from collections import defaultdict
 
     backend_based_gerrit_data = defaultdict(list)
     for gerrit_data in gerrits_data_list:
