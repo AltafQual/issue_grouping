@@ -39,8 +39,13 @@ class FaissConfigurations:
 
 @dataclass
 class FaissDBPath:
-    local: str = os.path.join("/prj/qct/webtech_scratch29/altaf/issue_grouping/issue_grouping/", FaissConfigurations.base_path)
-    prod: str = os.path.join("/prj/qct/webtech_scratch29/altaf/issue_grouping/issue_grouping/issue_grouping_hosting/issue_grouping", FaissConfigurations.base_path)
+    local: str = os.path.join(
+        "/prj/qct/webtech_scratch29/altaf/issue_grouping/issue_grouping/", FaissConfigurations.base_path
+    )
+    prod: str = os.path.join(
+        "/prj/qct/webtech_scratch29/altaf/issue_grouping/issue_grouping/issue_grouping_hosting/issue_grouping",
+        FaissConfigurations.base_path,
+    )
 
 
 @dataclass
@@ -50,3 +55,10 @@ class ErrorLogConfigurations:
 
 
 GERRIT_INFO_PATH = "/prj/qct/webtech_hyd11/pgbs/output/tag_info.json"
+
+
+@dataclass
+class GERRIT_API_CONFIG:
+    host: str = "https://review.qualcomm.com"
+    user_name: str = os.getenv("GERRIT_USER_NAME")
+    http_password: str = os.getenv("GERRIT_HTTP_PASSWORD")

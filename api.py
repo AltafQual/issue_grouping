@@ -16,6 +16,7 @@ from src import helpers
 from src.constants import DataFrameKeys
 from src.custom_clustering import CustomEmbeddingCluster
 from src.failure_analyzer import FailureAnalyzer
+from src.gerrit_data_fetching_helpers import get_gerrit_info_between_2_runids
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("memlog")
@@ -227,3 +228,8 @@ async def get_two_run_ids_cluster_info(cluster_info_object: ClusterInfo) -> Dict
         TTL_CACHE[(cluster_info_object.run_id_a, cluster_info_object.run_id_b)] = result
 
     return result
+
+@app.post("/api/get_gerrits_merged_between_two_run_ids/")
+async def get_gerrits_merged_between_two_run_ids(cluster_info_object: ClusterInfo) -> Dict:
+    logger.info(f"Received run ids: {cluster_info_object}")
+    return {"gerrit_data": await get_gerrit_info_between_2_runids(cluster_info_object.run_id_a, cluster_info_object.run_id_b)}
