@@ -5,6 +5,7 @@ from collections import defaultdict
 from datetime import datetime
 from typing import Dict, Iterable, List, Optional, Tuple
 
+from src.async_gerrit_client import GerritClientAsync
 from src.constants import GERRIT_API_CONFIG, GERRIT_CONFIGURATION
 from src.logger import AppLogger
 
@@ -181,14 +182,9 @@ def aggregate_gerrit_ids_for_range_string(
     return all_ids
 
 
-from src.async_gerrit_client import GerritClientAsync
-
-gerrit_client = GerritClientAsync()
-
-
-async def _process_gerrit_id(_id: int) -> Optional[Dict]:
+async def _process_gerrit_id(client: GerritClientAsync, _id: int) -> Optional[Dict]:
     """Helper to fetch and process a single Gerrit ID."""
-    response = await gerrit_client.get_change_detail(_id)
+    response = await client.get_change_detail(_id)
     if not isinstance(response, dict):
         return None
 
@@ -233,8 +229,9 @@ async def _process_gerrit_id(_id: int) -> Optional[Dict]:
 async def get_gerrit_info_between_2_runids(run_id_a, run_id_b):
     all_gerrit_ids = aggregate_gerrit_ids_for_range_string(run_id_a, run_id_b)
 
-    tasks = [_process_gerrit_id(gerrit_id) for gerrit_id in all_gerrit_ids]
-    results = await asyncio.gather(*tasks)
+    async with GerritClientAsync() as client:
+        tasks = [_process_gerrit_id(client, gerrit_id) for gerrit_id in all_gerrit_ids]
+        results = await asyncio.gather(*tasks)
 
     # Filter out None results from failed API calls
     return [result for result in results if result is not None]
@@ -256,6 +253,9 @@ async def get_regression_gerrits_based_of_type(run_id_a, run_id_b, type_backend_
             backend_based_gerrit_data[backend_name].append(gerrit_data)
 
     response_data = defaultdict(list)
+    if "common" in backend_based_gerrit_data:
+        response_data["common"] = backend_based_gerrit_data["common"]
+
     for _type, backend_list in type_backend_mapping.items():
         gerrit_data_dict = {}
         if _type in {"converter", "quantizer"}:

@@ -32,6 +32,13 @@ class GerritClientAsync:
             self.default_headers.update(default_headers)
         self.default_params = default_params or {}
 
+    async def __aenter__(self):
+        await self._ensure_session()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.close()
+
     async def start(self) -> None:
         """Optionally create the session up front."""
         await self._ensure_session()
