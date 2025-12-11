@@ -252,9 +252,9 @@ async def get_regression_gerrits_based_of_type(run_id_a, run_id_b, type_backend_
         for backend_name in backend_names:
             backend_based_gerrit_data[backend_name].append(gerrit_data)
 
-    response_data = defaultdict(list)
+    response_data = defaultdict(dict)
     if "common" in backend_based_gerrit_data:
-        response_data["common"] = backend_based_gerrit_data["common"]
+        response_data["common"] = {"all_runtimes":backend_based_gerrit_data["common"]}
 
     for _type, backend_list in type_backend_mapping.items():
         gerrit_data_dict = {}
@@ -263,6 +263,6 @@ async def get_regression_gerrits_based_of_type(run_id_a, run_id_b, type_backend_
         else:
             for backend in backend_list:
                 gerrit_data_dict[backend] = backend_based_gerrit_data.get(backend, [])
-        response_data[_type].append(gerrit_data_dict)
+        response_data[_type] = gerrit_data_dict
 
     return response_data
