@@ -508,12 +508,16 @@ class CustomEmbeddingCluster:
                     break
                 data_loading_retry -= 1
 
+            result_cluster_names = []
+            result_class_names = []
+            
+            if metadata is None:
+                return result_class_names, result_cluster_names
+            
             cluster_names = list(metadata.keys())
             # Compute similarities for all queries at once
             similarities = cosine_similarity(query_embeddings, centroids)
 
-            result_cluster_names = []
-            result_class_names = []
 
             # Process each query's results
             for i, (query, sim_row) in enumerate(zip(original_queries, similarities)):
