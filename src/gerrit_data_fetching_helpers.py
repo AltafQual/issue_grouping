@@ -203,7 +203,7 @@ async def _process_gerrit_id(client: GerritClientAsync, _id: int) -> Optional[Di
 
     gerrit_raised_by = response.get("owner", {}).get("username", "")
     gerrit_reviewed_by = []
-    gerrit_merged_by = []
+    gerrit_approved_by = []
 
     all_reviewers = response.get("labels", {}).get("Code-Review", {}).get("all", []) + response.get("labels", {}).get(
         "Developer-Verified", {}
@@ -217,12 +217,12 @@ async def _process_gerrit_id(client: GerritClientAsync, _id: int) -> Optional[Di
                 "QC_name": reviewer.get("username"),
             }
             if reviewer["value"] == 2:
-                gerrit_merged_by.append(reviewer_info)
+                gerrit_approved_by.append(reviewer_info)
             elif reviewer["value"] == 1 and reviewer["username"] != gerrit_raised_by:
                 gerrit_reviewed_by.append(reviewer_info)
 
     inner_response["gerrit_reviewed_by"] = gerrit_reviewed_by
-    inner_response["gerrit_merged_by"] = gerrit_merged_by
+    inner_response["gerrit_approved_by"] = gerrit_approved_by
     return inner_response
 
 
