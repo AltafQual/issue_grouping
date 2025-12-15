@@ -239,22 +239,28 @@ async def get_gerrit_info_between_2_runids(run_id_a, run_id_b):
 
 async def get_regression_gerrits_based_of_type(run_id_a, run_id_b, type_backend_mapping):
     gerrits_data_list = await get_gerrit_info_between_2_runids(run_id_a, run_id_b)
-
     backend_based_gerrit_data = defaultdict(list)
     for gerrit_data in gerrits_data_list:
         repo_name = gerrit_data.get("repository_name", "")
         if repo_name:
             repo_name = repo_name.split("/")[1].lower()
         backend_names = []
-        for list_of_config, bck_name in GERRIT_CONFIGURATION.gerrit_backend_configuration.items():
+        added_to_any_backend = False
+        for bck_name, list_of_config in GERRIT_CONFIGURATION.gerrit_backend_configuration.items():
             if repo_name in list_of_config:
                 backend_names.append(bck_name)
+                added_to_any_backend = True
+
+        # if the repo was not added to any backend, add it as common by default
+        if not added_to_any_backend:
+            backend_names.append("common")
+
         for backend_name in backend_names:
             backend_based_gerrit_data[backend_name].append(gerrit_data)
 
     response_data = defaultdict(dict)
     if "common" in backend_based_gerrit_data:
-        response_data["common"] = {"all_runtimes":backend_based_gerrit_data["common"]}
+        response_data["common"] = {"all_runtimes": backend_based_gerrit_data["common"]}
 
     for _type, backend_list in type_backend_mapping.items():
         gerrit_data_dict = {}

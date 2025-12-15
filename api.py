@@ -7,7 +7,7 @@ from typing import Any, Dict
 
 import pandas as pd
 import psutil
-from cachetools import TTLCache
+from cachetools import LFUCache
 from fastapi import BackgroundTasks, FastAPI, Query, Request
 from fastapi.responses import ORJSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
@@ -24,10 +24,7 @@ proc = psutil.Process()
 
 
 analyzer = FailureAnalyzer()
-
-# 24hrs(in seconds) * 3 days
-TTL_CACHE = TTLCache(ttl=(86400 * 3), maxsize=500)
-
+TTL_CACHE = LFUCache(maxsize=500)
 
 class InitiateIssueGrouping(BaseModel):
     run_id: str = Field(description="Run ID of the test you want to run issue grouping on")
@@ -41,6 +38,7 @@ class Regression(BaseModel):
 class ClusterInfo(BaseModel):
     run_id_a: str = Field(description="first valid test case Run ID")
     run_id_b: str = Field(description="second valid test case Run ID")
+    force: bool = Field(description="Skip cache and regenrate the regression", default = False)
 
 
 class RegressionResponse(BaseModel):
@@ -179,7 +177,7 @@ async def get_two_run_ids_cluster_info(cluster_info_object: ClusterInfo) -> Dict
     response = ClusterInfoResponse()
     response.run_id_a = cluster_info_object.run_id_a
     response.run_id_b = cluster_info_object.run_id_b
-    if (cluster_info_object.run_id_a, cluster_info_object.run_id_b) in TTL_CACHE:
+    if (cluster_info_object.run_id_a, cluster_info_object.run_id_b) in TTL_CACHE and cluster_info_object.force != True:
         result = TTL_CACHE[(cluster_info_object.run_id_a, cluster_info_object.run_id_b)]
         result["time_taken"] = round(time.time() - start_time)
         return result

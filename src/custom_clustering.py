@@ -443,11 +443,25 @@ class CustomEmbeddingCluster:
                 return ClusterSpecificKeys.non_grouped_key, np.nan
 
             # Load data
-            with open(os.path.join(type_dir, "metadata.json"), "r") as f:
-                metadata = json.load(f)
+            data_loading_retry = 3
+            metadata, centroids = None, None
+            while data_loading_retry:
+                try:
+                    with open(os.path.join(type_dir, "metadata.json"), "r") as f:
+                        metadata = json.load(f)
+                    with open(os.path.join(type_dir, "centroids.npy"), "rb") as f:
+                        centroids = np.load(f)
+                except Exception as e:
+                    print(f"Exception occured while loading data for batch search: {e}")
+                    print(f"retrying in 5 seconds")
+                    time.sleep(5)
 
-            with open(os.path.join(type_dir, "centroids.npy"), "rb") as f:
-                centroids = np.load(f)
+                if metadata:
+                    break
+                data_loading_retry -= 1
+
+            if metadata is None:
+                return ClusterSpecificKeys.non_grouped_key, np.nan
 
             cluster_names = list(metadata.keys())
             # Compute similarities
@@ -510,17 +524,16 @@ class CustomEmbeddingCluster:
 
             result_cluster_names = []
             result_class_names = []
-            
+
             if metadata is None:
-                return result_class_names, result_cluster_names
-            
+                return [ClusterSpecificKeys.non_grouped_key] * len(original_queries), [np.nan] * len(original_queries)
+
             cluster_names = list(metadata.keys())
             # Compute similarities for all queries at once
             similarities = cosine_similarity(query_embeddings, centroids)
 
-
             # Process each query's results
-            for i, (query, sim_row) in enumerate(zip(original_queries, similarities)):
+            for _, (query, sim_row) in enumerate(zip(original_queries, similarities)):
                 cluster_name = ""
                 if len(sim_row) > 0:
                     max_sim_idx = np.argmax(sim_row)
