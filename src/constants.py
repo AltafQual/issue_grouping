@@ -68,6 +68,8 @@ class GERRIT_CONFIGURATION:
         "common": ("qnn", "qnn_qti", "mlg", "ml", "api"),
         "converter": ("modeltools"),
         "quantizer": ("modeltools", "qnn-cpu"),
+        "mcp": ("mlg-infra", "qnn-htp", "manifest", "genie"),
+        "mcp_x86": ("mlg-infra", "qnn-htp", "manifest", "genie")
     }
 
 

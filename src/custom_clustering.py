@@ -456,11 +456,11 @@ class CustomEmbeddingCluster:
                     print(f"retrying in 5 seconds")
                     time.sleep(5)
 
-                if metadata:
+                if metadata is not None and isinstance(metadata, dict):
                     break
                 data_loading_retry -= 1
 
-            if metadata is None:
+            if metadata is None or not isinstance(metadata, dict):
                 return ClusterSpecificKeys.non_grouped_key, np.nan
 
             cluster_names = list(metadata.keys())
@@ -518,14 +518,14 @@ class CustomEmbeddingCluster:
                     print(f"retrying in 5 seconds")
                     time.sleep(5)
 
-                if metadata:
+                if metadata is not None and isinstance(metadata, dict):
                     break
                 data_loading_retry -= 1
 
             result_cluster_names = []
             result_class_names = []
 
-            if metadata is None:
+            if metadata is None or not isinstance(metadata, dict):
                 return [ClusterSpecificKeys.non_grouped_key] * len(original_queries), [np.nan] * len(original_queries)
 
             cluster_names = list(metadata.keys())

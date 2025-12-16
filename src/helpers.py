@@ -718,7 +718,6 @@ async def process_tc_ids_async_bg_job(run_ids):
     from src.failure_analyzer import FailureAnalyzer
 
     logger.info("processing the parquet and updating faiss as background job")
-    failure_while_processing_ids = None
     run_ids_list = run_ids["testplan_id"].tolist()
     for run_id in run_ids_list:
         try:
@@ -726,9 +725,7 @@ async def process_tc_ids_async_bg_job(run_ids):
             processed_run_ids = []
             if os.path.isfile(processed_run_ids_path):
                 processed_run_ids = json.loads(open(processed_run_ids_path).read())
-            if failure_while_processing_ids and failure_while_processing_ids in processed_run_ids:
-                processed_run_ids.remove(failure_while_processing_ids)
-                failure_while_processing_ids = None
+
             if run_id not in processed_run_ids:
                 logger.info(f"Processing: {run_id}")
                 await async_sequential_process_by_type(
@@ -739,7 +736,6 @@ async def process_tc_ids_async_bg_job(run_ids):
                 logger.info(f"Skipping processing: {run_id} already processed")
         except Exception as e:
             logger.error(f"Error occured while processing: {run_id}: \n{e}")
-            failure_while_processing_ids = run_id
             # Append full traceback to a log file
             error_log_path = os.path.join(FaissConfigurations.base_path, "failed_processing_runids_log.txt")
             with open(error_log_path, "a") as log_file:
@@ -747,6 +743,13 @@ async def process_tc_ids_async_bg_job(run_ids):
                 log_file.write(f"\nFailed with error: {e}\n")
                 log_file.write(traceback.format_exc())
                 log_file.write("\n" + "-" * 80 + "\n")
+                
+                processed_run_ids = json.loads(open(processed_run_ids_path).read())
+                if run_id in processed_run_ids:
+                    processed_run_ids.remove(run_id)
+                
+                with open(processed_run_ids_path, "w") as f:
+                    json.dumps(processed_run_ids, f, indent=3)
 
             continue
 

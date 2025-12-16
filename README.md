@@ -6,4 +6,6 @@ API starting Command:
 
 ```python 
  gunicorn -w 4 -k uvicorn.workers.UvicornWorker --max-requests 1 --max-requests-jitter 0  -b 0.0.0.0:8001 "api:app" --graceful-timeout 30 --keep-alive 5
+
+ uvicorn api:app --host=0.0.0.0 --port=8001 --workers=4
 ```
