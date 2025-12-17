@@ -108,6 +108,8 @@ You are an expert in log analysis and classification. Your task is to analyze th
       - Failed to open input file
       - cannot unpack non-iterable NoneType object
       - ValueError: cannot reshape array.
+      - Could not find matching record in ADB logs
+      - The selected runtime is not available on this platform
       can be classified as setup related issues
 3. **SDK related Issue**: logs related to hardware failures, sub modules failed or any type of failure in legacy code. All the errors which doesn't belong to either environment/code will fall in this category. Verifier Failed related issues can also be classified as SDK Related Issues
 
