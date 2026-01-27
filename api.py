@@ -85,6 +85,7 @@ class ClusterInfoResponse(BaseModel):
 
 
 def consolidated_report_worker():
+    logger.info("Starting consolidated report analysis job")
     analysis = CombinedRegressionAnalysis(ConsolidatedReportAnalysis())
 
     while True:
