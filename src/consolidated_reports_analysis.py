@@ -207,7 +207,9 @@ class RegressionAnalysisReport:
         from src.qgenie import error_summary_generation
 
         error_summary = error_summary_generation(final_error_list)
-        self.error_summary_list.extend(final_error_list)
+        for error in final_error_list:
+            if error not in self.error_summary_list:
+                self.error_summary_list.append(error)
         return error_summary
 
     def __filter_reason_and_get_qgenie_summary(self, failure_data):
