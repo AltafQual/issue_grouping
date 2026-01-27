@@ -338,5 +338,5 @@ async def initiate_consolidated_report_regression_analysis(
 
     result = "Successfully queued ids for processing."
     if non_processing_ids:
-        result += f" Except {non_processing_ids}: These are already in processing"
+        result += f" Except {','.join(non_processing_ids)}: These are already in processing"
     return {"response": result}
