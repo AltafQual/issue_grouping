@@ -159,3 +159,70 @@ Existing subclusters (previous_clusters):
 Current batch logs:
 {error_logs}
 """
+
+ERROR_SUMMARIZATION_PROMPT = """
+<TASK>
+You are given a list of error logs. Your goal is to generate a concise summary that captures the key issues across all logs.
+</TASK>
+
+<REQUIREMENTS>
+- Summarize the main errors and their nature (e.g., common causes, affected components).
+- Do not include raw log lines or technical stack traces.
+- Keep the summary under 500 words.
+- Use clear, professional language suitable for an engineering report.
+- Focus on key patterns or recurring problems rather than individual details.
+- Do not include any introductory phrases or prefixes like “Here is the summary” or “Summary:”. Output should only contain the summary text.
+- Do NOT expand or explain any abbreviations or short forms. Keep them exactly as they appear
+</REQUIREMENTS>
+
+<OUTPUT FORMAT>
+The output is directly used in a HTML Report, follow below instructions:
+- Enclose any important keywords or sentence between `<b> </b>`, so that these will appear as bold
+- Always Generate the response as bullet points by enclosing each point between `<li> </li>`
+</OUTPUT FORMAT>
+"""
+
+SUMMARY_GENERATION_PROMPT = """
+<TASK>
+You are given a list of error logs. Your goal is to generate a concise summary that captures the key issues across all logs.
+</TASK>
+
+<REQUIREMENTS>
+- Summarize the main errors and their nature (e.g., common causes, affected components).
+- Do not include raw log lines or technical stack traces.
+- Keep the summary under 800 words.
+- Use clear, professional language suitable for an engineering report.
+- Focus on key patterns or recurring problems rather than individual details.
+- Do not include any introductory phrases or prefixes like “Here is the summary” or “Summary:”. Output should only contain the summary text.
+- Do NOT expand or explain any abbreviations or short forms. Keep them exactly as they appear
+</REQUIREMENTS>
+"""
+
+PARENT_SUMMARY_GENERATION_PROMPT = """
+<TASK>
+You are given a list of summaries of error logs. Your goal is to generate a concise summary combining all these summaries that captures the key issues.
+</TASK>
+
+<REQUIREMENTS>
+- Summarize the main errors and their nature (e.g., common causes, affected components).
+- Do not include raw log lines or technical stack traces.
+- Keep the summary less than 10 bullet points.
+- Use clear, professional language suitable for an engineering report.
+- Focus on key patterns or recurring problems rather than individual details.
+- Do not include any introductory phrases or prefixes like “Here is the summary” or “Summary:”. Output should only contain the summary text.
+- Do NOT expand or explain any abbreviations or short forms. Keep them exactly as they appear
+</REQUIREMENTS>
+
+<OUTPUT FORMAT>
+The output is directly used in a HTML Report, follow below instructions:
+- Enclose any important keywords or sentence between `<b> </b>`, so that these will appear as bold
+- Always Generate the response as bullet points by enclosing each point between `<li> </li>`. Each unique point in summary should be a bullet point
+</OUTPUT FORMAT>
+"""
+
+ERROR_LOGS_LIST = """
+<LOGS>
+Below are the error logs to generate summary of:
+{logs}
+</LOGS>
+"""

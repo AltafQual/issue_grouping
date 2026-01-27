@@ -1,5 +1,6 @@
 import hashlib
 import logging
+import re
 import time
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
@@ -353,7 +354,22 @@ class ConnectToMySql(DatabaseConnection):
         logger.info(f"Fetched result {result} with the details: {type}, {runtime}, {cluster_name}")
         return result[0] if result else ""
 
+    def sort_run_ids(self, run_id1: str, run_id2: str):
+        """
+        Sort two run IDs so that the latest (based on embedded timestamp) is first.
+        Assumes timestamp is the 12-digit part after 'vX.X.X.' and before underscore.
+        Example: v2.44.0.260112072337_193906 → timestamp = 260112072337
+        """
+
+        def extract_ts(run_id):
+            m = re.search(r"v\d+\.\d+\.\d+\.(\d{12})_", run_id)
+            return int(m.group(1)) if m else 0
+
+        ts1, ts2 = extract_ts(run_id1), extract_ts(run_id2)
+        return (run_id1, run_id2) if ts1 >= ts2 else (run_id2, run_id1)
+
     def get_regressions(self, test_id_a: str, test_id_b: str):
+        test_id_a, test_id_b = self.sort_run_ids(test_id_a, test_id_b)
         query = f"""
         SELECT 
             r1.tc_uuid AS tc_uuid,

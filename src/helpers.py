@@ -348,7 +348,7 @@ def replace_limiting_reason_with_actual_reason_concurrently(df, error_reason_col
 
 @execution_timer
 def remove_empty_and_misc_rows(df: pd.DataFrame, errors: list, error_column_name: str):
-
+    df[DataFrameKeys.extracted_error_log] = None
     df[error_column_name] = errors
     df_with_error_reason = df[
         ~df[error_column_name].str.startswith("limiting reason to 3000")  # not starting with that phrase
@@ -357,6 +357,9 @@ def remove_empty_and_misc_rows(df: pd.DataFrame, errors: list, error_column_name
         df[df[error_column_name].str.startswith("limiting reason to 3000")],  # not starting with that phrase
         error_column_name,
     )
+    partial_error_reasons.loc[:, DataFrameKeys.extracted_error_log] = partial_error_reasons[
+        DataFrameKeys.preprocessed_text_key
+    ]
     df = pd.concat([df_with_error_reason, partial_error_reasons], axis=0).reset_index(drop=True)
     df.loc[:, DataFrameKeys.cluster_name] = df[error_column_name].apply(is_empty_error_log)
     df.loc[:, error_column_name] = df[error_column_name].apply(mask_numbers)
@@ -743,13 +746,6 @@ async def process_tc_ids_async_bg_job(run_ids):
                 log_file.write(f"\nFailed with error: {e}\n")
                 log_file.write(traceback.format_exc())
                 log_file.write("\n" + "-" * 80 + "\n")
-                
-                processed_run_ids = json.loads(open(processed_run_ids_path).read())
-                if run_id in processed_run_ids:
-                    processed_run_ids.remove(run_id)
-                
-                with open(processed_run_ids_path, "w") as f:
-                    json.dumps(processed_run_ids, f, indent=3)
 
             continue
 

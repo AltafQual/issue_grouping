@@ -1,5 +1,7 @@
 import asyncio
+import json
 import logging
+import threading
 import time
 import traceback
 from contextlib import asynccontextmanager
@@ -13,7 +15,8 @@ from fastapi.responses import ORJSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
 from src import helpers
-from src.constants import DataFrameKeys
+from src.consolidated_reports_analysis import CombinedRegressionAnalysis, ConsolidatedReportAnalysis
+from src.constants import CONSOLIDATED_REPORTS, DataFrameKeys
 from src.custom_clustering import CustomEmbeddingCluster
 from src.failure_analyzer import FailureAnalyzer
 from src.gerrit_data_fetching_helpers import get_gerrit_info_between_2_runids, get_regression_gerrits_based_of_type
@@ -25,9 +28,17 @@ proc = psutil.Process()
 
 analyzer = FailureAnalyzer()
 TTL_CACHE = LFUCache(maxsize=500)
+LOCK = threading.Lock()
+
 
 class InitiateIssueGrouping(BaseModel):
     run_id: str = Field(description="Run ID of the test you want to run issue grouping on")
+
+
+class InitiateConsolidatedReportGeneration(BaseModel):
+    run_ids: list = Field(
+        description="QAISW id example `qaisw-v2.44.0.260112072337_193906_nightly` to initiate report generation"
+    )
 
 
 class Regression(BaseModel):
@@ -38,7 +49,7 @@ class Regression(BaseModel):
 class ClusterInfo(BaseModel):
     run_id_a: str = Field(description="first valid test case Run ID")
     run_id_b: str = Field(description="second valid test case Run ID")
-    force: bool = Field(description="Skip cache and regenrate the regression", default = False)
+    force: bool = Field(description="Skip cache and regenrate the regression", default=False)
 
 
 class RegressionResponse(BaseModel):
@@ -73,9 +84,52 @@ class ClusterInfoResponse(BaseModel):
         return self.dict()
 
 
+def consolidated_report_worker():
+    analysis = CombinedRegressionAnalysis(ConsolidatedReportAnalysis())
+
+    while True:
+        try:
+            with LOCK:
+                try:
+                    with open(CONSOLIDATED_REPORTS.PROCESSING_JSON, "r") as f:
+                        data = json.load(f)
+                except Exception:
+                    data = []
+
+            if not data:
+                time.sleep(10)
+                continue
+
+            run_id = data[0]
+            print(f"[Worker] Processing run_id: {run_id}")
+
+            try:
+                analysis.generate_final_summary_report(run_id)
+            except Exception as e:
+                print(f"[Worker] Error processing {run_id}: {e}")
+
+            # After finishing, remove it
+            with LOCK:
+
+                with open(CONSOLIDATED_REPORTS.PROCESSING_JSON, "r") as f:
+                    data = json.load(f)
+
+                if run_id in data:
+                    data.remove(run_id)
+
+                with open(CONSOLIDATED_REPORTS.PROCESSING_JSON, "w") as f:
+                    json.dump(data, f, indent=2)
+
+        except Exception as e:
+            print(f"[Worker] Unexpected error: {e}")
+
+        time.sleep(10)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     asyncio.create_task(asyncio.to_thread(helpers.tc_id_scheduler))
+    asyncio.create_task(asyncio.to_thread(consolidated_report_worker))
     yield
 
 
@@ -165,19 +219,29 @@ async def inititate_issue_grouping(tc_id_object: InitiateIssueGrouping, backgrou
         return {"status": f"Error: No data found for the Run ID: {run_id}"}
 
     background_tasks.add_task(
-        helpers.async_sequential_process_by_type, data, update_faiss_and_sql=True, run_id=run_id.strip()
+        helpers.async_sequential_process_by_type,
+        data,
+        update_faiss_and_sql=True,
+        run_id=run_id.strip(),
     )
     return {"status": f"Successfully Started processing: {run_id}"}
 
 
-@app.post("/api/get_two_run_ids_cluster_info/", response_model=ClusterInfoResponse)
+@app.post(
+    "/api/get_two_run_ids_cluster_info/",
+    response_model=ClusterInfoResponse,
+    status_code=200,
+)
 async def get_two_run_ids_cluster_info(cluster_info_object: ClusterInfo) -> Dict:
     logger.info(f"Received run ids: {cluster_info_object}")
     start_time = time.time()
     response = ClusterInfoResponse()
     response.run_id_a = cluster_info_object.run_id_a
     response.run_id_b = cluster_info_object.run_id_b
-    if (cluster_info_object.run_id_a, cluster_info_object.run_id_b) in TTL_CACHE and cluster_info_object.force != True:
+    if (
+        cluster_info_object.run_id_a,
+        cluster_info_object.run_id_b,
+    ) in TTL_CACHE and cluster_info_object.force != True:
         result = TTL_CACHE[(cluster_info_object.run_id_a, cluster_info_object.run_id_b)]
         result["time_taken"] = round(time.time() - start_time)
         return result
@@ -216,7 +280,9 @@ async def get_two_run_ids_cluster_info(cluster_info_object: ClusterInfo) -> Dict
                     response.model[model_name].extend(model_cluster_details)
 
             gerrit_info = await get_regression_gerrits_based_of_type(
-                cluster_info_object.run_id_a, cluster_info_object.run_id_b, backend_type_mapping
+                cluster_info_object.run_id_a,
+                cluster_info_object.run_id_b,
+                backend_type_mapping,
             )
             if gerrit_info:
                 response.gerrit_info = dict(gerrit_info)
@@ -237,11 +303,40 @@ async def get_two_run_ids_cluster_info(cluster_info_object: ClusterInfo) -> Dict
     return result
 
 
-@app.post("/api/get_gerrits_merged_between_two_run_ids/")
-async def get_gerrits_merged_between_two_run_ids(cluster_info_object: ClusterInfo) -> Dict:
+@app.post("/api/get_gerrits_merged_between_two_run_ids/", status_code=200)
+async def get_gerrits_merged_between_two_run_ids(
+    cluster_info_object: ClusterInfo,
+) -> Dict:
     logger.info(f"Received run ids: {cluster_info_object}")
     return {
         "gerrit_data": await get_gerrit_info_between_2_runids(
             cluster_info_object.run_id_a, cluster_info_object.run_id_b
         )
     }
+
+
+@app.post("/api/consolidated_report_regression_analysis/", status_code=202)
+async def initiate_consolidated_report_regression_analysis(
+    initiate_report_generation: InitiateConsolidatedReportGeneration,
+):
+    with LOCK:
+        try:
+            with open(CONSOLIDATED_REPORTS.PROCESSING_JSON, "r") as f:
+                data = json.load(f)
+        except Exception:
+            data = []
+
+        non_processing_ids = []
+        for rid in initiate_report_generation.run_ids:
+            if rid not in data:
+                data.append(rid)
+            else:
+                non_processing_ids.append(rid)
+
+        with open(CONSOLIDATED_REPORTS.PROCESSING_JSON, "w") as f:
+            json.dump(data, f, indent=2)
+
+    result = "Successfully queued ids for processing."
+    if non_processing_ids:
+        result += f" Except {non_processing_ids}: These are already in processing"
+    return {"response": result}

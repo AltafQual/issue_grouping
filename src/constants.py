@@ -25,6 +25,7 @@ class DataFrameKeys:
     index: str = "unique_id"
     grouped_from_faiss: str = "issue_already_occured"
     cluster_class: str = "cluster_class"
+    extracted_error_log: str = "extracted_error_log"
 
 
 @dataclass
@@ -69,7 +70,7 @@ class GERRIT_CONFIGURATION:
         "converter": ("modeltools"),
         "quantizer": ("modeltools", "qnn-cpu"),
         "mcp": ("mlg-infra", "qnn-htp", "manifest", "genie"),
-        "mcp_x86": ("mlg-infra", "qnn-htp", "manifest", "genie")
+        "mcp_x86": ("mlg-infra", "qnn-htp", "manifest", "genie"),
     }
 
 
@@ -78,3 +79,17 @@ class GERRIT_API_CONFIG:
     host: str = "https://review.qualcomm.com"
     user_name: str = os.getenv("GERRIT_USER_NAME")
     http_password: str = os.getenv("GERRIT_HTTP_PASSWORD")
+
+
+@dataclass
+class CONSOLIDATED_REPORTS:
+    path: str = "/prj/qct/webtech_hyd19/CONSOLIDATED_REPORTS/"
+    sheet_name: str = "Consolidated Report"
+
+    # NOTE: hard coding previous version release info, currently have to update everymonth unless automated
+    prev_release_info: str = "v2.42.0.251225135753_193295"
+    prev_release_rc_number: str = "RC4"
+
+    prev_run_id_generation_script_path = "/prj/mlgqipl/Satyam/Scripts/get_previous_testplan_id.py"
+    qa2_config_file_path = "/prj/qct/webtech_hyd7/qa2_web/config/config-prod.yaml"
+    PROCESSING_JSON = "./consolidate_report_assests/processing_ids.json"

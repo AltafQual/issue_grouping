@@ -13,7 +13,6 @@ from src.embeddings import FallbackEmbeddings
 
 
 class EmbeddingsDB(object):
-
     def save(self):
         raise NotImplementedError
 
@@ -48,7 +47,6 @@ def build_faiss_index(embeddings):
 
 
 class FaissIVFFlatIndex(EmbeddingsDB):
-
     def _check_existing_faiss_for_type(self, type):
         type_based_path = os.path.join(FaissConfigurations.base_path, f"{type}_faiss")
         if os.path.exists(type_based_path):

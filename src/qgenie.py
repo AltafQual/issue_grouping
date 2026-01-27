@@ -9,13 +9,13 @@ from typing import Any
 import pandas as pd
 from langchain_core.callbacks import AsyncCallbackManagerForLLMRun, CallbackManagerForLLMRun
 from langchain_core.messages import BaseMessage
-from langchain_core.output_parsers import JsonOutputParser
+from langchain_core.output_parsers import JsonOutputParser, StrOutputParser
 from langchain_core.outputs import ChatResult
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
 from qgenie.integrations.langchain import QGenieChat
-from src import helpers, prompts
+from src import prompts
 from src.constants import QGENEIE_API_KEY, ClusterSpecificKeys, DataFrameKeys
 from src.execution_timer_log import execution_timer
 from src.logger import AppLogger
@@ -134,6 +134,50 @@ recluster_parser = JsonOutputParser(pydantic_object=ReclusterResult)
 nameparser = JsonOutputParser(pydantic_object=NameClusteringResult)
 classify_cluster_based_on_type = JsonOutputParser(pydantic_object=ClassifyClusterGroup)
 subcluster_verifer_failed = JsonOutputParser(pydantic_object=SubClusterVerifierFailed)
+
+
+@execution_timer
+def error_summary_generation(errors_list: list[str]) -> str:
+    prompt_template = ChatPromptTemplate.from_messages(
+        [("system", prompts.ERROR_SUMMARIZATION_PROMPT), ("human", prompts.ERROR_LOGS_LIST)]
+    )
+    model_to_use = model
+    if len(errors_list) >= 10:
+        model_to_use = gemini_pro_model
+    chain = prompt_template | model_to_use | StrOutputParser()
+    error_logs = "\n\n".join(f"Error Logs {i}:\n{error}" for i, error in enumerate(errors_list, start=1))
+
+    return chain.invoke({"logs": error_logs})
+
+
+@execution_timer
+def cummilative_summary_generation(errors_list: list[str]) -> str:
+    def _chunk(iterable, size: int):
+        """Yield successive chunks of given size from the iterable."""
+        for i in range(0, len(iterable), size):
+            yield iterable[i : i + size]
+
+    print(f"Total logs for cummilative summary generation: {len(errors_list)}")
+    summaries_list = []
+
+    for index, error_window in enumerate(_chunk(errors_list, 10), start=1):
+        print(f"Processing window: {index} with lenght: {len(error_window)}")
+        prompt_template = ChatPromptTemplate.from_messages(
+            [("system", prompts.SUMMARY_GENERATION_PROMPT), ("human", prompts.ERROR_LOGS_LIST)]
+        )
+        chain = prompt_template | gemini_pro_model | StrOutputParser()
+        error_logs = "\n\n".join(f"Error Logs {i}:\n{error}" for i, error in enumerate(error_window, start=1))
+        summaries_list.append(chain.invoke({"logs": error_logs}))
+
+    print(f"Total summaries generated: {len(summaries_list)}. Generating final summary")
+    prompt_template = ChatPromptTemplate.from_messages(
+        [("system", prompts.PARENT_SUMMARY_GENERATION_PROMPT), ("human", prompts.ERROR_LOGS_LIST)]
+    )
+    chain = prompt_template | gemini_pro_model | StrOutputParser()
+    all_summaries_combined = "\n\n".join(
+        f"Error Logs Summary {i}:\n{error}" for i, error in enumerate(errors_list, start=1)
+    )
+    return chain.invoke({"logs": all_summaries_combined})
 
 
 @execution_timer
@@ -664,6 +708,8 @@ async def qgenie_post_processing(df: pd.DataFrame) -> pd.DataFrame:
             duplicate_clusters = get_duplicate_clusters(analyzed_results)
             df, analyzed_results = await merge_duplicate_clusters(df, duplicate_clusters, analyzed_results)
             df = give_cluster_names_and_reassign_misc_clusters(df, analyzed_results)
+
+        from src import helpers
 
         df = helpers.detect_cluster_outlier(df)
         df = helpers.reassign_unclustered_logs(df)
