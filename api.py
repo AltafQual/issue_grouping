@@ -9,7 +9,7 @@ from typing import Any, Dict
 
 import pandas as pd
 import psutil
-from cachetools import LFUCache
+from cachetools import LFUCache, TTLCache
 from fastapi import BackgroundTasks, FastAPI, Query, Request
 from fastapi.responses import ORJSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
@@ -24,10 +24,8 @@ from src.gerrit_data_fetching_helpers import get_gerrit_info_between_2_runids, g
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("memlog")
 proc = psutil.Process()
-
-
 analyzer = FailureAnalyzer()
-TTL_CACHE = LFUCache(maxsize=500)
+TTL_CACHE = TTLCache(maxsize=1000, timer= (604800 * 604800))
 LOCK = threading.Lock()
 
 
