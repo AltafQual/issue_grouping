@@ -25,7 +25,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger("memlog")
 proc = psutil.Process()
 analyzer = FailureAnalyzer()
-TTL_CACHE = TTLCache(maxsize=1000, timer= (604800 * 604800))
+TTL_CACHE = TTLCache(maxsize=1000, ttl= (604800 * 604800))
 LOCK = threading.Lock()
 
 
