@@ -86,7 +86,6 @@ class ClusterInfoResponse(BaseModel):
 
 def consolidated_report_worker():
     logger.info("Starting consolidated report analysis job")
-    analysis = CombinedRegressionAnalysis(ConsolidatedReportAnalysis())
 
     while True:
         try:
@@ -98,18 +97,18 @@ def consolidated_report_worker():
                     data = []
 
             if not data:
-                time.sleep(10)
+                time.sleep(60)
                 continue
 
             run_id = data[0]
-            print(f"[Worker] Processing run_id: {run_id}")
+            logger.info(f"[Worker] Processing run_id: {run_id}")
 
             try:
+                analysis = CombinedRegressionAnalysis(ConsolidatedReportAnalysis())
                 analysis.generate_final_summary_report(run_id)
             except Exception as e:
-                print(f"[Worker] Error processing {run_id}: {e}")
+                logger.info(f"[Worker] Error processing {run_id}: {e}")
 
-            # After finishing, remove it
             with LOCK:
 
                 with open(CONSOLIDATED_REPORTS.PROCESSING_JSON, "r") as f:
@@ -122,7 +121,7 @@ def consolidated_report_worker():
                     json.dump(data, f, indent=2)
 
         except Exception as e:
-            print(f"[Worker] Unexpected error: {e}")
+            logger.info(f"[Worker] Unexpected error: {e}")
 
         time.sleep(10)
 

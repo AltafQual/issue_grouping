@@ -18,13 +18,14 @@ def filter_error_logs(error_logs_list):
     __error_filters = tuple(
         re.compile(error_regex, re.IGNORECASE)
         for error_regex in [
-            r"\btimer\s+expired\b",  # matches "timer expired"
-            r"\bmodel\s+not\s+found\b",  # matches "model not found"
-            r"\bdevice\s+creation\b",  # matches "device creation",
+            r"\btimer\s+expired\b",
+            r"\bmodel\s+not\s+found\b",
+            r"\bdevice\s+creation\b",
             r"\binference\s+passed\s+but\s+output\s+not\s+generated\b",
             r"\bverifier\s+failed\b",
             r"\bdevice\s+not\s+found\b",
             r"\bmissing\s+shared\s+libraries\b",
+            r"\bdevice(?:[_\s-])?unavailable\b",
         ]
     )
     filtered_error_logs = []
@@ -517,6 +518,7 @@ class CombinedRegressionAnalysis:
         self.consolidated_report_analysis = consolidated_report_analysis
         self._regression_analysis_object = defaultdict(dict)
         self._regression_html_paths = defaultdict(str)
+        self.__processed_run_id = False
 
     def _regex(self, pattern: str):
         rx = re.compile(pattern, re.IGNORECASE)
@@ -590,7 +592,6 @@ class CombinedRegressionAnalysis:
             logger.exception(f"Error occured while loading objects: {e}")
 
     def generate_each_run_id_regression_report(self, qairt_id):
-        html_path_dict = {}
         unique_run_ids_for_qairt_id = self.consolidated_report_analysis.get_unqiue_runids(qairt_id)
         logger.info(f"Got all the run ids for qairt id: {qairt_id}: Run IDS: {unique_run_ids_for_qairt_id}")
 
@@ -618,10 +619,11 @@ class CombinedRegressionAnalysis:
             html_path = regression_analysis.generate_regression_analysis_report(_id, prev_id, regression_json)
             logger.info(f"HTML for {_id}: {html_path}")
 
-            self._regression_analysis_object[_id] = regression_analysis
-            html_path_dict[_id] = html_path
+            if html_path:
+                self._regression_analysis_object[_id] = regression_analysis
+                self._regression_html_paths[_id] = html_path
+                self.__processed_run_id = True
 
-        self._regression_html_paths = html_path_dict
         self.save_regression_analysis_objects(qairt_id)
 
     def __generated_regressed_gerrits_page(self, qairt_id, gerrits_information):
@@ -634,12 +636,12 @@ class CombinedRegressionAnalysis:
 
         for repo_name, gerrit_data in gerrits_information.items():
             html_content += f"<h3>Repository Name: {repo_name}</h3>"
-            html_content += "<table border='1'><tr><th>Gerrit Raised By</th><th>Email</th><th>Gerrit Link</th></tr>"
+            html_content += "<table border='1'><tr><th>Gerrit Raised By</th><th>Email</th><th>Commit Message</th><th>Gerrit Link</th></tr>"
             unique_gerrits = set()
             for data in gerrit_data:
                 if data["commit_url"] not in unique_gerrits:
                     commit_url = f"<a href='{data['commit_url']}' target='_blank'>Gerrit</a>"
-                    html_content += f"<tr><td>{data['gerrit_raised_by'][0]['name']}</td><td>{data['gerrit_raised_by'][0]['email']}</td><td>{commit_url}</td></tr>"
+                    html_content += f"<tr><td>{data['gerrit_raised_by'][0]['name']}</td><td>{data['gerrit_raised_by'][0]['email']}</td><td>{data['commit_message']}</td></tr><td>{commit_url}</td></tr>"
                     unique_gerrits.add(data["commit_url"])
                     gerrits_merged_count += 1
             html_content += "</table>"
@@ -672,6 +674,16 @@ class CombinedRegressionAnalysis:
         return f"<ul>{li_html}</ul>"
 
     def generate_qairt_regression_report(self, qairt_id):
+        qairt_regression_report_path = os.path.join(
+            CONSOLIDATED_REPORTS.path,
+            qairt_id,
+            f"{qairt_id}.html",
+        )
+
+        # if no run id is processed return the previous path with any processing
+        if not self.__processed_run_id:
+            return qairt_regression_report_path
+
         qairt_regression_report = "<html><head><style> body { font-family: Arial, sans-serif; color: #000000;} table {border-collapse: collapse;}th,td {border: 2px solid black;text-align: center;padding: 7px;}</style></head>"
         qairt_regression_report += f"<h2>Regression Analysis Report ({qairt_id})</h2>"
 
@@ -683,7 +695,15 @@ class CombinedRegressionAnalysis:
         for bu, run_ids in bu_wise_run_ids.items():
             logger.info(f"Generating executing summary for bu: {bu}: {run_ids}")
             qairt_regression_report += f"<h3>{bu.upper()} Analysis Report</h3>"
-            qairt_regression_report += self.list_to_html_ul(run_ids)
+            updated_run_ids = []
+            for run_id in run_ids:
+                if run_id in self._regression_html_paths:
+                    updated_run_ids.append(
+                        f"<a href='https://aisw-hyd.qualcomm.com/fs/{self._regression_html_paths[run_id]}'>{run_id}</a>"
+                    )
+                else:
+                    updated_run_ids.append(run_id)
+            qairt_regression_report += self.list_to_html_ul(updated_run_ids)
 
             soc_errors_list, model_error_list = [], []
             for run_id in run_ids:
@@ -693,31 +713,12 @@ class CombinedRegressionAnalysis:
             logger.info(f"Total errors: {len(soc_errors_list)}, Total model errors: {len(model_error_list)}")
             qairt_regression_report += generate_executive_summary(soc_errors_list, model_error_list)
 
-        qairt_regression_report += "<h3>Run ID Wise Reports</h3>"
-        non_regressed_run_ids = []
-        regressed_run_ids = []
-        for run_id, path in self._regression_html_paths.items():
-            if not path:
-                non_regressed_run_ids.append(run_id)
-            else:
-                regressed_run_ids.append(f"<a href='https://aisw-hyd.qualcomm.com/fs/{path}'>{run_id}</a>")
-
-        qairt_regression_report += self.list_to_html_ul(regressed_run_ids)
-        if non_regressed_run_ids:
-            qairt_regression_report += "<h3> Non Regressed Run IDS </h3>"
-            qairt_regression_report += self.list_to_html_ul(non_regressed_run_ids)
-
         qairt_regression_report += "<h3> Lists of Gerrits Merged </h3>"
         gerrits_merged_html_path, gerrits_count = self.generate_gerrits_merged_report(qairt_id)
         qairt_regression_report += self.list_to_html_ul(
             [f"<a href='{gerrits_merged_html_path}'>{gerrits_count} Gerrits Merged</a>"]
         )
         qairt_regression_report += "</br>Regards,</br>AISW AUTO</body></html>"
-        qairt_regression_report_path = os.path.join(
-            CONSOLIDATED_REPORTS.path,
-            qairt_id,
-            f"{qairt_id}.html",
-        )
         with open(qairt_regression_report_path, "w") as f:
             f.write(qairt_regression_report)
 
