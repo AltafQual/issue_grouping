@@ -593,9 +593,11 @@ class CombinedRegressionAnalysis:
 
     def generate_each_run_id_regression_report(self, qairt_id):
         unique_run_ids_for_qairt_id = self.consolidated_report_analysis.get_unqiue_runids(qairt_id)
-        logger.info(f"Got all the run ids for qairt id: {qairt_id}: Run IDS: {unique_run_ids_for_qairt_id}")
+        if not unique_run_ids_for_qairt_id:
+            logger.error(f"No run ids found for {qairt_id}")
+            return unique_run_ids_for_qairt_id
 
-        # load existing data if any
+        logger.info(f"Got all the run ids for qairt id: {qairt_id}: Run IDS: {unique_run_ids_for_qairt_id}")
         self.load_regression_analysis_objects(qairt_id)
         for _id in unique_run_ids_for_qairt_id:
             """
