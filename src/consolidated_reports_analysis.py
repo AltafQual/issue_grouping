@@ -713,11 +713,14 @@ class CombinedRegressionAnalysis:
             logger.info(f"Total errors: {len(soc_errors_list)}, Total model errors: {len(model_error_list)}")
             qairt_regression_report += generate_executive_summary(soc_errors_list, model_error_list)
 
-        qairt_regression_report += "<h3> Lists of Gerrits Merged </h3>"
         gerrits_merged_html_path, gerrits_count = self.generate_gerrits_merged_report(qairt_id)
-        qairt_regression_report += self.list_to_html_ul(
-            [f"<a href='{gerrits_merged_html_path}'>{gerrits_count} Gerrits Merged</a>"]
-        )
+        if gerrits_count:
+            qairt_regression_report += "<h3> Lists of Gerrits Merged </h3>"
+            qairt_regression_report += self.list_to_html_ul(
+                [f"<a href='{gerrits_merged_html_path}'>{gerrits_count} Gerrits Merged</a>"]
+            )
+        else:
+            qairt_regression_report += "<h3> No Gerrits Merged !! </h3>"
         qairt_regression_report += "</br>Regards,</br>AISW AUTO</body></html>"
         with open(qairt_regression_report_path, "w") as f:
             f.write(qairt_regression_report)
