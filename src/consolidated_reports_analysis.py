@@ -643,7 +643,7 @@ class CombinedRegressionAnalysis:
             for data in gerrit_data:
                 if data["commit_url"] not in unique_gerrits:
                     commit_url = f"<a href='{data['commit_url']}' target='_blank'>Gerrit</a>"
-                    html_content += f"<tr><td>{data['gerrit_raised_by'][0]['name']}</td><td>{data['gerrit_raised_by'][0]['email']}</td><td>{data['commit_message']}</td></tr><td>{commit_url}</td></tr>"
+                    html_content += f"<tr><td>{data['gerrit_raised_by'][0]['name']}</td><td>{data['gerrit_raised_by'][0]['email']}</td><td>{data['commit_message']}</td><td>{commit_url}</td></tr>"
                     unique_gerrits.add(data["commit_url"])
                     gerrits_merged_count += 1
             html_content += "</table>"
