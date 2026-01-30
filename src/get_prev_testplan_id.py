@@ -189,6 +189,23 @@ def parse_testplan_id(testplan_id):
             "is_rc": "_RC" in suffix,
         }
 
+    # pattern with no build number
+    # QNN-v2.44.0.260128041850-non_pt_nightly
+    pattern3 = r"^(SNPE|QNN|QAIRT|QNN_DELEGATE)-v([\d\.]+)\.?(\d+)-(.+)$"
+    match = re.match(pattern3, testplan_id)
+
+    if match:
+        prefix, version, timestamp, suffix = match.groups()
+        return {
+            "prefix": prefix,
+            "version": version,
+            "timestamp": timestamp,
+            "build_number": "",
+            "suffix": suffix,
+            "suffix_base": suffix.split("_RC")[0] if "_RC" in suffix else suffix,
+            "is_rc": "_RC" in suffix,
+        }
+
     # If no pattern matches, try a more general approach
     if "-v" in testplan_id:
         parts = testplan_id.split("-v", 1)

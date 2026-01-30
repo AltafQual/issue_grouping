@@ -119,22 +119,26 @@ class ConsolidatedReportAnalysis:
         return previous_testplan_id
 
     def get_unqiue_runids(self, qairt_id):
-        logger.info(f"Processing QAIRT Id: {qairt_id}")
-        qairt_folder = os.path.join(self.reports_folder_path, qairt_id)
-        functional_report_file = None
-        for file in os.listdir(qairt_folder):
-            if file.startswith("Functional"):
-                functional_report_file = file
-                break
+        try:
+            logger.info(f"Processing QAIRT Id: {qairt_id}")
+            qairt_folder = os.path.join(self.reports_folder_path, qairt_id)
+            functional_report_file = None
+            for file in os.listdir(qairt_folder):
+                if file.startswith("Functional"):
+                    functional_report_file = file
+                    break
 
-        if functional_report_file is None:
-            logger.warning(f"Not able to find any Functional report for: {qairt_id}")
+            if functional_report_file is None:
+                logger.warning(f"Not able to find any Functional report for: {qairt_id}")
+                return []
+
+            df = pd.read_excel(
+                os.path.join(qairt_folder, functional_report_file), sheet_name=CONSOLIDATED_REPORTS.sheet_name, engine="openpyxl"
+            )
+            unique_test_ids = df["testplan_id"].unique().tolist()
+        except Exception as e:
+            logger.exception(f"Exception Occured while processing: {qairt_id} {e}")
             return []
-
-        df = pd.read_excel(
-            os.path.join(qairt_folder, functional_report_file), sheet_name=CONSOLIDATED_REPORTS.sheet_name
-        )
-        unique_test_ids = df["testplan_id"].unique().tolist()
         return unique_test_ids
 
     def get_regression_info_json(self, qairt_id):
@@ -608,8 +612,8 @@ class CombinedRegressionAnalysis:
             if (
                 self._regression_analysis_object
                 and self._regression_html_paths
-                and _id in self._regression_analysis_object
-                and self._regression_html_paths.get(_id, "")
+                and self._regression_analysis_object.get(_id)
+                and self._regression_html_paths.get(_id)
             ):
                 logger.info(f"{_id} already processed skipping")
                 continue
@@ -621,12 +625,14 @@ class CombinedRegressionAnalysis:
             html_path = regression_analysis.generate_regression_analysis_report(_id, prev_id, regression_json)
             logger.info(f"HTML for {_id}: {html_path}")
 
+            self._regression_analysis_object[_id] = regression_analysis
+            self._regression_html_paths[_id] = html_path
             if html_path:
-                self._regression_analysis_object[_id] = regression_analysis
-                self._regression_html_paths[_id] = html_path
                 self.__processed_run_id = True
 
-        self.save_regression_analysis_objects(qairt_id)
+        # only in case of new processing save the regression objects
+        if self.__processed_run_id:
+            self.save_regression_analysis_objects(qairt_id)
 
     def __generated_regressed_gerrits_page(self, qairt_id, gerrits_information):
         output_dir = os.path.join(CONSOLIDATED_REPORTS.path, qairt_id, "regression_htmls")
@@ -662,11 +668,12 @@ class CombinedRegressionAnalysis:
 
         all_gerrits_data = defaultdict(list)
         for run in self._regression_analysis_object.values():
-            sub_gerrit_data = run._RegressionAnalysisReport__gerrits_information
-            for project in _iter_projects(sub_gerrit_data):
-                repo = project.get("repository_name")
-                if repo:
-                    all_gerrits_data[repo].append(project)
+            if run:
+                sub_gerrit_data = run._RegressionAnalysisReport__gerrits_information
+                for project in _iter_projects(sub_gerrit_data):
+                    repo = project.get("repository_name")
+                    if repo:
+                        all_gerrits_data[repo].append(project)
 
         return self.__generated_regressed_gerrits_page(qairt_id, all_gerrits_data)
 
@@ -699,7 +706,7 @@ class CombinedRegressionAnalysis:
             qairt_regression_report += f"<h3>{bu.upper()} Analysis Report</h3>"
             updated_run_ids = []
             for run_id in run_ids:
-                if run_id in self._regression_html_paths:
+                if self._regression_html_paths.get(run_id):
                     updated_run_ids.append(
                         f"<a href='https://aisw-hyd.qualcomm.com/fs/{self._regression_html_paths[run_id]}'>{run_id}</a>"
                     )
@@ -709,8 +716,9 @@ class CombinedRegressionAnalysis:
 
             soc_errors_list, model_error_list = [], []
             for run_id in run_ids:
-                soc_errors_list.extend(self._regression_analysis_object[run_id].error_summary_list)
-                model_error_list.extend(self._regression_analysis_object[run_id].model_regressed_errors_list)
+                if self._regression_analysis_object[run_id]:
+                    soc_errors_list.extend(self._regression_analysis_object[run_id].error_summary_list)
+                    model_error_list.extend(self._regression_analysis_object[run_id].model_regressed_errors_list)
 
             logger.info(f"Total errors: {len(soc_errors_list)}, Total model errors: {len(model_error_list)}")
             qairt_regression_report += generate_executive_summary(soc_errors_list, model_error_list)
@@ -733,6 +741,24 @@ class CombinedRegressionAnalysis:
         self.generate_each_run_id_regression_report(qairt_id)
         final_qairt_report_path = self.generate_qairt_regression_report(qairt_id)
         return final_qairt_report_path
+
+
+def run_report_generation_for_all_qairt_ids():
+    import time
+
+    for qairt_id in os.listdir(CONSOLIDATED_REPORTS.path):
+        if qairt_id.startswith("qaisw"):
+            try:
+                report_analysis = CombinedRegressionAnalysis(ConsolidatedReportAnalysis())
+                print(f"Processing qairt id: {qairt_id}")
+                report_analysis.generate_final_summary_report(qairt_id)
+                print(f"{qairt_id} Successfully processed !! Sleeping for 10 seconds")
+            except Exception as e:
+                continue
+
+            time.sleep(10)
+        else:
+            print(f"Non Qaisw folder found: {qairt_id}... Skipping !!!")
 
 
 if __name__ == "__main__":
