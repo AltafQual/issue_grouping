@@ -173,6 +173,7 @@ You are given a list of error logs. Your goal is to generate a concise summary t
 - Focus on key patterns or recurring problems rather than individual details.
 - Do not include any introductory phrases or prefixes like “Here is the summary” or “Summary:”. Output should only contain the summary text.
 - Do NOT expand or explain any abbreviations or short forms. Keep them exactly as they appear
+- If There are No/Empty Logs, Just Return `No logs to provide summary` and don't include any suffix or prefix phrases along with this
 </REQUIREMENTS>
 
 <OUTPUT FORMAT>
@@ -195,6 +196,7 @@ You are given a list of error logs. Your goal is to generate a concise summary t
 - Focus on key patterns or recurring problems rather than individual details.
 - Do not include any introductory phrases or prefixes like “Here is the summary” or “Summary:”. Output should only contain the summary text.
 - Do NOT expand or explain any abbreviations or short forms. Keep them exactly as they appear
+- If There are No/Empty Logs, Just Return `No logs to provide summary` and don't include any suffix or prefix phrases along with this
 </REQUIREMENTS>
 """
 
@@ -211,6 +213,7 @@ You are given a list of summaries of error logs. Your goal is to generate a conc
 - Focus on key patterns or recurring problems rather than individual details.
 - Do not include any introductory phrases or prefixes like “Here is the summary” or “Summary:”. Output should only contain the summary text.
 - Do NOT expand or explain any abbreviations or short forms. Keep them exactly as they appear
+- If There are No/Empty Logs, Just Return `No logs to provide summary` and don't include any suffix or prefix phrases along with this
 </REQUIREMENTS>
 
 <OUTPUT FORMAT>

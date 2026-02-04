@@ -26,6 +26,7 @@ def filter_error_logs(error_logs_list):
             r"\bdevice\s+not\s+found\b",
             r"\bmissing\s+shared\s+libraries\b",
             r"\bdevice(?:[_\s-])?unavailable\b",
+            r"\bnot\s+found\b",
         ]
     )
     filtered_error_logs = []
@@ -133,7 +134,9 @@ class ConsolidatedReportAnalysis:
                 return []
 
             df = pd.read_excel(
-                os.path.join(qairt_folder, functional_report_file), sheet_name=CONSOLIDATED_REPORTS.sheet_name, engine="openpyxl"
+                os.path.join(qairt_folder, functional_report_file),
+                sheet_name=CONSOLIDATED_REPORTS.sheet_name,
+                engine="openpyxl",
             )
             unique_test_ids = df["testplan_id"].unique().tolist()
         except Exception as e:
@@ -744,19 +747,15 @@ class CombinedRegressionAnalysis:
 
 
 def run_report_generation_for_all_qairt_ids():
-    import time
-
-    for qairt_id in os.listdir(CONSOLIDATED_REPORTS.path):
+    for qairt_id in sorted(os.listdir(CONSOLIDATED_REPORTS.path), reverse=True):
         if qairt_id.startswith("qaisw"):
             try:
                 report_analysis = CombinedRegressionAnalysis(ConsolidatedReportAnalysis())
                 print(f"Processing qairt id: {qairt_id}")
                 report_analysis.generate_final_summary_report(qairt_id)
-                print(f"{qairt_id} Successfully processed !! Sleeping for 10 seconds")
+                print(f"{qairt_id} Successfully processed !!")
             except Exception as e:
                 continue
-
-            time.sleep(10)
         else:
             print(f"Non Qaisw folder found: {qairt_id}... Skipping !!!")
 
