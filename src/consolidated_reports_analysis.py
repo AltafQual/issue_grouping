@@ -8,10 +8,10 @@ from joblib import dump, load
 from src.constants import CONSOLIDATED_REPORTS
 from src.execution_timer_log import execution_timer
 from src.get_prev_testplan_id import iterate_db_get_testplan
-from src.logger import AppLogger
 from src.regression_api_call import get_two_run_ids_cluster_info
+import logging
 
-logger = AppLogger().get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 def filter_error_logs(error_logs_list):
@@ -115,9 +115,9 @@ class ConsolidatedReportAnalysis:
         return replaced
 
     def build_prev_run_id(self, run_id: str):
-        p_n_df, p_r_df, previous_testplan_id, previous_release_testplan_id = iterate_db_get_testplan(run_id)
+        _, _, previous_testplan_id, previous_release_testplan_id = iterate_db_get_testplan(run_id)
         logger.info(f"previous testplan id: {previous_testplan_id} : Current testplan id: {run_id}")
-        return previous_testplan_id
+        return previous_testplan_id if previous_testplan_id else previous_release_testplan_id
 
     def get_unqiue_runids(self, qairt_id):
         try:
@@ -391,14 +391,14 @@ class RegressionAnalysisReport:
         for model_name, model_data in model_regression_data.items():
             html_content += f"<h2>{model_name}</h2>"
 
-            html_content += "<table border='1'><tr><th>TC UUID</th><th>Name</th><th>Type</th><th>Cluster Name</th><th>Type</th><th>SOC Name</th><th>Run Time</th><th>Log</th></tr>"
+            html_content += "<table border='1'><tr><th>TC UUID</th><th>Name</th><th>Type</th><th>Cluster Name</th><th>Type</th><th>SOC Name</th><th>Run Time</th><th>Error</th><th>Log</th></tr>"
             for data in model_data:
                 cluster_name = data.get("clusters", "")
                 log_path = data.get("log_path", "N/A")
                 log_link = (
                     f"<a href='https://aisw-hyd.qualcomm.com/fs/{log_path}'>Log</a>" if log_path != "N/A" else "N/A"
                 )
-                html_content += f"<tr><td>{data.get('tc_uuid', 'N/A')}</td><td>{data.get('name', 'N/A')}</td><td>{data.get('type', 'N/A')}</td><td>{data.get('clusters', 'N/A')}</td><td>{data.get('type', 'N/A')}</td><td>{data.get('soc_name', 'N/A')}</td><td>{data.get('runtime', 'N/A')}</td><td>{log_link}</td></tr>"
+                html_content += f"<tr><td>{data.get('tc_uuid', 'N/A')}</td><td>{data.get('name', 'N/A')}</td><td>{data.get('type', 'N/A')}</td><td>{data.get('clusters', 'N/A')}</td><td>{data.get('type', 'N/A')}</td><td>{data.get('soc_name', 'N/A')}</td><td>{data.get('runtime', 'N/A')}</td><td>{data.get('reason', 'N/A')}</td><td>{log_link}</td></tr>"
 
                 # store the errors for summary generation
                 if cluster_name not in cluster_names_seen:

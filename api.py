@@ -9,7 +9,7 @@ from typing import Any, Dict
 
 import pandas as pd
 import psutil
-from cachetools import LFUCache, TTLCache
+from cachetools import TTLCache
 from fastapi import BackgroundTasks, FastAPI, Query, Request
 from fastapi.responses import ORJSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
@@ -36,6 +36,11 @@ class InitiateIssueGrouping(BaseModel):
 class InitiateConsolidatedReportGeneration(BaseModel):
     run_ids: list = Field(
         description="QAISW id example `qaisw-v2.44.0.260112072337_193906_nightly` to initiate report generation"
+    )
+    
+class ModelOps(BaseModel):
+    model_names: list = Field(
+        description="list of all the model Names"
     )
 
 
@@ -338,3 +343,9 @@ async def initiate_consolidated_report_regression_analysis(
     if non_processing_ids:
         result += f" Except {','.join(non_processing_ids)}: These are already in processing"
     return {"response": result}
+
+@app.post("/api/model_ops/", status_code=200)
+async def fetch_model_ops(
+    model_ops_object: ModelOps,
+):
+    return helpers.fetch_model_ops(model_ops_object.model_names)

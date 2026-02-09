@@ -10,7 +10,9 @@ from sqlalchemy.orm import sessionmaker
 from yaml.loader import SafeLoader
 
 from src.constants import CONSOLIDATED_REPORTS
+import logging
 
+logger = logging.getLogger(__name__)
 pd.set_option("future.no_silent_downcasting", True)
 
 
@@ -54,7 +56,7 @@ def parse_performance_score(score, product="SNPE"):
         # Check if score is None
         if score is None:
             return inf_time, init_time, deinit_time
-        # print("herrrr3")
+        # logger.info("herrrr3")
         # Convert to dictionary if it's a JSON string
         if isinstance(score, str):
             try:
@@ -128,7 +130,7 @@ def parse_performance_score(score, product="SNPE"):
                 deinit_time = runtime_data["De-Init Stats [NetRun]"].get("Min_Time")
 
     except Exception as e:
-        print(e)
+        logger.info(e)
         # If any exception occurs, return default values
         pass
 
@@ -259,7 +261,7 @@ def get_testplan_execution_status_df(session, testplan_id, debug=False):
     """
     try:
         if debug:
-            print(f"Getting execution status for {testplan_id} using DataFrame approach")
+            logger.info(f"Getting execution status for {testplan_id} using DataFrame approach")
 
         # Query to get all test cases and their execution status for the testplan_id
         query = text(
@@ -274,7 +276,7 @@ def get_testplan_execution_status_df(session, testplan_id, debug=False):
 
         if not results:
             if debug:
-                print(f"No test cases found for {testplan_id}")
+                logger.info(f"No test cases found for {testplan_id}")
             return None, None
 
         # Create a DataFrame from the results
@@ -287,7 +289,7 @@ def get_testplan_execution_status_df(session, testplan_id, debug=False):
             product = "QNN"
 
         # Apply performance score parsing with proper error handling
-        # print(product)
+        # logger.info(product)
         try:
             # Use result_type='expand' to properly expand the tuple into columns
             df[["inf", "init", "de_init"]] = df.apply(
@@ -295,7 +297,7 @@ def get_testplan_execution_status_df(session, testplan_id, debug=False):
             )
         except Exception as e:
             # if debug:
-            print(f"Error parsing performance scores: {e}")
+            logger.info(f"Error parsing performance scores: {e}")
             # Create empty columns if parsing fails
             df["inf"] = None
             df["init"] = None
@@ -303,8 +305,8 @@ def get_testplan_execution_status_df(session, testplan_id, debug=False):
         df.fillna(np.nan, inplace=True)
 
         if debug:
-            print(f"Found {len(df)} test cases for {testplan_id}")
-            print(f"Execution status counts:\n{df['exec_status'].value_counts()}")
+            logger.info(f"Found {len(df)} test cases for {testplan_id}")
+            logger.info(f"Execution status counts:\n{df['exec_status'].value_counts()}")
 
         # Calculate the percentage of completed test cases
         total_count = len(df)
@@ -313,15 +315,15 @@ def get_testplan_execution_status_df(session, testplan_id, debug=False):
         if total_count > 0:
             percentage = (completed_count / total_count) * 100
             if debug:
-                print(f"Execution status: {percentage:.2f}% ({completed_count}/{total_count} completed)")
+                logger.info(f"Execution status: {percentage:.2f}% ({completed_count}/{total_count} completed)")
             return int(percentage), df
         else:
             if debug:
-                print(f"No test cases found for {testplan_id}")
+                logger.info(f"No test cases found for {testplan_id}")
             return 0, df
 
     except Exception as e:
-        print(f"Error getting execution status: {e}", file=sys.stderr)
+        logger.info(f"Error getting execution status: {e}", file=sys.stderr)
         return None, None
 
 
@@ -351,8 +353,8 @@ def get_valid_previous_testplan_id(session, testplan_id, min_exec_status=90, deb
             suffix_pattern = f"%-{components['suffix']}"
 
         if debug:
-            print(f"Looking for valid previous testplan_id with execution status >= {min_exec_status}%")
-            print(f"Suffix pattern: {suffix_pattern}")
+            logger.info(f"Looking for valid previous testplan_id with execution status >= {min_exec_status}%")
+            logger.info(f"Suffix pattern: {suffix_pattern}")
 
         # Query to find all previous testplan_ids with the same prefix and suffix
         query = text(
@@ -375,7 +377,7 @@ def get_valid_previous_testplan_id(session, testplan_id, min_exec_status=90, deb
 
         if not results:
             if debug:
-                print(f"No previous testplan_ids found")
+                logger.info(f"No previous testplan_ids found")
             return None
 
         # Find the first testplan_id with execution status >= min_exec_status
@@ -387,18 +389,18 @@ def get_valid_previous_testplan_id(session, testplan_id, min_exec_status=90, deb
 
             if exec_status is not None and exec_status >= min_exec_status:
                 if debug:
-                    print(f"Found valid testplan_id: {prev_testplan_id} with execution status {exec_status}%")
+                    logger.info(f"Found valid testplan_id: {prev_testplan_id} with execution status {exec_status}%")
                 return prev_testplan_id
             else:
                 if debug:
-                    print(f"Skipping {prev_testplan_id} - Execution status: {exec_status}% (below threshold)")
+                    logger.info(f"Skipping {prev_testplan_id} - Execution status: {exec_status}% (below threshold)")
 
         if debug:
-            print(f"No testplan_id found with execution status >= {min_exec_status}%")
+            logger.info(f"No testplan_id found with execution status >= {min_exec_status}%")
         return None
 
     except Exception as e:
-        print(f"Error finding valid previous testplan_id: {e}", file=sys.stderr)
+        logger.info(f"Error finding valid previous testplan_id: {e}", file=sys.stderr)
         return None
 
 
@@ -434,7 +436,7 @@ def get_valid_previous_release_testplan_id(session, testplan_id, min_exec_status
         minor = int(major_version_parts[1])
 
         if debug:
-            print(f"Looking for valid previous release testplan_id with execution status >= {min_exec_status}%")
+            logger.info(f"Looking for valid previous release testplan_id with execution status >= {min_exec_status}%")
 
         # Query to find all RC testplans for any previous version
         query = text(
@@ -456,7 +458,7 @@ def get_valid_previous_release_testplan_id(session, testplan_id, min_exec_status
 
         if not results:
             if debug:
-                print(f"No RC testplans found")
+                logger.info(f"No RC testplans found")
             return None
 
         # Group testplans by version and find the highest RC for each version with sufficient execution status
@@ -486,7 +488,9 @@ def get_valid_previous_release_testplan_id(session, testplan_id, min_exec_status
                             # Skip testplans with insufficient execution status
                             if exec_status is None or exec_status < min_exec_status:
                                 if debug:
-                                    print(f"Skipping {testplan} - Execution status: {exec_status}% (below threshold)")
+                                    logger.info(
+                                        f"Skipping {testplan} - Execution status: {exec_status}% (below threshold)"
+                                    )
                                 continue
 
                             # Extract RC number
@@ -496,7 +500,7 @@ def get_valid_previous_release_testplan_id(session, testplan_id, min_exec_status
                                 ver_key = f"{ver_major}.{ver_minor}"
 
                                 if debug:
-                                    print(
+                                    logger.info(
                                         f"Found {testplan} - Version {ver_key} RC{rc_num} - Execution status: {exec_status}%"
                                     )
 
@@ -505,12 +509,12 @@ def get_valid_previous_release_testplan_id(session, testplan_id, min_exec_status
                                     version_rc_testplans[ver_key] = (rc_num, testplan, exec_status)
             except Exception as e:
                 if debug:
-                    print(f"Error parsing testplan {testplan}: {e}")
+                    logger.info(f"Error parsing testplan {testplan}: {e}")
                 continue
 
         if not version_rc_testplans:
             if debug:
-                print(f"No valid RC testplans found with execution status >= {min_exec_status}%")
+                logger.info(f"No valid RC testplans found with execution status >= {min_exec_status}%")
             return None
 
         # Sort versions in descending order
@@ -519,23 +523,25 @@ def get_valid_previous_release_testplan_id(session, testplan_id, min_exec_status
         )
 
         if debug:
-            print(f"Found valid RC testplans for versions: {sorted_versions}")
+            logger.info(f"Found valid RC testplans for versions: {sorted_versions}")
             for ver in sorted_versions:
                 rc_num, testplan, exec_status = version_rc_testplans[ver]
-                print(f"  Version {ver}: RC{rc_num} - {testplan} - Execution status: {exec_status}%")
+                logger.info(f"  Version {ver}: RC{rc_num} - {testplan} - Execution status: {exec_status}%")
 
         # Return the highest RC testplan from the most recent version with sufficient execution status
         if sorted_versions:
             latest_version = sorted_versions[0]
             rc_num, testplan, exec_status = version_rc_testplans[latest_version]
             if debug:
-                print(f"Selected version {latest_version} RC{rc_num}: {testplan} with execution status {exec_status}%")
+                logger.info(
+                    f"Selected version {latest_version} RC{rc_num}: {testplan} with execution status {exec_status}%"
+                )
             return testplan
 
         return None
 
     except Exception as e:
-        print(f"Error finding valid previous release testplan_id: {e}", file=sys.stderr)
+        logger.info(f"Error finding valid previous release testplan_id: {e}", file=sys.stderr)
         return None
 
 
@@ -591,9 +597,9 @@ def get_previous_release_testplan_id(session, testplan_id, debug=False):
         suffix_pattern = f"%-{base_suffix}_RC%"
 
         if debug:
-            print(f"Looking for release testplan_ids with:")
-            print(f"  prefix_pattern: {prefix_pattern}")
-            print(f"  suffix_pattern: {suffix_pattern}")
+            logger.info(f"Looking for release testplan_ids with:")
+            logger.info(f"  prefix_pattern: {prefix_pattern}")
+            logger.info(f"  suffix_pattern: {suffix_pattern}")
 
         results = session.execute(
             query, {"prefix_pattern": prefix_pattern, "suffix_pattern": suffix_pattern}
@@ -601,7 +607,7 @@ def get_previous_release_testplan_id(session, testplan_id, debug=False):
 
         if not results:
             if debug:
-                print(f"No RC testplans found")
+                logger.info(f"No RC testplans found")
             return None
 
         # Group testplans by version and find the highest RC for each version
@@ -632,12 +638,12 @@ def get_previous_release_testplan_id(session, testplan_id, debug=False):
                                     version_rc_testplans[ver_key] = (rc_num, testplan)
             except Exception as e:
                 if debug:
-                    print(f"Error parsing testplan {testplan}: {e}")
+                    logger.info(f"Error parsing testplan {testplan}: {e}")
                 continue
 
         if not version_rc_testplans:
             if debug:
-                print(f"No valid RC testplans found for previous versions")
+                logger.info(f"No valid RC testplans found for previous versions")
             return None
 
         # Sort versions in descending order
@@ -646,23 +652,23 @@ def get_previous_release_testplan_id(session, testplan_id, debug=False):
         )
 
         if debug:
-            print(f"Found RC testplans for versions: {sorted_versions}")
+            logger.info(f"Found RC testplans for versions: {sorted_versions}")
             for ver in sorted_versions:
                 rc_num, testplan = version_rc_testplans[ver]
-                print(f"  Version {ver}: RC{rc_num} - {testplan}")
+                logger.info(f"  Version {ver}: RC{rc_num} - {testplan}")
 
         # Return the highest RC testplan from the most recent version
         if sorted_versions:
             latest_version = sorted_versions[0]
             rc_num, testplan = version_rc_testplans[latest_version]
             if debug:
-                print(f"Selected version {latest_version} RC{rc_num}: {testplan}")
+                logger.info(f"Selected version {latest_version} RC{rc_num}: {testplan}")
             return testplan
 
         return None
 
     except Exception as e:
-        print(f"Error finding previous release testplan_id: {e}", file=sys.stderr)
+        logger.info(f"Error finding previous release testplan_id: {e}", file=sys.stderr)
         return None
 
 
@@ -703,9 +709,9 @@ def get_previous_testplan_id(session, testplan_id, debug=False):
             suffix_pattern = f"%-{components['suffix']}"
 
         if debug:
-            print(f"Is RC testplan_id: {components['is_rc']}")
-            print(f"Suffix base: {components['suffix_base']}")
-            print(f"Suffix pattern: {suffix_pattern}")
+            logger.info(f"Is RC testplan_id: {components['is_rc']}")
+            logger.info(f"Suffix base: {components['suffix_base']}")
+            logger.info(f"Suffix pattern: {suffix_pattern}")
 
         # First, try to find a testplan_id with the same prefix, version, and suffix but a lower build number
         query = text(
@@ -723,10 +729,10 @@ def get_previous_testplan_id(session, testplan_id, debug=False):
         prefix_pattern = f"{components['prefix']}-v{components['version']}%"
 
         if debug:
-            print(f"Query 1 - Looking for testplan_id with:")
-            print(f"  prefix_pattern: {prefix_pattern}")
-            print(f"  suffix_pattern: {suffix_pattern}")
-            print(f"  current_testplan_id: {testplan_id}")
+            logger.info(f"Query 1 - Looking for testplan_id with:")
+            logger.info(f"  prefix_pattern: {prefix_pattern}")
+            logger.info(f"  suffix_pattern: {suffix_pattern}")
+            logger.info(f"  current_testplan_id: {testplan_id}")
 
         result = session.execute(
             query,
@@ -753,10 +759,10 @@ def get_previous_testplan_id(session, testplan_id, debug=False):
         # Suffix pattern is already set above
 
         if debug:
-            print(f"Query 2 - Looking for testplan_id with:")
-            print(f"  prefix_pattern: {prefix_pattern}")
-            print(f"  suffix_pattern: {suffix_pattern}")
-            print(f"  current_testplan_id: {testplan_id}")
+            logger.info(f"Query 2 - Looking for testplan_id with:")
+            logger.info(f"  prefix_pattern: {prefix_pattern}")
+            logger.info(f"  suffix_pattern: {suffix_pattern}")
+            logger.info(f"  current_testplan_id: {testplan_id}")
 
         result = session.execute(
             query,
@@ -785,11 +791,11 @@ def get_previous_testplan_id(session, testplan_id, debug=False):
         # Suffix pattern is already set above
 
         if debug:
-            print(f"Query 3 - Looking for testplan_id with:")
-            print(f"  prefix_pattern: {prefix_pattern}")
-            print(f"  version_pattern: {version_pattern}")
-            print(f"  suffix_pattern: {suffix_pattern}")
-            print(f"  current_testplan_id: {testplan_id}")
+            logger.info(f"Query 3 - Looking for testplan_id with:")
+            logger.info(f"  prefix_pattern: {prefix_pattern}")
+            logger.info(f"  version_pattern: {version_pattern}")
+            logger.info(f"  suffix_pattern: {suffix_pattern}")
+            logger.info(f"  current_testplan_id: {testplan_id}")
 
         result = session.execute(
             query,
@@ -807,7 +813,7 @@ def get_previous_testplan_id(session, testplan_id, debug=False):
         return None
 
     except Exception as e:
-        print(f"Error querying database: {e}", file=sys.stderr)
+        logger.info(f"Error querying database: {e}", file=sys.stderr)
         return None
 
 
@@ -824,7 +830,7 @@ def get_all_testplans_df(session, debug=False):
     """
     try:
         if debug:
-            print("Fetching all testplan_ids from database...")
+            logger.info("Fetching all testplan_ids from database...")
 
         # Query to get all distinct testplan_ids
         query = text(
@@ -841,12 +847,12 @@ def get_all_testplans_df(session, debug=False):
         df = pd.DataFrame(results, columns=["testplan_id"])
 
         if debug:
-            print(f"Found {len(df)} distinct testplan_ids")
+            logger.info(f"Found {len(df)} distinct testplan_ids")
 
         return df
 
     except Exception as e:
-        print(f"Error getting all testplan_ids: {e}", file=sys.stderr)
+        logger.info(f"Error getting all testplan_ids: {e}", file=sys.stderr)
         return pd.DataFrame(columns=["testplan_id"])
 
 
@@ -867,8 +873,8 @@ def get_previous_testplan_id_from_df(df, testplan_id, debug=False):
         components = parse_testplan_id(testplan_id)
 
         if debug:
-            print(f"Looking for previous testplan_id for {testplan_id}")
-            print(f"Components: {components}")
+            logger.info(f"Looking for previous testplan_id for {testplan_id}")
+            logger.info(f"Components: {components}")
 
         # Filter the DataFrame for testplan_ids with the same prefix and version
         prefix = components["prefix"]
@@ -907,7 +913,7 @@ def get_previous_testplan_id_from_df(df, testplan_id, debug=False):
             # Get the first (most recent) testplan_id
             previous_testplan_id = filtered_df.iloc[0]["testplan_id"]
             if debug:
-                print(f"Found previous testplan_id with same prefix, version, and suffix: {previous_testplan_id}")
+                logger.info(f"Found previous testplan_id with same prefix, version, and suffix: {previous_testplan_id}")
             return previous_testplan_id
 
         # If no result found, try a more general query with just the same prefix and suffix
@@ -943,7 +949,7 @@ def get_previous_testplan_id_from_df(df, testplan_id, debug=False):
             # Get the first (most recent) testplan_id
             previous_testplan_id = filtered_df.iloc[0]["testplan_id"]
             if debug:
-                print(f"Found previous testplan_id with same prefix and suffix: {previous_testplan_id}")
+                logger.info(f"Found previous testplan_id with same prefix and suffix: {previous_testplan_id}")
             return previous_testplan_id
 
         # If still no result found, try an even more general query
@@ -981,15 +987,15 @@ def get_previous_testplan_id_from_df(df, testplan_id, debug=False):
             # Get the first (most recent) testplan_id
             previous_testplan_id = filtered_df.iloc[0]["testplan_id"]
             if debug:
-                print(f"Found previous testplan_id with general query: {previous_testplan_id}")
+                logger.info(f"Found previous testplan_id with general query: {previous_testplan_id}")
             return previous_testplan_id
 
         if debug:
-            print(f"No previous testplan_id found for {testplan_id}")
+            logger.info(f"No previous testplan_id found for {testplan_id}")
         return None
 
     except Exception as e:
-        print(f"Error finding previous testplan_id from DataFrame: {e}", file=sys.stderr)
+        logger.info(f"Error finding previous testplan_id from DataFrame: {e}", file=sys.stderr)
         return None
 
 
@@ -1024,8 +1030,8 @@ def get_previous_release_testplan_id_from_df(df, testplan_id, debug=False):
         minor = int(major_version_parts[1])
 
         if debug:
-            print(f"Looking for previous release testplan_id for {testplan_id}")
-            print(f"Major version: {major_version}, Base suffix: {base_suffix}")
+            logger.info(f"Looking for previous release testplan_id for {testplan_id}")
+            logger.info(f"Major version: {major_version}, Base suffix: {base_suffix}")
 
         # Filter the DataFrame for RC testplan_ids
         prefix = components["prefix"]
@@ -1035,7 +1041,7 @@ def get_previous_release_testplan_id_from_df(df, testplan_id, debug=False):
 
         if filtered_df.empty:
             if debug:
-                print(f"No RC testplans found")
+                logger.info(f"No RC testplans found")
             return None
 
         # Group testplans by version and find the highest RC for each version
@@ -1066,12 +1072,12 @@ def get_previous_release_testplan_id_from_df(df, testplan_id, debug=False):
                                     version_rc_testplans[ver_key] = (rc_num, testplan)
             except Exception as e:
                 if debug:
-                    print(f"Error parsing testplan {testplan}: {e}")
+                    logger.info(f"Error parsing testplan {testplan}: {e}")
                 continue
 
         if not version_rc_testplans:
             if debug:
-                print(f"No valid RC testplans found for previous versions")
+                logger.info(f"No valid RC testplans found for previous versions")
             return None
 
         # Sort versions in descending order
@@ -1080,31 +1086,32 @@ def get_previous_release_testplan_id_from_df(df, testplan_id, debug=False):
         )
 
         if debug:
-            print(f"Found RC testplans for versions: {sorted_versions}")
+            logger.info(f"Found RC testplans for versions: {sorted_versions}")
             for ver in sorted_versions:
                 rc_num, testplan = version_rc_testplans[ver]
-                print(f"  Version {ver}: RC{rc_num} - {testplan}")
+                logger.info(f"  Version {ver}: RC{rc_num} - {testplan}")
 
         # Return the highest RC testplan from the most recent version
         if sorted_versions:
             latest_version = sorted_versions[0]
             rc_num, testplan = version_rc_testplans[latest_version]
             if debug:
-                print(f"Selected version {latest_version} RC{rc_num}: {testplan}")
+                logger.info(f"Selected version {latest_version} RC{rc_num}: {testplan}")
             return testplan
 
         return None
 
     except Exception as e:
-        print(f"Error finding previous release testplan_id from DataFrame: {e}", file=sys.stderr)
+        logger.info(f"Error finding previous release testplan_id from DataFrame: {e}", file=sys.stderr)
         return None
 
 
 def iterate_db_get_testplan(testplan_id):
     yaml_file = CONSOLIDATED_REPORTS.qa2_config_file_path
+    p_n_df, p_r_df, previous_testplan_id, previous_release_testplan_id = pd.DataFrame(), pd.DataFrame(), None, None
 
     if not yaml_file:
-        print("Error: QA2_CONFIG_FILE_PATH environment variable not set.", file=sys.stderr)
+        logger.info("Error: QA2_CONFIG_FILE_PATH environment variable not set.", file=sys.stderr)
         sys.exit(1)
 
     try:
@@ -1126,7 +1133,7 @@ def iterate_db_get_testplan(testplan_id):
         # Parse the testplan_id to get its components
         components = parse_testplan_id(testplan_id)
         if debug:
-            print(f"Parsed testplan_id components: {components}")
+            logger.info(f"Parsed testplan_id components: {components}")
 
         # Get all testplan_ids as a DataFrame
         df = get_all_testplans_df(session, debug)
@@ -1137,18 +1144,18 @@ def iterate_db_get_testplan(testplan_id):
         # Get the previous release testplan_id using the DataFrame
         previous_release_testplan_id = get_previous_release_testplan_id_from_df(df, testplan_id, debug)
 
-        # print(f"Current testplan_id: {testplan_id}")
+        # logger.info(f"Current testplan_id: {testplan_id}")
 
         # Check if previous testplan_id has execution status >= 90%
         if previous_testplan_id:
             exec_status, p_n_df = get_testplan_execution_status_df(session, previous_testplan_id, debug)
-            # print(f"Previous testplan_id: {previous_testplan_id}")
+            # logger.info(f"Previous testplan_id: {previous_testplan_id}")
 
             if exec_status is not None and exec_status >= 90:
-                # print(f"  Execution status: {exec_status}% (Valid - >= 90%)")
+                # logger.info(f"  Execution status: {exec_status}% (Valid - >= 90%)")
                 pass
             else:
-                # print(f"  Execution status: {exec_status}% (Invalid - < 90%)")
+                # logger.info(f"  Execution status: {exec_status}% (Invalid - < 90%)")
                 pass
                 # Find the next previous testplan_id with execution status >= 90%
                 valid_previous_testplan_id = get_valid_previous_testplan_id(session, testplan_id, 90, debug)
@@ -1156,24 +1163,24 @@ def iterate_db_get_testplan(testplan_id):
                     valid_exec_status, p_n_df = get_testplan_execution_status_df(
                         session, valid_previous_testplan_id, debug
                     )
-                    print(
+                    logger.info(
                         f"  Valid previous testplan_id: {valid_previous_testplan_id} (Execution status: {valid_exec_status}%)"
                     )
                 else:
-                    print("  No valid previous testplan_id found with execution status >= 90%")
+                    logger.info("  No valid previous testplan_id found with execution status >= 90%")
         else:
-            print(f"No previous testplan_id found for {testplan_id}")
+            logger.info(f"No previous testplan_id found for {testplan_id}")
 
         # Check if previous release testplan_id has execution status >= 90%
         if previous_release_testplan_id:
             exec_status, p_r_df = get_testplan_execution_status_df(session, previous_release_testplan_id, debug)
-            # print(f"Previous release testplan_id: {previous_release_testplan_id}")
+            # logger.info(f"Previous release testplan_id: {previous_release_testplan_id}")
 
             if exec_status is not None and exec_status >= 90:
-                # print(f"  Execution status: {exec_status}% (Valid - >= 90%)")
+                # logger.info(f"  Execution status: {exec_status}% (Valid - >= 90%)")
                 pass
             else:
-                # print(f"  Execution status: {exec_status}% (Invalid - < 90%)")
+                # logger.info(f"  Execution status: {exec_status}% (Invalid - < 90%)")
                 # Find the next previous release testplan_id with execution status >= 90%
                 valid_previous_release_testplan_id = get_valid_previous_release_testplan_id(
                     session, testplan_id, 90, debug
@@ -1182,18 +1189,19 @@ def iterate_db_get_testplan(testplan_id):
                     valid_exec_status, p_r_df = get_testplan_execution_status_df(
                         session, valid_previous_release_testplan_id, debug
                     )
-                    print(
+                    logger.info(
                         f"  Valid previous release testplan_id: {valid_previous_release_testplan_id} (Execution status: {valid_exec_status}%)"
                     )
                 else:
-                    print("  No valid previous release testplan_id found with execution status >= 90%")
+                    logger.info("  No valid previous release testplan_id found with execution status >= 90%")
         else:
-            print(f"No previous release testplan_id found for {testplan_id}")
+            logger.info(f"No previous release testplan_id found for {testplan_id}")
 
     except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
+        logger.info(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
     finally:
         if "session" in locals():
             session.close()
+
     return p_n_df, p_r_df, previous_testplan_id, previous_release_testplan_id

@@ -1070,3 +1070,12 @@ def filter_and_sort_by_embedded_datetime(strings: list[str], n_remove: int = 0) 
 
     # Drop the first n_remove in the chosen order
     return [s for _, s in dated[n_remove:]]
+
+
+def fetch_model_ops(models_list):
+    model_ops_data = {}
+
+    for model in models_list:
+        pass
+
+    return model_ops_data

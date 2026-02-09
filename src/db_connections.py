@@ -399,3 +399,13 @@ class ConnectToMySql(DatabaseConnection):
         with self.connection_context() as cnx:
             df = pd.read_sql(query, cnx)
         return df
+
+    def get_model_ops(self, models_list):
+        query = f"""
+        SELECT * 
+        FROM model_ops
+        WHERE 
+        """
+        with self.connection_context() as cnx:
+            df = pd.read_sql(query, cnx)
+        return df
