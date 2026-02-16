@@ -1,3 +1,4 @@
+import logging
 import re
 import sys
 from urllib.parse import quote_plus
@@ -10,7 +11,6 @@ from sqlalchemy.orm import sessionmaker
 from yaml.loader import SafeLoader
 
 from src.constants import CONSOLIDATED_REPORTS
-import logging
 
 logger = logging.getLogger(__name__)
 pd.set_option("future.no_silent_downcasting", True)

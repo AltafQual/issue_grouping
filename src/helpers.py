@@ -31,7 +31,7 @@ from src.constants import (
     ErrorLogConfigurations,
     FaissConfigurations,
     FaissDBPath,
-    regex_based_filteration_patterns
+    regex_based_filteration_patterns,
 )
 from src.custom_clustering import CustomEmbeddingCluster
 from src.db_connections import ConnectToMySql

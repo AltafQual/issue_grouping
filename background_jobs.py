@@ -12,6 +12,7 @@ IST = timezone(timedelta(hours=5, minutes=30))
 logger = logging.getLogger(__name__)
 scheduler = BlockingScheduler(timezone=IST)
 
+
 def consolidated_report_processing_job():
     now = datetime.now(IST)
     print(f"[START]  {now.strftime('%Y-%m-%d %H:%M:%S')} IST (UTC+05:30)")

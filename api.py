@@ -25,7 +25,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger("memlog")
 proc = psutil.Process()
 analyzer = FailureAnalyzer()
-TTL_CACHE = TTLCache(maxsize=1000, ttl= (604800 * 604800))
+TTL_CACHE = TTLCache(maxsize=1000, ttl=(604800 * 604800))
 LOCK = threading.Lock()
 
 
@@ -37,11 +37,10 @@ class InitiateConsolidatedReportGeneration(BaseModel):
     run_ids: list = Field(
         description="QAISW id example `qaisw-v2.44.0.260112072337_193906_nightly` to initiate report generation"
     )
-    
+
+
 class ModelOps(BaseModel):
-    model_names: list = Field(
-        description="list of all the model Names"
-    )
+    model_names: list = Field(description="list of all the model Names")
 
 
 class Regression(BaseModel):
@@ -343,6 +342,7 @@ async def initiate_consolidated_report_regression_analysis(
     if non_processing_ids:
         result += f" Except {','.join(non_processing_ids)}: These are already in processing"
     return {"response": result}
+
 
 @app.post("/api/model_ops/", status_code=200)
 async def fetch_model_ops(

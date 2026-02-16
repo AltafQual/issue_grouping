@@ -1,6 +1,8 @@
+import logging
 import os
 import re
 from collections import defaultdict
+from copy import deepcopy
 
 import pandas as pd
 from joblib import dump, load
@@ -9,7 +11,6 @@ from src.constants import CONSOLIDATED_REPORTS
 from src.execution_timer_log import execution_timer
 from src.get_prev_testplan_id import iterate_db_get_testplan
 from src.regression_api_call import get_two_run_ids_cluster_info
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,16 @@ def filter_error_logs(error_logs_list):
 
     print(f"Error logs in total: {len(error_logs_list)}, filtered error logs: {len(filtered_error_logs)}")
     return filtered_error_logs
+
+
+@execution_timer
+def get_cummilative_sumary(errors, filter=True):
+    from src.qgenie import cummilative_summary_generation
+
+    if filter:
+        return cummilative_summary_generation(filter_error_logs(errors))
+    else:
+        return cummilative_summary_generation(errors)
 
 
 @execution_timer
@@ -74,10 +85,9 @@ def generate_executive_summary(soc_errors_list, model_error_list):
     executive_summary = (
         inline_css + "<table class='exec-summary'>" "<tr><th>SOC/RunTime Summary</th><th>Model Summary</th></tr>"
     )
-    from src.qgenie import cummilative_summary_generation
 
-    soc_runtime_summary = cummilative_summary_generation(filter_error_logs(soc_errors_list))
-    model_summary = cummilative_summary_generation(filter_error_logs(model_error_list))
+    soc_runtime_summary = get_cummilative_sumary(soc_errors_list)
+    model_summary = get_cummilative_sumary(model_error_list)
 
     executive_summary += "<tr>" f"{ensure_td(soc_runtime_summary)}" f"{ensure_td(model_summary)}" "</tr>" "</table>"
     return executive_summary
@@ -160,7 +170,9 @@ class RegressionAnalysisReport:
         self.types_to_filter_for_regression_analysis = ["bm_regression"]
         self.__destination_folder = os.path.join(CONSOLIDATED_REPORTS.path, qairt_id)
         self.__server_prefix = "https://aisw-hyd.qualcomm.com/fs"
-        self.__regression_data = None
+        self.regression_data = None
+        self.gerrits_information = None
+        self.runtime_type_regression_error_data = None
         self.__auto_soc_column_header = [
             "htp",
             "htp_fp16",
@@ -266,6 +278,28 @@ class RegressionAnalysisReport:
         else:
             return inline_css + '<td class="qgenie-summary"><div class="cell-content">-</div></td>'
 
+    def __type_runtime_based_error_data(self, data):
+        runtime_type_regression_error_data = {}
+
+        for _type, runtimes in (data or {}).items():
+            if not isinstance(runtimes, dict):
+                continue
+            for runtime, clusters in runtimes.items():
+                if not isinstance(clusters, dict):
+                    continue
+
+                type_bucket = runtime_type_regression_error_data.setdefault(_type, {})
+                reasons_list = type_bucket.setdefault(runtime, [])
+
+                for _, entries in clusters.items():
+                    if not entries:
+                        continue
+                    first = entries[0]
+                    if isinstance(first, dict) and "reason" in first and first["reason"] is not None:
+                        reasons_list.append(first["reason"])
+
+        self.runtime_type_regression_error_data = runtime_type_regression_error_data
+
     def __filter_regression_data(self, data, _processing_type=None):
         if _processing_type is None or not data:
             return data
@@ -275,6 +309,7 @@ class RegressionAnalysisReport:
             for _type, data_in_type in data.items():
                 if _type.lower() not in self.types_to_filter_for_regression_analysis:
                     updated_data[_type] = data_in_type
+            self.__type_runtime_based_error_data(data)
             return updated_data
 
         elif _processing_type == "model":
@@ -418,8 +453,8 @@ class RegressionAnalysisReport:
     def generate_regression_analysis_report(self, run_id_a, run_id_b, regression_data):
         self.__current_run_id = run_id_a
         self.__prev_run_id = run_id_b
-        self.__regression_data = regression_data
-        self.__gerrits_information = regression_data.get("gerrit_info", {})
+        self.regression_data = regression_data
+        self.gerrits_information = regression_data.get("gerrit_info", {})
         logger.info(f"Processing: {run_id_a}: {run_id_b}")
 
         type_based_regression_data = self.__filter_regression_data(
@@ -526,6 +561,10 @@ class CombinedRegressionAnalysis:
         self._regression_analysis_object = defaultdict(dict)
         self._regression_html_paths = defaultdict(str)
         self.__processed_run_id = False
+        self.combined_soc_errors_list = []
+        self.combined_model_errros_list = []
+        self.combined_type_runtime_wise_errors_dict = {}
+        self._qairt_id = None
 
     def _regex(self, pattern: str):
         rx = re.compile(pattern, re.IGNORECASE)
@@ -598,6 +637,32 @@ class CombinedRegressionAnalysis:
         except Exception as e:
             logger.exception(f"Error occured while loading objects: {e}")
 
+    def merge_two_jsons(self, dst, src, dedupe=False):
+        for key, src_val in src.items():
+            if key not in dst:
+                dst[key] = deepcopy(src_val)
+                continue
+
+            dst_val = dst[key]
+
+            if isinstance(dst_val, dict) and isinstance(src_val, dict):
+                self.merge_two_jsons(dst_val, src_val, dedupe=dedupe)
+            elif isinstance(dst_val, list) and isinstance(src_val, list):
+                dst_val.extend(src_val)
+                if dedupe:
+                    seen = set()
+                    unique = []
+                    for item in dst_val:
+                        marker = item if isinstance(item, (str, int, float, bool, type(None))) else repr(item)
+                        if marker not in seen:
+                            seen.add(marker)
+                            unique.append(item)
+                    dst[key] = unique
+            else:
+                dst[key] = deepcopy(src_val)
+
+        return dst
+
     def generate_each_run_id_regression_report(self, qairt_id):
         unique_run_ids_for_qairt_id = self.consolidated_report_analysis.get_unqiue_runids(qairt_id)
         if not unique_run_ids_for_qairt_id:
@@ -605,7 +670,8 @@ class CombinedRegressionAnalysis:
             return unique_run_ids_for_qairt_id
 
         logger.info(f"Got all the run ids for qairt id: {qairt_id}: Run IDS: {unique_run_ids_for_qairt_id}")
-        self.load_regression_analysis_objects(qairt_id)
+        # self.load_regression_analysis_objects(qairt_id)
+        cnt = 2
         for _id in unique_run_ids_for_qairt_id:
             """
             Both the object and html should be available for the run_id to skip processing
@@ -632,6 +698,9 @@ class CombinedRegressionAnalysis:
             self._regression_html_paths[_id] = html_path
             if html_path:
                 self.__processed_run_id = True
+            # cnt -= 1
+            # if not cnt:
+            #     break
 
         # only in case of new processing save the regression objects
         if self.__processed_run_id:
@@ -663,7 +732,7 @@ class CombinedRegressionAnalysis:
 
         return "https://aisw-hyd.qualcomm.com/fs/" + file_path, gerrits_merged_count
 
-    def generate_gerrits_merged_report(self, qairt_id):
+    def generate_gerrits_merged_report(self):
         def _iter_projects(sub_gerrit_data):
             for type_bucket in sub_gerrit_data.values():
                 for project_list in type_bucket.values():
@@ -672,32 +741,29 @@ class CombinedRegressionAnalysis:
         all_gerrits_data = defaultdict(list)
         for run in self._regression_analysis_object.values():
             if run:
-                sub_gerrit_data = run._RegressionAnalysisReport__gerrits_information
+                sub_gerrit_data = run.gerrits_information
                 for project in _iter_projects(sub_gerrit_data):
                     repo = project.get("repository_name")
                     if repo:
                         all_gerrits_data[repo].append(project)
 
-        return self.__generated_regressed_gerrits_page(qairt_id, all_gerrits_data)
+        return self.__generated_regressed_gerrits_page(self._qairt_id, all_gerrits_data)
 
     def list_to_html_ul(self, items):
         """Convert a Python list into an HTML <ul><li>...</li></ul> block."""
         li_html = "".join(f"<li>{item}</li>" for item in items)
         return f"<ul>{li_html}</ul>"
 
-    def generate_qairt_regression_report(self, qairt_id):
+    def generate_bu_regression_report(self, qairt_id):
         qairt_regression_report_path = os.path.join(
             CONSOLIDATED_REPORTS.path,
             qairt_id,
-            f"{qairt_id}.html",
+            "regression_htmls",
+            f"BU_{qairt_id}.html",
         )
 
-        # if no run id is processed return the previous path with any processing
-        if not self.__processed_run_id:
-            return qairt_regression_report_path
-
         qairt_regression_report = "<html><head><style> body { font-family: Arial, sans-serif; color: #000000;} table {border-collapse: collapse;}th,td {border: 2px solid black;text-align: center;padding: 7px;}</style></head>"
-        qairt_regression_report += f"<h2>Regression Analysis Report ({qairt_id})</h2>"
+        qairt_regression_report += f"<h2>BU Wise Analysis Report ({qairt_id})</h2>"
 
         # BU Wise Executive Summary
         bu_wise_run_ids = defaultdict(list)
@@ -723,27 +789,112 @@ class CombinedRegressionAnalysis:
                     soc_errors_list.extend(self._regression_analysis_object[run_id].error_summary_list)
                     model_error_list.extend(self._regression_analysis_object[run_id].model_regressed_errors_list)
 
+            self.combined_soc_errors_list.extend(soc_errors_list)
+            self.combined_model_errros_list.extend(model_error_list)
+
             logger.info(f"Total errors: {len(soc_errors_list)}, Total model errors: {len(model_error_list)}")
             qairt_regression_report += generate_executive_summary(soc_errors_list, model_error_list)
 
-        gerrits_merged_html_path, gerrits_count = self.generate_gerrits_merged_report(qairt_id)
+        with open(qairt_regression_report_path, "w") as f:
+            f.write(qairt_regression_report)
+        return qairt_regression_report_path
+
+    def add_gerrit_details_to_report(self, qairt_html_report):
+        gerrits_merged_html_path, gerrits_count = self.generate_gerrits_merged_report()
         if gerrits_count:
-            qairt_regression_report += "<h3> Lists of Gerrits Merged </h3>"
-            qairt_regression_report += self.list_to_html_ul(
+            qairt_html_report += "<h3> Lists of Gerrits Merged </h3>"
+            qairt_html_report += self.list_to_html_ul(
                 [f"<a href='{gerrits_merged_html_path}'>{gerrits_count} Gerrits Merged</a>"]
             )
         else:
-            qairt_regression_report += "<h3> No Gerrits Merged !! </h3>"
-        qairt_regression_report += "</br>Regards,</br>AISW AUTO</body></html>"
+            qairt_html_report += "<h3> No Gerrits Merged !! </h3>"
+
+        return qairt_html_report
+
+    def generate_qairt_regression_report(self, qairt_id):
+        qairt_regression_report_path = os.path.join(
+            CONSOLIDATED_REPORTS.path,
+            qairt_id,
+            f"{qairt_id}.html",
+        )
+
+        # if no run id is processed return the previous path with any processing
+        if not self.__processed_run_id:
+            return qairt_regression_report_path
+
+        qairt_regression_report = "<html><head><style> body { font-family: Arial, sans-serif; color: #000000;} table {border-collapse: collapse;}th,td {border: 2px solid black;text-align: left;padding: 7px;}</style></head>"
+        qairt_regression_report += f"<h2>Regression Analysis Report ({qairt_id})</h2>"
+
+        prev_run_id = None
+        combined_runtime_type_json_data = None
+        for run_id in self._regression_analysis_object:
+            if not self._regression_analysis_object[run_id].runtime_type_regression_error_data:
+                continue
+            if prev_run_id is None:
+                prev_run_id = run_id
+                continue
+
+            if not combined_runtime_type_json_data:
+                combined_runtime_type_json_data = self.merge_two_jsons(
+                    self._regression_analysis_object[prev_run_id].runtime_type_regression_error_data,
+                    self._regression_analysis_object[run_id].runtime_type_regression_error_data,
+                )
+            else:
+                combined_runtime_type_json_data = self.merge_two_jsons(
+                    combined_runtime_type_json_data,
+                    self._regression_analysis_object[run_id].runtime_type_regression_error_data,
+                )
+        if combined_runtime_type_json_data is None:
+            combined_runtime_type_json_data = self._regression_analysis_object[
+                prev_run_id
+            ].runtime_type_regression_error_data
+
+        list_of_summay_to_avoid = ["no logs to provide", "no logs"]
+        qairt_regression_report += "<table border='1'><tr><th>Type</th><th>Runtime</th><th>Summary</th></tr>"
+        for _type, runtimes_dict in combined_runtime_type_json_data.items():
+            runtimes = list(runtimes_dict.keys())
+            summaries_list = [get_cummilative_sumary(runtimes_dict[runtime]) for runtime in runtimes]
+            summary_idx_to_avoid = []
+            for idx, summary in enumerate(summaries_list):
+                if any(summay_to_avoid in summary.lower() for summay_to_avoid in list_of_summay_to_avoid):
+                    summary_idx_to_avoid.append(idx)
+            updated_runtimes = []
+            for idx, runtime in enumerate(runtimes):
+                if idx not in summary_idx_to_avoid:
+                    updated_runtimes.append((runtime, idx))
+
+            runtimes = updated_runtimes
+            rowspan = len(runtimes)
+            if rowspan:
+                first_runtime = runtimes[0][0]
+                first_summary = summaries_list[runtimes[0][1]]
+                qairt_regression_report += (
+                    f"<tr>"
+                    f"<td rowspan='{rowspan}'>{_type}</td>"
+                    f"<td>{first_runtime}</td>"
+                    f"<td><ul>{first_summary}</ul></td>"
+                    f"</tr>"
+                )
+                for runtime, idx in runtimes[1:]:
+                    summary = summaries_list[idx]
+                    qairt_regression_report += f"<tr>" f"<td>{runtime}</td>" f"<td><ul>{summary}</ul></td>" f"</tr>"
+        qairt_regression_report += "</table>"
+        bu_summary_path = self.generate_bu_regression_report(qairt_id)
+
+        qairt_regression_report += "<h3> BU Summary Page </h3>"
+        qairt_regression_report += self.list_to_html_ul(
+            [f"<a href='https://aisw-hyd.qualcomm.com/fs/{bu_summary_path}' target='_blank'>BU Summary Page</a>"]
+        )
+        qairt_regression_report = self.add_gerrit_details_to_report(qairt_regression_report)
+
         with open(qairt_regression_report_path, "w") as f:
             f.write(qairt_regression_report)
-
         return qairt_regression_report_path
 
     def generate_final_summary_report(self, qairt_id=None):
+        self._qairt_id = qairt_id
         self.generate_each_run_id_regression_report(qairt_id)
-        final_qairt_report_path = self.generate_qairt_regression_report(qairt_id)
-        return final_qairt_report_path
+        return self.generate_qairt_regression_report(qairt_id)
 
 
 def run_report_generation_for_all_qairt_ids():

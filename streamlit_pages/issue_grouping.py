@@ -16,7 +16,7 @@ from src.helpers import (
     create_excel_with_clusters,
     faiss_runner,
     get_tc_ids_from_sql,
-    tc_id_scheduler
+    tc_id_scheduler,
 )
 
 nest_asyncio.apply()
