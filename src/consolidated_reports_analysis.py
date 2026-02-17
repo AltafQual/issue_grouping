@@ -28,6 +28,9 @@ def filter_error_logs(error_logs_list):
             r"\bmissing\s+shared\s+libraries\b",
             r"\bdevice(?:[_\s-])?unavailable\b",
             r"\bnot\s+found\b",
+            r"\bno\s+space\s+left\s+on\s+device\b",
+            r"\bno\s+such\s+file\s+or\s+directory",
+            r"\bfilenotfounderror\b",
         ]
     )
     filtered_error_logs = []
@@ -35,7 +38,7 @@ def filter_error_logs(error_logs_list):
         if error_log and not any(pattern.search(error_log) for pattern in __error_filters):
             filtered_error_logs.append(error_log)
 
-    print(f"Error logs in total: {len(error_logs_list)}, filtered error logs: {len(filtered_error_logs)}")
+    logger.info(f"Error logs in total: {len(error_logs_list)}, filtered error logs: {len(filtered_error_logs)}")
     return filtered_error_logs
 
 
@@ -44,6 +47,7 @@ def get_cummilative_sumary(errors, filter=True):
     from src.qgenie import cummilative_summary_generation
 
     if filter:
+        logger.info("Filter enabled, filtering logs")
         return cummilative_summary_generation(filter_error_logs(errors))
     else:
         return cummilative_summary_generation(errors)
@@ -670,8 +674,7 @@ class CombinedRegressionAnalysis:
             return unique_run_ids_for_qairt_id
 
         logger.info(f"Got all the run ids for qairt id: {qairt_id}: Run IDS: {unique_run_ids_for_qairt_id}")
-        # self.load_regression_analysis_objects(qairt_id)
-        cnt = 2
+        self.load_regression_analysis_objects(qairt_id)
         for _id in unique_run_ids_for_qairt_id:
             """
             Both the object and html should be available for the run_id to skip processing
@@ -698,9 +701,6 @@ class CombinedRegressionAnalysis:
             self._regression_html_paths[_id] = html_path
             if html_path:
                 self.__processed_run_id = True
-            # cnt -= 1
-            # if not cnt:
-            #     break
 
         # only in case of new processing save the regression objects
         if self.__processed_run_id:
@@ -722,7 +722,7 @@ class CombinedRegressionAnalysis:
                 if data["commit_url"] not in unique_gerrits:
                     commit_url = f"<a href='{data['commit_url']}' target='_blank'>Gerrit</a>"
                     html_content += f"<tr><td>{data['gerrit_raised_by'][0]['name']}</td><td>{data['gerrit_raised_by'][0]['email']}</td><td>{data['commit_message']}</td><td>{commit_url}</td></tr>"
-                    unique_gerrits.add(data["commit_url"])
+                    unique_gerrits.add(data["commit_url"].lower())
                     gerrits_merged_count += 1
             html_content += "</table>"
 
