@@ -6,7 +6,7 @@ import requests
 ISSUE_GROUPING_API_URL = os.getenv("ISSUE_GROUPING_API_URL", "http://hyd-lablnx904:8010")
 
 
-def get_two_run_ids_cluster_info(run_id_a: str, run_id_b: str, timeout: int = 600) -> dict:
+def get_two_run_ids_cluster_info(run_id_a: str, run_id_b: str, timeout: int = 600, force: bool = False) -> dict:
     """
     Calls the API to get regression for two run IDs.
 
@@ -19,7 +19,7 @@ def get_two_run_ids_cluster_info(run_id_a: str, run_id_b: str, timeout: int = 60
     """
     url = f"{ISSUE_GROUPING_API_URL}/api/get_two_run_ids_cluster_info/"
     headers = {"accept": "application/json", "Content-Type": "application/json"}
-    payload = {"run_id_a": run_id_a, "run_id_b": run_id_b}
+    payload = {"run_id_a": run_id_a, "run_id_b": run_id_b, "force": force}
 
     try:
         print(f"POST: url: {url}, json: {payload}")
@@ -31,7 +31,9 @@ def get_two_run_ids_cluster_info(run_id_a: str, run_id_b: str, timeout: int = 60
         return {}
 
 
-async def get_two_run_ids_cluster_info_async(run_id_a: str, run_id_b: str, timeout: int = 600) -> dict:
+async def get_two_run_ids_cluster_info_async(
+    run_id_a: str, run_id_b: str, timeout: int = 600, force: bool = False
+) -> dict:
     """
     Async version: Calls the API to get regression for two run IDs.
 
@@ -51,7 +53,7 @@ async def get_two_run_ids_cluster_info_async(run_id_a: str, run_id_b: str, timeo
 
     url = f"{ISSUE_GROUPING_API_URL}/api/get_two_run_ids_cluster_info/"
     headers = {"accept": "application/json", "Content-Type": "application/json"}
-    payload = {"run_id_a": run_id_a, "run_id_b": run_id_b}
+    payload = {"run_id_a": run_id_a, "run_id_b": run_id_b, "force": force}
 
     try:
         print(f"POST: url: {url}, json: {payload}")
