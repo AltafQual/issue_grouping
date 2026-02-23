@@ -178,8 +178,8 @@ You are given a list of error logs. Your goal is to generate a concise summary t
 
 <OUTPUT FORMAT>
 The output is directly used in a HTML Report, follow below instructions:
-- Enclose any important keywords or sentence between `<b> </b>`, so that these will appear as bold
-- Always Generate the response as bullet points by enclosing each point between `<li> </li>`
+- Enclose any important keywords or sentence between `<b>`words to highlight`</b>`, so that these will appear as bold
+- Always Generate the response as bullet points by enclosing each point between `<li>`Generated summary content`</li>`
 </OUTPUT FORMAT>
 """
 
@@ -219,7 +219,7 @@ You are given a list of summaries of error logs. Your goal is to generate a conc
 <OUTPUT FORMAT>
 The output is directly used in a HTML Report, follow below instructions:
 - Enclose any important keywords or sentence between `<b> </b>`, so that these will appear as bold
-- Always Generate the response as bullet points by enclosing each point between `<li> </li>`. Each unique point in summary should be a bullet point
+- Always Generate the response as bullet points by enclosing each point between `<li>`Generated summary content`</li>`. Each unique point in summary should be a bullet point
 </OUTPUT FORMAT>
 """
 

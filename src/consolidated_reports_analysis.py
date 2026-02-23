@@ -831,7 +831,7 @@ class CombinedRegressionAnalysis:
             return unique_run_ids_for_qairt_id
 
         print(f"Got all the run ids for qairt id: {qairt_id}: Run IDS: {unique_run_ids_for_qairt_id}")
-        # self.load_regression_analysis_objects(qairt_id)
+        self.load_regression_analysis_objects(qairt_id)
         for _id in unique_run_ids_for_qairt_id:
             """
             Both the object and html should be available for the run_id to skip processing
@@ -1234,7 +1234,6 @@ def run_report_generation_for_all_qairt_ids():
         if qairt_id.startswith("qaisw"):
             try:
                 report_analysis = CombinedRegressionAnalysis(ConsolidatedReportAnalysis())
-                print(f"Processing qairt id: {qairt_id}")
                 report_analysis.generate_final_summary_report(qairt_id)
                 print(f"{qairt_id} Successfully processed !!")
             except Exception as e:
