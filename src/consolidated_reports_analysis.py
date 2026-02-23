@@ -1,9 +1,10 @@
 import logging
 import os
 import re
-from collections import defaultdict
+from collections import OrderedDict
 from collections.abc import Mapping
 from copy import deepcopy
+from html import escape
 
 import pandas as pd
 from joblib import dump, load
@@ -12,11 +13,143 @@ from src.constants import CONSOLIDATED_REPORTS
 from src.execution_timer_log import execution_timer
 from src.get_prev_testplan_id import iterate_db_get_testplan
 from src.regression_api_call import get_two_run_ids_cluster_info
-from html import escape
 
 logger = logging.getLogger(__name__)
 
-CUSTOM_ERROR_FILTERS = [r"\bqnn-net-run.exe\b"]
+REPORT_CSS = """
+<style>
+    :root {
+        --primary: #00629B; /* Qualcomm Blue approx or dark blue */
+        --secondary: #3253DC;
+        --bg-body: #f5f7fa;
+        --bg-container: #ffffff;
+        --text-main: #333333;
+        --text-muted: #6c757d;
+        --border-color: #e9ecef;
+        --table-head-bg: #00629B;
+        --table-head-text: #ffffff;
+        --row-hover: #f1faff;
+        --accent-danger: #dc3545;
+        --accent-success: #28a745;
+        --shadow: 0 4px 6px rgba(0,0,0,0.05);
+    }
+
+    body {
+        font-family: 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+        background-color: var(--bg-body);
+        color: var(--text-main);
+        margin: 0;
+        padding: 20px;
+        line-height: 1.6;
+    }
+
+    .container {
+        max-width: 100%;
+        margin: 0 auto;
+        background-color: var(--bg-container);
+        padding: 40px;
+        border-radius: 8px;
+        box-shadow: var(--shadow);
+    }
+
+    h1, h2, h3, h4 {
+        color: var(--primary);
+        font-weight: 600;
+        margin-top: 1.5em;
+        margin-bottom: 0.75em;
+    }
+
+    h1 { font-size: 2.2em; border-bottom: 3px solid var(--primary); padding-bottom: 10px; margin-top: 0; }
+    h2 { font-size: 1.8em; border-bottom: 1px solid var(--border-color); padding-bottom: 8px; }
+    h3 { font-size: 1.4em; color: #444; }
+
+    table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 25px;
+        background-color: white;
+        border: 1px solid var(--border-color);
+        table-layout: fixed;
+    }
+
+    th, td {
+        padding: 12px 15px;
+        text-align: left;
+        border-bottom: 1px solid var(--border-color);
+        font-size: 0.95em;
+        vertical-align: top;
+        word-wrap: break-word;
+    }
+
+    th {
+        background-color: var(--table-head-bg);
+        color: var(--table-head-text);
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        font-size: 0.85em;
+    }
+
+    tr:nth-child(even) { background-color: #f8f9fa; }
+    tr:hover { background-color: var(--row-hover); }
+
+    a { color: var(--secondary); text-decoration: none; font-weight: 500; }
+    a:hover { text-decoration: underline; color: #003d73; }
+
+    ul { margin: 0; padding-left: 20px; }
+    li { margin-bottom: 5px; }
+
+    /* Summary Box / Dashboard Styles */
+    .dashboard-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 20px;
+        margin-bottom: 30px;
+    }
+
+    .card {
+        background: white;
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: var(--shadow);
+        border-top: 4px solid var(--primary);
+        text-align: center;
+        border: 1px solid var(--border-color);
+    }
+
+    .card h4 { margin: 0; font-size: 0.9em; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; }
+    .card .count { font-size: 2.5em; font-weight: bold; color: var(--primary); margin: 10px 0; }
+
+    .summary-section {
+        background-color: #fff;
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        padding: 20px;
+        margin-bottom: 30px;
+    }
+
+    /* Helper Classes */
+    .text-center { text-align: center; }
+
+    /* Specific overrides */
+    .qgenie-summary .cell-content, .gerrit-cell .cell-content {
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+    }
+
+    .exec-summary th { background-color: #2c3e50; }
+
+    .footer {
+        margin-top: 40px;
+        padding-top: 20px;
+        border-top: 1px solid var(--border-color);
+        color: var(--text-muted);
+        font-size: 0.9em;
+        text-align: center;
+    }
+</style>
+"""
 
 
 def filter_error_logs(error_logs_list, custom_filter_list=None):
@@ -33,6 +166,7 @@ def filter_error_logs(error_logs_list, custom_filter_list=None):
         r"\bno\s+space\s+left\s+on\s+device\b",
         r"\bno\s+such\s+file\s+or\s+directory",
         r"\bfilenotfounderror\b",
+        r"\bqnn-net-run.exe\b",
     ]
     if custom_filter_list:
         filter_list.extend(custom_filter_list)
@@ -42,7 +176,7 @@ def filter_error_logs(error_logs_list, custom_filter_list=None):
         if error_log and not any(pattern.search(error_log) for pattern in __error_filters):
             filtered_error_logs.append(error_log)
 
-    logger.info(f"Error logs in total: {len(error_logs_list)}, filtered error logs: {len(filtered_error_logs)}")
+    print(f"Error logs in total: {len(error_logs_list)}, filtered error logs: {len(filtered_error_logs)}")
     return filtered_error_logs
 
 
@@ -51,7 +185,7 @@ def get_cummilative_sumary(errors, filter=True, custom_filter=None):
     from src.qgenie import cummilative_summary_generation
 
     if filter:
-        logger.info("Filter enabled, filtering logs")
+        print("Filter enabled, filtering logs")
         return cummilative_summary_generation(filter_error_logs(errors, custom_filter))
     else:
         return cummilative_summary_generation(errors)
@@ -101,6 +235,20 @@ def generate_executive_summary(soc_errors_list, model_error_list, filter=True):
     return executive_summary
 
 
+class OrderedDefaultDict(OrderedDict):
+    def __init__(self, default_factory=None, *args, **kwargs):
+        if default_factory is not None and not callable(default_factory):
+            raise TypeError("default_factory must be callable or None")
+        self.default_factory = default_factory
+        super().__init__(*args, **kwargs)
+
+    def __missing__(self, key):
+        if self.default_factory is None:
+            raise KeyError(key)
+        self[key] = value = self.default_factory()
+        return value
+
+
 class ConsolidatedReportAnalysis:
     def __init__(self):
         self.reports_folder_path = CONSOLIDATED_REPORTS.path
@@ -134,12 +282,14 @@ class ConsolidatedReportAnalysis:
 
     def build_prev_run_id(self, run_id: str):
         _, _, previous_testplan_id, previous_release_testplan_id = iterate_db_get_testplan(run_id)
-        logger.info(f"previous testplan id: {previous_testplan_id} : Current testplan id: {run_id}")
+        print(
+            f"previous testplan id: {previous_testplan_id} : Current testplan id: {run_id}: previous release id: {previous_release_testplan_id}"
+        )
         return previous_testplan_id if previous_testplan_id else previous_release_testplan_id
 
     def get_unqiue_runids(self, qairt_id):
         try:
-            logger.info(f"Processing QAIRT Id: {qairt_id}")
+            print(f"Processing QAIRT Id: {qairt_id}")
             qairt_folder = os.path.join(self.reports_folder_path, qairt_id)
             functional_report_file = None
             for file in os.listdir(qairt_folder):
@@ -163,7 +313,7 @@ class ConsolidatedReportAnalysis:
         return unique_test_ids
 
     def get_regression_info_json(self, qairt_id):
-        regression_information_dict = defaultdict(dict)
+        regression_information_dict = OrderedDefaultDict(dict)
         unique_test_ids = self.get_unqiue_runids(qairt_id)
         for test_id in unique_test_ids:
             old_release_id = self.build_prev_run_id(test_id)
@@ -344,7 +494,7 @@ class RegressionAnalysisReport:
         file_path = os.path.join(output_dir, file_name)
         total_failure_count = 0
 
-        html_content = f"<html><head><h1>Cluster Level Details</h1></head><body>"
+        html_content = f"<html><head><title>Cluster Level Details</title>{REPORT_CSS}</head><body><div class='container'><h1>Cluster Level Details</h1>"
 
         for cluster_name, cluster_data in clustered_data.items():
             inner_html_content = ""
@@ -386,7 +536,7 @@ class RegressionAnalysisReport:
         file_name = f"{soc_name}_clustered_regression_report.html"
         file_path = os.path.join(output_dir, file_name)
 
-        html_content = f"<html><head><h1>SOC Level Details</title></h1><body>"
+        html_content = f"<html><head><title>SOC Level Details</title>{REPORT_CSS}</head><body><div class='container'><h1>SOC Level Details</h1>"
 
         html_content += "<table border='1'><tr><th>TC UUID</th><th>Name</th><th>Cluster Name</th><th>Runtime</th><th>Reason</th><th>Log</th></tr>"
         for soc_data in soc_regression_data:
@@ -407,7 +557,7 @@ class RegressionAnalysisReport:
         file_name = f"{runtime}_clustered_regression_report.html"
         file_path = os.path.join(output_dir, file_name)
 
-        html_content = f"<html><head><h1>Runtime Level Details</title></h1><body>"
+        html_content = f"<html><head><title>Runtime Level Details</title>{REPORT_CSS}</head><body><div class='container'><h1>Runtime Level Details</h1>"
 
         html_content += "<table border='1'><tr><th>TC UUID</th><th>Name</th><th>Cluster Name</th><th>Type</th><th>SOC Name</th><th>Reason</th><th>Log</th></tr>"
         for runtime_data in runtime_regression_data:
@@ -430,7 +580,7 @@ class RegressionAnalysisReport:
         file_name = "model_failures_regression_report.html"
         file_path = os.path.join(output_dir, file_name)
         cluster_names_seen = set()
-        html_content = f"<html><head><title>Model Level Failure Details</title></head><body>"
+        html_content = f"<html><head><title>Model Level Failure Details</title>{REPORT_CSS}</head><body><div class='container'><h1>Model Level Failure Details</h1>"
 
         for model_name, model_data in model_regression_data.items():
             html_content += f"<h2>{model_name}</h2>"
@@ -464,7 +614,7 @@ class RegressionAnalysisReport:
         self.__prev_run_id = run_id_b
         self.regression_data = regression_data
         self.gerrits_information = regression_data.get("gerrit_info", {})
-        logger.info(f"Processing: {run_id_a}: {run_id_b}")
+        print(f"Processing: {run_id_a}: {run_id_b}")
         if any("rc" in run_id.lower() for run_id in [run_id_a, run_id_b]):
             self._has_rc_in_runid = True
 
@@ -479,10 +629,10 @@ class RegressionAnalysisReport:
                 f"Empty regression data found between: {self.__current_run_id} and {self.__prev_run_id} \n Regression Data received: {regression_data}"
             )
             return ""
-        head = "<html><head><style> body { font-family: Arial, sans-serif; color: #000000;} table {border-collapse: collapse;}th,td {border: 2px solid black;text-align: center;padding: 7px;}</style></head>"
+        head = f"<html><head><title>Regression Analysis</title>{REPORT_CSS}</head><body><div class='container'>"
         regression_html = f"<h2>Regression Analysis between {run_id_a} : {run_id_b}</h2>"
 
-        logger.info("Building html for Type based Failures")
+        print("Building html for Type based Failures")
         regression_html += f"<h3>Type based Failures</h3>"
         type_based_data_dict = {}
         for test_type, types_dict in type_based_regression_data.items():
@@ -508,7 +658,7 @@ class RegressionAnalysisReport:
             regression_html += "</tr>"
         regression_html += "</table>"
 
-        logger.info("Building model failure report")
+        print("Building model failure report")
         regression_html += f"<h3>Failed Model Report</h3>"
         detailed_page_link = self.__create_detailed_model_failure_regression_page(model_based_regression_data)
         regression_html += f"<tr><td><a href='{detailed_page_link}'>Model Failure report</a></td><td> -- Total Models Failed {len(model_based_regression_data.keys())}</td></tr>"
@@ -522,7 +672,7 @@ class RegressionAnalysisReport:
                         soc_regression_data[data["soc_name"]] = soc_regression_data.get(data["soc_name"], []) + [data]
                         runtimes_regression_data[runtime] = runtimes_regression_data.get(runtime, []) + [data]
 
-        logger.info("Building runtime based failure report")
+        print("Building runtime based failure report")
         regression_html += f"<h3>Runtime based Failures</h3>"
         regression_html += "<table><tr><th>Runtime</th><th>Failure Count</th><th>Qgenie Summary</th>"
         if not regression_html.endswith("</tr>"):
@@ -548,8 +698,6 @@ class RegressionAnalysisReport:
             regression_html += "</tr>"
         regression_html += "</table>"
 
-        regression_html += "</br></br>Regards,</br>AISW AUTO</body></html>"
-
         executive_summary_html = "<h2>Executive Summary of Failures</h2>"
         executive_summary_html += generate_executive_summary(
             self.error_summary_list, self.model_regressed_errors_list, filter=False
@@ -571,8 +719,8 @@ class RegressionAnalysisReport:
 class CombinedRegressionAnalysis:
     def __init__(self, consolidated_report_analysis: ConsolidatedReportAnalysis):
         self.consolidated_report_analysis = consolidated_report_analysis
-        self._regression_analysis_object = defaultdict(dict)
-        self._regression_html_paths = defaultdict(str)
+        self._regression_analysis_object = OrderedDefaultDict(dict)
+        self._regression_html_paths = OrderedDefaultDict(str)
         self.__processed_run_id = False
         self.combined_soc_errors_list = []
         self.combined_model_errros_list = []
@@ -682,8 +830,8 @@ class CombinedRegressionAnalysis:
             logger.error(f"No run ids found for {qairt_id}")
             return unique_run_ids_for_qairt_id
 
-        logger.info(f"Got all the run ids for qairt id: {qairt_id}: Run IDS: {unique_run_ids_for_qairt_id}")
-        self.load_regression_analysis_objects(qairt_id)
+        print(f"Got all the run ids for qairt id: {qairt_id}: Run IDS: {unique_run_ids_for_qairt_id}")
+        # self.load_regression_analysis_objects(qairt_id)
         for _id in unique_run_ids_for_qairt_id:
             """
             Both the object and html should be available for the run_id to skip processing
@@ -696,15 +844,15 @@ class CombinedRegressionAnalysis:
                 and self._regression_analysis_object.get(_id)
                 and self._regression_html_paths.get(_id)
             ):
-                logger.info(f"{_id} already processed skipping")
+                print(f"{_id} already processed skipping")
                 continue
 
             prev_id = self.consolidated_report_analysis.build_prev_run_id(_id)
-            logger.info(f"Processing: {_id}: {prev_id}")
+            print(f"Processing: {_id}: {prev_id}")
             regression_json = get_two_run_ids_cluster_info(_id, prev_id, force=True)
             regression_analysis = RegressionAnalysisReport(qairt_id)
             html_path = regression_analysis.generate_regression_analysis_report(_id, prev_id, regression_json)
-            logger.info(f"HTML for {_id}: {html_path}")
+            print(f"HTML for {_id}: {html_path}")
 
             self._regression_analysis_object[_id] = regression_analysis
             self._regression_html_paths[_id] = html_path
@@ -721,7 +869,7 @@ class CombinedRegressionAnalysis:
         file_path = os.path.join(output_dir, file_name)
 
         gerrits_merged_count = 0
-        html_content = f"<html><head><h2>List of Gerrits merged in {qairt_id}</h2></head><body>"
+        html_content = f"<html><head><title>Gerrits Merged</title>{REPORT_CSS}</head><body><div class='container'><h2>List of Gerrits merged in {qairt_id}</h2>"
 
         for repo_name, gerrit_data in gerrits_information.items():
             html_content += f"<h3>Repository Name: {repo_name}</h3>"
@@ -764,7 +912,7 @@ class CombinedRegressionAnalysis:
         return f"<ul>{li_html}</ul>"
 
     def get_runtime_based_gerrit_row(self, runtime, gerrit_data, rows_span=0):
-        logger.info(f"All types of gerrits merged: {gerrit_data.keys()}")
+        print(f"All types of gerrits merged: {gerrit_data.keys()}")
         common_gerrits = gerrit_data.get("all_runtimes", [])
         if runtime == "tools":
             runtime_gerrits = gerrit_data.get("quantizer", [])
@@ -772,9 +920,9 @@ class CombinedRegressionAnalysis:
         else:
             runtime_gerrits = gerrit_data.get(runtime, [])
 
-        seen_jiras = defaultdict(set)
+        seen_jiras = OrderedDefaultDict(set)
         items_html = []
-        repository_based_filteration = defaultdict(list)
+        repository_based_filteration = OrderedDefaultDict(list)
 
         # Group by repository
         for gerrit_info in (common_gerrits or []) + (runtime_gerrits or []):
@@ -905,16 +1053,18 @@ class CombinedRegressionAnalysis:
             f"BU_{qairt_id}.html",
         )
 
-        qairt_regression_report = "<html><head><style> body { font-family: Arial, sans-serif; color: #000000;} table {border-collapse: collapse;}th,td {border: 2px solid black;text-align: center;padding: 7px;}</style></head>"
+        qairt_regression_report = (
+            f"<html><head><title>BU Wise Analysis</title>{REPORT_CSS}</head><body><div class='container'>"
+        )
         qairt_regression_report += f"<h2>BU Wise Analysis Report ({qairt_id})</h2>"
 
         # BU Wise Executive Summary
-        bu_wise_run_ids = defaultdict(list)
+        bu_wise_run_ids = OrderedDefaultDict(list)
         for run_id in self._regression_analysis_object:
             bu_wise_run_ids[self.classify_run_id(run_id)].append(run_id)
 
         for bu, run_ids in bu_wise_run_ids.items():
-            logger.info(f"Generating executing summary for bu: {bu}: {run_ids}")
+            print(f"Generating executing summary for bu: {bu}: {run_ids}")
             qairt_regression_report += f"<h3>{bu.upper()} Analysis Report</h3>"
             updated_run_ids = []
             for run_id in run_ids:
@@ -935,9 +1085,10 @@ class CombinedRegressionAnalysis:
             self.combined_soc_errors_list.extend(soc_errors_list)
             self.combined_model_errros_list.extend(model_error_list)
 
-            logger.info(f"Total errors: {len(soc_errors_list)}, Total model errors: {len(model_error_list)}")
+            print(f"Total errors: {len(soc_errors_list)}, Total model errors: {len(model_error_list)}")
             qairt_regression_report += generate_executive_summary(soc_errors_list, model_error_list)
 
+        qairt_regression_report += "</div></body></html>"
         with open(qairt_regression_report_path, "w") as f:
             f.write(qairt_regression_report)
         return qairt_regression_report_path
@@ -965,24 +1116,9 @@ class CombinedRegressionAnalysis:
         if not self.__processed_run_id:
             return qairt_regression_report_path
 
-        qairt_regression_report = """<html><head><style> body { font-family: Arial, sans-serif; color: #000000;} table {border-collapse: collapse;}th,td {border: 2px solid black;text-align: left;padding: 7px;}
-        td.gerrit-cell { vertical-align: middle; padding: 8px; text-align: left; }
-            td.gerrit-cell > .cell-content {
-                display: flex;          
-                align-items: center;
-                width: 100%;
-                white-space: normal;
-                word-break: break-word;
-            }
-            td.gerrit-cell > .cell-content > ul {
-                margin: 0;
-                padding-left: 20px;
-                list-style: disc;
-                text-align: left;
-            }
-        
-        </style>
-        </head>"""
+        qairt_regression_report = (
+            f"<html><head><title>Regression Report</title>{REPORT_CSS}</head><body><div class='container'>"
+        )
         qairt_regression_report += f"<h2>Regression Analysis Report ({qairt_id})</h2>"
 
         prev_run_id = None
@@ -1026,7 +1162,7 @@ class CombinedRegressionAnalysis:
             first_row = True
             for _, runtimes_dict in converter_quantizer_dict.items():
                 for runtime, errors_list in runtimes_dict.items():
-                    logs_summary = get_cummilative_sumary(errors_list, CUSTOM_ERROR_FILTERS)
+                    logs_summary = get_cummilative_sumary(errors_list)
                     if any(summay_to_avoid in logs_summary.lower() for summay_to_avoid in list_of_summay_to_avoid):
                         continue
 
@@ -1047,7 +1183,7 @@ class CombinedRegressionAnalysis:
 
         for current_runtime, types_dict in combined_runtime_type_json_data.items():
             runtimes = list(types_dict.keys())
-            summaries_list = [get_cummilative_sumary(types_dict[runtime], CUSTOM_ERROR_FILTERS) for runtime in runtimes]
+            summaries_list = [get_cummilative_sumary(types_dict[runtime]) for runtime in runtimes]
             summary_idx_to_avoid = []
             for idx, summary in enumerate(summaries_list):
                 if any(summay_to_avoid in summary.lower() for summay_to_avoid in list_of_summay_to_avoid):
@@ -1081,8 +1217,8 @@ class CombinedRegressionAnalysis:
         qairt_regression_report += self.list_to_html_ul(
             [f"<a href='https://aisw-hyd.qualcomm.com/fs/{bu_summary_path}' target='_blank'>BU Summary Page</a>"]
         )
-        # qairt_regression_report = self.add_gerrit_details_to_report(qairt_regression_report)
 
+        qairt_regression_report += "</div></body></html>"
         with open(qairt_regression_report_path, "w") as f:
             f.write(qairt_regression_report)
         return qairt_regression_report_path
