@@ -54,6 +54,11 @@ class ClusterInfo(BaseModel):
     force: bool = Field(description="Skip cache and regenrate the regression", default=False)
 
 
+class OneClusterInfo(BaseModel):
+    run_id: str = Field(description="valid test case Run ID")
+    force: bool = Field(description="Skip cache and regenrate the regression", default=False)
+
+
 class RegressionResponse(BaseModel):
     status: int = 200
     data: Dict[str, Any] = {}
@@ -74,6 +79,25 @@ class ClusterInfoResponse(BaseModel):
     type: Dict[str, Any] = {}
     model: Dict[str, Any] = {}
     gerrit_info: Dict[str, Any] = {}
+
+    def add(self, key: str, value: Any, data_type: str) -> None:
+        if data_type == "type":
+            self.type[key] = value
+        elif data_type == "model":
+            self.model[key] = value
+        logger.info(f"Data: {key}: {value} not added valid `data_type` not provided")
+
+    def to_dict(self) -> Dict:
+        return self.dict()
+
+
+class OneClusterInfoResponse(BaseModel):
+    status: int = 200
+    error_message: str = ""
+    time_taken: float = 0
+    run_id: str = ""
+    type: Dict[str, Any] = {}
+    model: Dict[str, Any] = {}
 
     def add(self, key: str, value: Any, data_type: str) -> None:
         if data_type == "type":
@@ -294,9 +318,11 @@ async def get_two_run_ids_cluster_info(cluster_info_object: ClusterInfo) -> Dict
                 f"No data Found for regression between: {cluster_info_object.run_id_a} - {cluster_info_object.run_id_b}"
             )
     except Exception as e:
-        logger.exception(f"Exception occured while finding regression: {e}")
-        logger.error(traceback.format_exc())
+        logger.exception(
+            f"{cluster_info_object.run_id_a}: {cluster_info_object.run_id_b} Exception occured while finding regression: {e}"
+        )
         response.status = 500
+
     response.time_taken = round(time.time() - start_time, 2)
     result = response.to_dict()
     if response.status == 200:
@@ -344,8 +370,71 @@ async def initiate_consolidated_report_regression_analysis(
     return {"response": result}
 
 
-@app.post("/api/model_ops/", status_code=200)
-async def fetch_model_ops(
-    model_ops_object: ModelOps,
-):
-    return helpers.fetch_model_ops(model_ops_object.model_names)
+@app.post(
+    "/api/get_run_id_cluster_info/",
+    response_model=OneClusterInfoResponse,
+    status_code=200,
+)
+async def get_two_run_ids_cluster_info(cluster_info_object: OneClusterInfo) -> Dict:
+    start_time = time.time()
+    response = OneClusterInfoResponse()
+    response.run_id = cluster_info_object.run_id
+    analyzer = FailureAnalyzer()
+    dataframe = analyzer.load_data(tc_id=cluster_info_object.run_id)
+
+    if dataframe is None or dataframe.empty:
+        return response
+
+    if (cluster_info_object.run_id) in TTL_CACHE and cluster_info_object.force != True:
+        result = TTL_CACHE[cluster_info_object.run_id]
+        result["time_taken"] = round(time.time() - start_time)
+        return result
+
+    clustered_response = await helpers.async_sequential_process_by_type(dataframe)
+    try:
+        for test_type, df in clustered_response.items():
+            df = df.drop(
+                columns=[
+                    col
+                    for col in [
+                        DataFrameKeys.embeddings_key,
+                        DataFrameKeys.bins,
+                        DataFrameKeys.error_logs_length,
+                        DataFrameKeys.cluster_type_int,
+                        DataFrameKeys.preprocessed_text_key,
+                        DataFrameKeys.grouped_from_faiss,
+                    ]
+                    if col in df.columns
+                ]
+            )
+            response.type[test_type] = {}
+            for runtime, runtime_df in df.groupby("runtime"):
+                response.type[test_type][runtime] = {}
+                for cluster_name, cluster_df in runtime_df.groupby(DataFrameKeys.cluster_name):
+                    cluster_entries = cluster_df.to_dict(orient="records")
+                    response.type[test_type][runtime][cluster_name] = cluster_entries
+
+            for model_name, model_df in df.groupby("model_name"):
+                model_cluster_details = model_df.to_dict(orient="records")
+                if model_name not in response.model:
+                    response.model[model_name] = []
+                response.model[model_name].extend(model_cluster_details)
+        else:
+            response.status = 404
+            response.error_message = f"No data Found for runid: {cluster_info_object.run_id}"
+    except Exception as e:
+        logger.exception(f"{cluster_info_object.run_id}: Exception occured while finding regression: {e}")
+        response.status = 500
+
+    if response.status == 200:
+        TTL_CACHE[cluster_info_object.run_id] = result
+
+    response.time_taken = round(time.time() - start_time, 2)
+    return response.to_dict()
+
+
+# @app.post("/api/model_ops/", status_code=200)
+# async def fetch_model_ops(
+#     model_ops_object: ModelOps,
+# ):
+#     return helpers.fetch_model_ops(model_ops_object.model_names)

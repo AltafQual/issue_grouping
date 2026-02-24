@@ -831,7 +831,7 @@ class CombinedRegressionAnalysis:
             return unique_run_ids_for_qairt_id
 
         print(f"Got all the run ids for qairt id: {qairt_id}: Run IDS: {unique_run_ids_for_qairt_id}")
-        self.load_regression_analysis_objects(qairt_id)
+        # self.load_regression_analysis_objects(qairt_id)
         for _id in unique_run_ids_for_qairt_id:
             """
             Both the object and html should be available for the run_id to skip processing
@@ -912,20 +912,23 @@ class CombinedRegressionAnalysis:
         return f"<ul>{li_html}</ul>"
 
     def get_runtime_based_gerrit_row(self, runtime, gerrit_data, rows_span=0):
-        print(f"All types of gerrits merged: {gerrit_data.keys()}")
-        common_gerrits = gerrit_data.get("all_runtimes", [])
+        print(f"All types of gerrits merged: {gerrit_data.keys()}, runtime: {runtime}")
+        common_gerrits = list(gerrit_data.get("all_runtimes") or [])
         if runtime == "tools":
-            runtime_gerrits = gerrit_data.get("quantizer", [])
-            runtime_gerrits += gerrit_data.get("converter", [])
+            runtime_gerrits = list(gerrit_data.get("quantizer") or []) + list(gerrit_data.get("converter") or [])
         else:
-            runtime_gerrits = gerrit_data.get(runtime, [])
+            runtime_gerrits = list(gerrit_data.get(runtime) or [])
 
         seen_jiras = OrderedDefaultDict(set)
         items_html = []
         repository_based_filteration = OrderedDefaultDict(list)
+        source = runtime_gerrits + common_gerrits
+        print(
+            f"Total gerrits: {len(source)}: Common gerrits: {len(common_gerrits)}, {runtime} gerrits: {len(runtime_gerrits)}"
+        )
 
         # Group by repository
-        for gerrit_info in (common_gerrits or []) + (runtime_gerrits or []):
+        for gerrit_info in source:
             repo = (gerrit_info.get("repository_name") or "").strip()
             repository_based_filteration[repo].append(gerrit_info)
 
@@ -1198,7 +1201,7 @@ class CombinedRegressionAnalysis:
             if rowspan:
                 first_runtime = runtimes[0][0]
                 first_summary = summaries_list[runtimes[0][1]]
-                gerrit_cell = self.get_runtime_based_gerrit_row(first_runtime, gerrits_data, rowspan)
+                gerrit_cell = self.get_runtime_based_gerrit_row(current_runtime, gerrits_data, rowspan)
                 qairt_regression_report += (
                     f"<tr>"
                     f"<td rowspan='{rowspan}'>{current_runtime}</td>"

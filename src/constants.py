@@ -71,6 +71,8 @@ class GERRIT_CONFIGURATION:
         "quantizer": ("modeltools", "qnn-cpu"),
         "mcp": ("mlg-infra", "qnn-htp", "manifest", "genie"),
         "mcp_x86": ("mlg-infra", "qnn-htp", "manifest", "genie"),
+        "hta": ("hta"),
+        "gpu:cpu": ("qnn-cpu", "qnn-gpu"),
     }
 
 
