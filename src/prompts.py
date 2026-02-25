@@ -233,7 +233,7 @@ You are given a list of summaries of error logs. Your goal is to generate a conc
 - Maintain strict factual accuracy; do not invent modules, components, or behavior that cannot be reasonably inferred from logs.
 - If no logs are provided or input is empty, return only: `No logs to provide summary`
 - Do NOT add any prefixes or suffixes around the output.
-- Keep the summary less than 15 bullet points.
+- Keep the summary less than 10 bullet points.
 - Use a polished, professional tone suitable for engineering leadership.
 </REQUIREMENTS>
 
