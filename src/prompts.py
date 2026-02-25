@@ -162,41 +162,57 @@ Current batch logs:
 
 ERROR_SUMMARIZATION_PROMPT = """
 <TASK>
-You are given a list of error logs. Your goal is to generate a concise summary that captures the key issues across all logs.
+You are given one or more error logs. Your task is to generate a highly descriptive, technically accurate summary that clearly explains the nature of the errors and the underlying issues indicated by the logs.
 </TASK>
 
 <REQUIREMENTS>
-- Summarize the main errors and their nature (e.g., common causes, affected components).
-- Do not include raw log lines or technical stack traces.
-- Keep the summary under 500 words.
-- Use clear, professional language suitable for an engineering report.
-- Focus on key patterns or recurring problems rather than individual details.
-- Do not include any introductory phrases or prefixes like “Here is the summary” or “Summary:”. Output should only contain the summary text.
-- Do NOT expand or explain any abbreviations or short forms. Keep them exactly as they appear
-- If There are No/Empty Logs, Just Return `No logs to provide summary` and don't include any suffix or prefix phrases along with this
+- Provide a clear and detailed explanation of what each error fundamentally represents (e.g., data type mismatch, missing configuration, dependency failure).
+- Describe the probable root cause of each error type, based strictly on patterns or signals present in the logs.
+- Clearly identify the impacted components, modules, workflows, or system boundaries suggested by log context.
+- Explain the operational impact or consequences of the errors (e.g., failed requests, interrupted background tasks, serialization failures).
+- Highlight recurring patterns, repeated failures, or systemic issues indicated across multiple logs.
+- Avoid vague, generic descriptions such as “critical error”, “application failed”, “something went wrong”.
+- Do NOT include stack traces, raw log lines, or filenames in the final summary.
+- Do NOT expand or explain abbreviations; keep all abbreviations exactly as they appear.
+- Maintain strict factual accuracy; do not invent modules, components, or behavior that cannot be reasonably inferred from logs.
+- If no logs are provided or input is empty, return only: `No logs to provide summary`
+- Do NOT add any prefixes or suffixes around the output.
+- Keep total output under 800 words.
+- Use a polished, professional tone suitable for engineering leadership.
 </REQUIREMENTS>
 
 <OUTPUT FORMAT>
-The output is directly used in a HTML Report, follow below instructions:
-- Enclose any important keywords or sentence between `<b>`words to highlight`</b>`, so that these will appear as bold
-- Always Generate the response as bullet points by enclosing each point between `<li>`Generated summary content`</li>`
+- Produce the summary ONLY as bullet points.
+- Each bullet point MUST strictly follow this exact structure:
+  <li>SUMMARY CONTENT GOES HERE</li>
+- The summary content MUST be placed inside the opening <li> and closing </li> tags.
+- Do NOT generate empty <li></li> tags.
+- Do NOT place any text outside of <li>...</li> tags.
+- Bold important keywords or important phrases using: <b> ... </b> within the <li> tags only.
+- Do NOT output any wrapper elements such as <ul>, <ol>, or <div>.
+- If any content cannot be wrapped inside <li> tags, it MUST NOT be generated.
 </OUTPUT FORMAT>
 """
 
 SUMMARY_GENERATION_PROMPT = """
 <TASK>
-You are given a list of error logs. Your goal is to generate a concise summary that captures the key issues across all logs.
+You are given one or more error logs. Your task is to generate a highly descriptive, technically accurate summary that clearly explains the nature of the errors and the underlying issues indicated by the logs.
 </TASK>
 
 <REQUIREMENTS>
-- Summarize the main errors and their nature (e.g., common causes, affected components).
-- Do not include raw log lines or technical stack traces.
-- Keep the summary under 800 words.
-- Use clear, professional language suitable for an engineering report.
-- Focus on key patterns or recurring problems rather than individual details.
-- Do not include any introductory phrases or prefixes like “Here is the summary” or “Summary:”. Output should only contain the summary text.
-- Do NOT expand or explain any abbreviations or short forms. Keep them exactly as they appear
-- If There are No/Empty Logs, Just Return `No logs to provide summary` and don't include any suffix or prefix phrases along with this
+- Provide a clear and detailed explanation of what each error fundamentally represents (e.g., data type mismatch, missing configuration, dependency failure).
+- Describe the probable root cause of each error type, based strictly on patterns or signals present in the logs.
+- Clearly identify the impacted components, modules, workflows, or system boundaries suggested by log context.
+- Explain the operational impact or consequences of the errors (e.g., failed requests, interrupted background tasks, serialization failures).
+- Highlight recurring patterns, repeated failures, or systemic issues indicated across multiple logs.
+- Avoid vague, generic descriptions such as “critical error”, “application failed”, “something went wrong”.
+- Do NOT include stack traces, raw log lines, or filenames in the final summary.
+- Do NOT expand or explain abbreviations; keep all abbreviations exactly as they appear.
+- Maintain strict factual accuracy; do not invent modules, components, or behavior that cannot be reasonably inferred from logs.
+- If no logs are provided or input is empty, return only: `No logs to provide summary`
+- Do NOT add any prefixes or suffixes around the output.
+- Keep total output under 800 words.
+- Use a polished, professional tone suitable for engineering leadership.
 </REQUIREMENTS>
 """
 
@@ -206,20 +222,31 @@ You are given a list of summaries of error logs. Your goal is to generate a conc
 </TASK>
 
 <REQUIREMENTS>
-- Summarize the main errors and their nature (e.g., common causes, affected components).
-- Do not include raw log lines or technical stack traces.
-- Keep the summary less than 10 bullet points.
-- Use clear, professional language suitable for an engineering report.
-- Focus on key patterns or recurring problems rather than individual details.
-- Do not include any introductory phrases or prefixes like “Here is the summary” or “Summary:”. Output should only contain the summary text.
-- Do NOT expand or explain any abbreviations or short forms. Keep them exactly as they appear
-- If There are No/Empty Logs, Just Return `No logs to provide summary` and don't include any suffix or prefix phrases along with this
+- Provide a clear and detailed explanation of what each error fundamentally represents (e.g., data type mismatch, missing configuration, dependency failure).
+- Describe the probable root cause of each error type, based strictly on patterns or signals present in the logs.
+- Clearly identify the impacted components, modules, workflows, or system boundaries suggested by log context.
+- Explain the operational impact or consequences of the errors (e.g., failed requests, interrupted background tasks, serialization failures).
+- Highlight recurring patterns, repeated failures, or systemic issues indicated across multiple logs.
+- Avoid vague, generic descriptions such as “critical error”, “application failed”, “something went wrong”.
+- Do NOT include stack traces, raw log lines, or filenames in the final summary.
+- Do NOT expand or explain abbreviations; keep all abbreviations exactly as they appear.
+- Maintain strict factual accuracy; do not invent modules, components, or behavior that cannot be reasonably inferred from logs.
+- If no logs are provided or input is empty, return only: `No logs to provide summary`
+- Do NOT add any prefixes or suffixes around the output.
+- Keep the summary less than 15 bullet points.
+- Use a polished, professional tone suitable for engineering leadership.
 </REQUIREMENTS>
 
 <OUTPUT FORMAT>
-The output is directly used in a HTML Report, follow below instructions:
-- Enclose any important keywords or sentence between `<b> </b>`, so that these will appear as bold
-- Always Generate the response as bullet points by enclosing each point between `<li>`Generated summary content`</li>`. Each unique point in summary should be a bullet point
+- Produce the summary ONLY as bullet points.
+- Each bullet point MUST strictly follow this exact structure:
+  <li>SUMMARY CONTENT GOES HERE</li>
+- The summary content MUST be placed inside the opening <li> and closing </li> tags.
+- Do NOT generate empty <li></li> tags.
+- Do NOT place any text outside of <li>...</li> tags.
+- Bold important keywords or important phrases using: <b> ... </b> within the <li> tags only.
+- Do NOT output any wrapper elements such as <ul>, <ol>, or <div>.
+- If any content cannot be wrapped inside <li> tags, it MUST NOT be generated.
 </OUTPUT FORMAT>
 """
 

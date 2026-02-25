@@ -369,7 +369,10 @@ class ConnectToMySql(DatabaseConnection):
         return (run_id1, run_id2) if ts1 >= ts2 else (run_id2, run_id1)
 
     def get_regressions(self, test_id_a: str, test_id_b: str):
+        print(f"Run id A: {test_id_a} : Run id B {test_id_b}")
         test_id_a, test_id_b = self.sort_run_ids(test_id_a, test_id_b)
+        print(f"After Sorting Run id A: {test_id_a} : Run id B {test_id_b}")
+
         query = f"""
         SELECT 
             r1.tc_uuid AS tc_uuid,

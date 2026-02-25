@@ -640,11 +640,11 @@ class RegressionAnalysisReport:
 
         regression_html += f"<table><tr><th>Type/Runtime</th>"
         for headers in self.__auto_soc_column_header:
-            regression_html += f"<th>{headers.upper()}</th>"
+            regression_html += f"<th>{headers.capitalize()}</th>"
         regression_html += "</tr>"
 
         for _type, type_data in type_based_data_dict.items():
-            regression_html += f"<tr><th>{_type.upper()}</th>"
+            regression_html += f"<tr><th>{_type.capitalize()}</th>"
             for runtime in self.__auto_soc_column_header:
                 html_path, failure_count = type_data.get(runtime, {}).get("html"), type_data.get(runtime, {}).get(
                     "failure_count", 0
@@ -831,7 +831,7 @@ class CombinedRegressionAnalysis:
             return unique_run_ids_for_qairt_id
 
         print(f"Got all the run ids for qairt id: {qairt_id}: Run IDS: {unique_run_ids_for_qairt_id}")
-        # self.load_regression_analysis_objects(qairt_id)
+        self.load_regression_analysis_objects(qairt_id)
         for _id in unique_run_ids_for_qairt_id:
             """
             Both the object and html should be available for the run_id to skip processing
@@ -913,7 +913,6 @@ class CombinedRegressionAnalysis:
 
     def get_runtime_based_gerrit_row(self, runtime, gerrit_data, rows_span=0):
         print(f"All types of gerrits merged: {gerrit_data.keys()}, runtime: {runtime}")
-        common_gerrits = list(gerrit_data.get("all_runtimes") or [])
         if runtime == "tools":
             runtime_gerrits = list(gerrit_data.get("quantizer") or []) + list(gerrit_data.get("converter") or [])
         else:
@@ -922,13 +921,9 @@ class CombinedRegressionAnalysis:
         seen_jiras = OrderedDefaultDict(set)
         items_html = []
         repository_based_filteration = OrderedDefaultDict(list)
-        source = runtime_gerrits + common_gerrits
-        print(
-            f"Total gerrits: {len(source)}: Common gerrits: {len(common_gerrits)}, {runtime} gerrits: {len(runtime_gerrits)}"
-        )
 
         # Group by repository
-        for gerrit_info in source:
+        for gerrit_info in runtime_gerrits:
             repo = (gerrit_info.get("repository_name") or "").strip()
             repository_based_filteration[repo].append(gerrit_info)
 
@@ -995,16 +990,14 @@ class CombinedRegressionAnalysis:
                 targets_present[kl] = k
 
         extracted = {}
-        targets_count = 0
         for target_name, actual_key in targets_present.items():
             if actual_key is not None:
                 value = data.pop(actual_key, None)  # remove from 'data' in-place
                 if isinstance(value, dict) and value:
                     # Store under target key names: 'converter' / 'quantizer'
                     extracted[target_name] = value
-                    targets_count += 1
 
-        return self.pivot_type_to_runtime(extracted), targets_count
+        return self.pivot_type_to_runtime(extracted)
 
     def pivot_type_to_runtime(self, data: dict, flatten=False) -> dict:
         """
@@ -1122,7 +1115,7 @@ class CombinedRegressionAnalysis:
         qairt_regression_report = (
             f"<html><head><title>Regression Report</title>{REPORT_CSS}</head><body><div class='container'>"
         )
-        qairt_regression_report += f"<h2>Regression Analysis Report ({qairt_id})</h2>"
+        qairt_regression_report += f"<h2>QAIRT Analysis Report ({qairt_id})</h2>"
 
         prev_run_id = None
         combined_runtime_type_json_data = None
@@ -1148,9 +1141,7 @@ class CombinedRegressionAnalysis:
                 prev_run_id
             ].runtime_type_regression_error_data
 
-        converter_quantizer_dict, rows_span_tools = self.extract_converter_quantizer_logs(
-            combined_runtime_type_json_data
-        )
+        converter_quantizer_dict = self.extract_converter_quantizer_logs(combined_runtime_type_json_data)
         combined_runtime_type_json_data = self.pivot_type_to_runtime(combined_runtime_type_json_data)
         list_of_summay_to_avoid = ["no logs to provide", "no logs"]
 
@@ -1164,43 +1155,137 @@ class CombinedRegressionAnalysis:
         if converter_quantizer_dict:
             first_row = True
             for _, runtimes_dict in converter_quantizer_dict.items():
-                for runtime, errors_list in runtimes_dict.items():
-                    logs_summary = get_cummilative_sumary(errors_list)
-                    if any(summay_to_avoid in logs_summary.lower() for summay_to_avoid in list_of_summay_to_avoid):
-                        continue
+                runtimes = runtimes_dict.keys()
+                summaries_list = [get_cummilative_sumary(runtimes_dict[runtime]) for runtime in runtimes]
 
-                    summary_html = f"<ul>{logs_summary}</ul>"
-                    if first_row:
-                        gerrit_cell = self.get_runtime_based_gerrit_row("tools", gerrits_data, rows_span_tools)
-                        qairt_regression_report += (
-                            f"<tr>"
-                            f"<td rowspan='{rows_span_tools}'>Tools</td>"
-                            f"<td>{runtime}</td>"
-                            f"<td>{summary_html}</td>"
-                            f"{gerrit_cell}"
-                            f"</tr>"
-                        )
-                        first_row = False
-                    else:
-                        qairt_regression_report += f"<tr>" f"<td>{runtime}</td>" f"<td>{summary_html}</td" f"</tr>"
+                summary_idx_to_avoid = []
+                for idx, summary in enumerate(summaries_list):
+                    if any(summay_to_avoid in summary.lower() for summay_to_avoid in list_of_summay_to_avoid):
+                        summary_idx_to_avoid.append(idx)
 
+                updated_runtimes = []
+                for idx, runtime in enumerate(runtimes):
+                    if idx not in summary_idx_to_avoid:
+                        updated_runtimes.append((runtime, idx))
+
+                runtimes = updated_runtimes
+                rowspan = len(runtimes)
+
+                if rowspan:
+                    for runtime, idx in runtimes:
+                        summary_html = f"<ul>{summaries_list[idx]}</ul>"
+                        if first_row:
+                            gerrit_cell = self.get_runtime_based_gerrit_row("tools", gerrits_data, rowspan)
+                            qairt_regression_report += (
+                                f"<tr>"
+                                f"<td rowspan='{rowspan}'>Tools</td>"
+                                f"<td>{runtime.capitalize()}</td>"
+                                f"<td><ul>{summary_html}</ul></td>"
+                                f"{gerrit_cell}"
+                                f"</tr>"
+                            )
+                            first_row = False
+                        else:
+                            qairt_regression_report += (
+                                f"<tr>" f"<td>{runtime.capitalize()}</td>" f"<td><ul>{summary_html}</ul></td>" f"</tr>"
+                            )
+        core_data = []
+        # process CPU seprately
+        if "cpu" in combined_runtime_type_json_data:
+            current_runtime = "cpu"
+            types_dict = combined_runtime_type_json_data[current_runtime]
+
+            # adding graph prepare section if exists
+            if "savecontext" in types_dict or "graph_prepare" in types_dict:
+                graph_prepare_row_data = []
+                savecontext_data = types_dict.get("savecontext") or ""
+                gprepare_data = types_dict.get("graph_prepare") or ""
+
+                if savecontext_data:
+                    savecontext_summary = get_cummilative_sumary(savecontext_data)
+                    graph_prepare_row_data.append(("savecontext", savecontext_summary))
+                    del types_dict["savecontext"]
+
+                if gprepare_data:
+                    gprepare_summary = get_cummilative_sumary(gprepare_data)
+                    graph_prepare_row_data.append(("graph prepare", gprepare_summary))
+                    del types_dict["graph_prepare"]
+
+                for data in graph_prepare_row_data:
+                    if any(summay_to_avoid in data[1].lower() for summay_to_avoid in list_of_summay_to_avoid):
+                        graph_prepare_row_data.remove(data)
+
+                rowspan = len(graph_prepare_row_data)
+                if rowspan:
+                    first_runtime = graph_prepare_row_data[0][0]
+                    first_summary = graph_prepare_row_data[0][1]
+                    gerrit_cell = self.get_runtime_based_gerrit_row("htp", gerrits_data, rowspan)
+                    qairt_regression_report += (
+                        f"<tr>"
+                        f"<td rowspan='{rowspan}'>Graph Prepare</td>"
+                        f"<td>{first_runtime}</td>"
+                        f"<td><ul>{first_summary}</ul></td>"
+                        f"{gerrit_cell}"
+                        f"</tr>"
+                    )
+                    for runtime, summary in runtimes[1:]:
+                        qairt_regression_report += f"<tr>" f"<td>{runtime}</td>" f"<td><ul>{summary}</ul></td>" f"</tr>"
+
+            types_to_process_cpu = ["inference", "verifier", "bm_regression"]
+            all_cpu_types = list(types_dict.keys())
+            all_cpu_summaries = [get_cummilative_sumary(types_dict[_type]) for _type in all_cpu_types]
+
+            summary_idx_to_avoid = []
+            for idx, summary in enumerate(all_cpu_summaries):
+                if not any(summay_to_avoid in summary.lower() for summay_to_avoid in list_of_summay_to_avoid):
+                    if all_cpu_types[idx] not in types_to_process_cpu and all_cpu_types[idx] != "benchmark":
+                        core_data.append((all_cpu_types[idx], summary))
+                        summary_idx_to_avoid.append(idx)
+                else:
+                    summary_idx_to_avoid.append(idx)
+
+            updated_cpu_types = []
+            for idx, runtime in enumerate(all_cpu_types):
+                if idx not in summary_idx_to_avoid:
+                    updated_cpu_types.append((runtime, idx))
+
+            runtimes = updated_cpu_types
+            rowspan = len(runtimes)
+            if rowspan:
+                first_runtime = runtimes[0][0]
+                first_summary = all_cpu_summaries[runtimes[0][1]]
+                gerrit_cell = self.get_runtime_based_gerrit_row(current_runtime, gerrits_data, rowspan)
+                qairt_regression_report += (
+                    f"<tr>"
+                    f"<td rowspan='{rowspan}'>Cpu</td>"
+                    f"<td>{first_runtime}</td>"
+                    f"<td><ul>{first_summary}</ul></td>"
+                    f"{gerrit_cell}"
+                    f"</tr>"
+                )
+                for runtime, idx in runtimes[1:]:
+                    summary = all_cpu_summaries[idx]
+                    qairt_regression_report += f"<tr>" f"<td>{runtime}</td>" f"<td><ul>{summary}</ul></td>" f"</tr>"
+            del combined_runtime_type_json_data["cpu"]
+
+        # add all rows apart from tools
         for current_runtime, types_dict in combined_runtime_type_json_data.items():
             runtimes = list(types_dict.keys())
-            summaries_list = [get_cummilative_sumary(types_dict[runtime]) for runtime in runtimes]
+            cpu_summaries_list = [get_cummilative_sumary(types_dict[runtime]) for runtime in runtimes]
             summary_idx_to_avoid = []
-            for idx, summary in enumerate(summaries_list):
+            for idx, summary in enumerate(cpu_summaries_list):
                 if any(summay_to_avoid in summary.lower() for summay_to_avoid in list_of_summay_to_avoid):
                     summary_idx_to_avoid.append(idx)
             updated_runtimes = []
             for idx, runtime in enumerate(runtimes):
-                if idx not in summary_idx_to_avoid:
+                if idx not in summary_idx_to_avoid and runtime != "benchmark":
                     updated_runtimes.append((runtime, idx))
 
             runtimes = updated_runtimes
             rowspan = len(runtimes)
             if rowspan:
                 first_runtime = runtimes[0][0]
-                first_summary = summaries_list[runtimes[0][1]]
+                first_summary = cpu_summaries_list[runtimes[0][1]]
                 gerrit_cell = self.get_runtime_based_gerrit_row(current_runtime, gerrits_data, rowspan)
                 qairt_regression_report += (
                     f"<tr>"
@@ -1211,8 +1296,28 @@ class CombinedRegressionAnalysis:
                     f"</tr>"
                 )
                 for runtime, idx in runtimes[1:]:
-                    summary = summaries_list[idx]
+                    summary = cpu_summaries_list[idx]
                     qairt_regression_report += f"<tr>" f"<td>{runtime}</td>" f"<td><ul>{summary}</ul></td>" f"</tr>"
+
+        gerrit_cell = self.get_runtime_based_gerrit_row("all_runtimes", gerrits_data, rowspan)
+        if core_data:
+            rowspan = len(core_data)
+            if rowspan:
+                first_runtime = core_data[0][0]
+                first_summary = core_data[0][1]
+                qairt_regression_report += (
+                    f"<tr>"
+                    f"<td rowspan='{rowspan}'>Core</td>"
+                    f"<td>{first_runtime}</td>"
+                    f"<td><ul>{first_summary}</ul></td>"
+                    f"{gerrit_cell}"
+                    f"</tr>"
+                )
+                for runtime, summary in core_data[1:]:
+                    qairt_regression_report += f"<tr>" f"<td>{runtime}</td>" f"<td><ul>{summary}</ul></td>" f"</tr>"
+        else:
+            qairt_regression_report += f"<tr>" f"<td>Core</td>" f"<td>-</td>" f"<td>-</td>" f"{gerrit_cell}" f"</tr>"
+
         qairt_regression_report += "</table>"
         bu_summary_path = self.generate_bu_regression_report(qairt_id)
 

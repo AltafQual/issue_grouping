@@ -31,7 +31,7 @@ from src.constants import (
     ErrorLogConfigurations,
     FaissConfigurations,
     FaissDBPath,
-    regex_based_filteration_patterns
+    regex_based_filteration_patterns,
 )
 from src.custom_clustering import CustomEmbeddingCluster
 from src.db_connections import ConnectToMySql
@@ -540,6 +540,9 @@ async def fuzzy_cluster_grouping(
 
 
 def clean_excel_string(text):
+    if not isinstance(text, str):
+        return text
+
     # Remove all illegal XML characters (Excel uses XML internally)
     # Covers ASCII control chars and DEL
     cleaned = re.sub(r"[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]", "", text)
@@ -551,26 +554,46 @@ def clean_excel_string(text):
 
 
 @execution_timer
-def create_excel_with_clusters(df: pd.DataFrame, cluster_column: str, columns_to_include=None) -> pd.ExcelFile:
+def create_excel_with_clusters(df: pd.DataFrame, cluster_column: str, columns_to_include=None) -> BytesIO:
     output = BytesIO()
+    sheet_created = False
+
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        for cluster in df[cluster_column].unique():
+        if cluster_column not in df.columns:
+            raise ValueError(f"{cluster_column} not found in DataFrame")
+
+        for cluster in df[cluster_column].dropna().unique():
             if isinstance(cluster, str) and cluster.strip():
                 sheet_name = str(cluster)[:31]
                 cluster_df = df[df[cluster_column] == cluster]
+
                 if columns_to_include:
                     cluster_df = cluster_df[columns_to_include]
+
+                if cluster_df.empty:
+                    continue
+
                 if DataFrameKeys.preprocessed_text_key in cluster_df.columns:
                     cluster_df[DataFrameKeys.preprocessed_text_key] = cluster_df[
                         DataFrameKeys.preprocessed_text_key
                     ].apply(clean_excel_string)
+
                 if DataFrameKeys.error_reason in cluster_df.columns:
                     cluster_df[DataFrameKeys.error_reason] = cluster_df[DataFrameKeys.error_reason].apply(
                         clean_excel_string
                     )
+
                 cluster_df.to_excel(writer, sheet_name=sheet_name, index=False)
+                sheet_created = True
+
             else:
-                print(f"Empty/No cluster name exists in {cluster_column}")
+                print(f"Skipping invalid cluster value: {repr(cluster)}")
+
+        if not sheet_created:
+            pd.DataFrame({"Message": ["No valid clusters available to export"]}).to_excel(
+                writer, sheet_name="Info", index=False
+            )
+
     output.seek(0)
     return output
 
