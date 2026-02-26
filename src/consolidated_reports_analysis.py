@@ -69,7 +69,6 @@ REPORT_CSS = """
         margin-bottom: 25px;
         background-color: white;
         border: 1px solid var(--border-color);
-        table-layout: fixed;
     }
 
     th, td {
@@ -79,6 +78,7 @@ REPORT_CSS = """
         font-size: 0.95em;
         vertical-align: top;
         word-wrap: break-word;
+        overflow-wrap: normal;
     }
 
     th {
@@ -192,7 +192,7 @@ def get_cummilative_sumary(errors, filter=True, custom_filter=None):
 
 
 @execution_timer
-def generate_executive_summary(soc_errors_list, model_error_list, filter=True):
+def generate_executive_summary(soc_errors_list=None, model_error_list=None, filter=True):
     def ensure_td(summary_html: str) -> str:
         if summary_html and "<td" in summary_html.lower():
             return summary_html
@@ -224,14 +224,18 @@ def generate_executive_summary(soc_errors_list, model_error_list, filter=True):
     </style>
     """
 
-    executive_summary = (
-        inline_css + "<table class='exec-summary'>" "<tr><th>SOC/RunTime Summary</th><th>Model Summary</th></tr>"
-    )
+    if model_error_list:
+        executive_summary = (
+            inline_css + "<table class='exec-summary'>" "<tr><th>SOC/RunTime Summary</th><th>Model Summary</th></tr>"
+        )
+        soc_runtime_summary = get_cummilative_sumary(soc_errors_list, filter)
+        model_summary = get_cummilative_sumary(model_error_list, filter)
+        executive_summary += "<tr>" f"{ensure_td(soc_runtime_summary)}" f"{ensure_td(model_summary)}" "</tr>" "</table>"
+    else:
+        executive_summary = inline_css + "<table class='exec-summary'>" "<tr><th>SOC/RunTime Summary</th></tr>"
+        soc_runtime_summary = get_cummilative_sumary(soc_errors_list, filter)
+        executive_summary += "<tr>" f"{ensure_td(soc_runtime_summary)}" "</tr>" "</table>"
 
-    soc_runtime_summary = get_cummilative_sumary(soc_errors_list, filter)
-    model_summary = get_cummilative_sumary(model_error_list, filter)
-
-    executive_summary += "<tr>" f"{ensure_td(soc_runtime_summary)}" f"{ensure_td(model_summary)}" "</tr>" "</table>"
     return executive_summary
 
 
@@ -392,7 +396,6 @@ class RegressionAnalysisReport:
         return error_summary
 
     def __filter_reason_and_get_qgenie_summary(self, failure_data):
-
         inline_css = """
             <style>
             table { table-layout: fixed; width: 100%; border-collapse: collapse; }
@@ -831,7 +834,7 @@ class CombinedRegressionAnalysis:
             return unique_run_ids_for_qairt_id
 
         print(f"Got all the run ids for qairt id: {qairt_id}: Run IDS: {unique_run_ids_for_qairt_id}")
-        self.load_regression_analysis_objects(qairt_id)
+        # self.load_regression_analysis_objects(qairt_id)
         for _id in unique_run_ids_for_qairt_id:
             """
             Both the object and html should be available for the run_id to skip processing
@@ -868,26 +871,29 @@ class CombinedRegressionAnalysis:
         file_name = "gerrits_regression_report.html"
         file_path = os.path.join(output_dir, file_name)
 
-        gerrits_merged_count = 0
         html_content = f"<html><head><title>Gerrits Merged</title>{REPORT_CSS}</head><body><div class='container'><h2>List of Gerrits merged in {qairt_id}</h2>"
+        project_wise_gerrits = OrderedDefaultDict(list)
+        unique_gerrits = set()
+        for _, runtime_based_gerrit_data in gerrits_information.items():
+            for _, backend_gerrit_data in runtime_based_gerrit_data.items():
+                for gerrit_data in backend_gerrit_data:
+                    if gerrit_data["commit_url"] not in unique_gerrits:
+                        project_wise_gerrits[gerrit_data["repository_name"]].append(gerrit_data)
+                        unique_gerrits.add(gerrit_data["commit_url"].lower())
 
-        for repo_name, gerrit_data in gerrits_information.items():
+        for repo_name, gerrits_data in project_wise_gerrits.items():
             html_content += f"<h3>Repository Name: {repo_name}</h3>"
-            html_content += "<table border='1'><tr><th>Gerrit Raised By</th><th>Email</th><th>Commit Message</th><th>Gerrit Link</th></tr>"
-            unique_gerrits = set()
-            for data in gerrit_data:
-                if data["commit_url"] not in unique_gerrits:
-                    commit_url = f"<a href='{data['commit_url']}' target='_blank'>Gerrit</a>"
-                    html_content += f"<tr><td>{data['gerrit_raised_by'][0]['name']}</td><td>{data['gerrit_raised_by'][0]['email']}</td><td>{data['commit_message']}</td><td>{commit_url}</td></tr>"
-                    unique_gerrits.add(data["commit_url"].lower())
-                    gerrits_merged_count += 1
+            for data in gerrits_data:
+                html_content += "<table border='1'><tr><th>Gerrit Raised By</th><th>Email</th><th>Commit Message</th><th>Gerrit Link</th></tr>"
+                commit_url = f"<a href='{data['commit_url']}' target='_blank'>Gerrit</a>"
+                html_content += f"<tr><td>{data['gerrit_raised_by'][0]['name']}</td><td>{data['gerrit_raised_by'][0]['email']}</td><td>{data['commit_message']}</td><td>{commit_url}</td></tr>"
             html_content += "</table>"
 
         html_content += "</body></html>"
         with open(file_path, "w") as f:
             f.write(html_content)
 
-        return "https://aisw-hyd.qualcomm.com/fs/" + file_path, gerrits_merged_count
+        return "https://aisw-hyd.qualcomm.com/fs/" + file_path
 
     def _get_gerrits_data(self, runtime_first=False):
         gerrits_data = None
@@ -1072,17 +1078,15 @@ class CombinedRegressionAnalysis:
                     updated_run_ids.append(run_id)
             qairt_regression_report += self.list_to_html_ul(updated_run_ids)
 
-            soc_errors_list, model_error_list = [], []
+            soc_errors_list = []
             for run_id in run_ids:
                 if self._regression_analysis_object[run_id]:
                     soc_errors_list.extend(self._regression_analysis_object[run_id].error_summary_list)
-                    model_error_list.extend(self._regression_analysis_object[run_id].model_regressed_errors_list)
 
             self.combined_soc_errors_list.extend(soc_errors_list)
-            self.combined_model_errros_list.extend(model_error_list)
 
-            print(f"Total errors: {len(soc_errors_list)}, Total model errors: {len(model_error_list)}")
-            qairt_regression_report += generate_executive_summary(soc_errors_list, model_error_list)
+            print(f"Total errors: {len(soc_errors_list)}")
+            qairt_regression_report += generate_executive_summary(soc_errors_list)
 
         qairt_regression_report += "</div></body></html>"
         with open(qairt_regression_report_path, "w") as f:
@@ -1257,7 +1261,7 @@ class CombinedRegressionAnalysis:
                 gerrit_cell = self.get_runtime_based_gerrit_row(current_runtime, gerrits_data, rowspan)
                 qairt_regression_report += (
                     f"<tr>"
-                    f"<td rowspan='{rowspan}'>Cpu</td>"
+                    f"<td rowspan='{rowspan}'>cpu</td>"
                     f"<td>{first_runtime}</td>"
                     f"<td><ul>{first_summary}</ul></td>"
                     f"{gerrit_cell}"
@@ -1299,7 +1303,8 @@ class CombinedRegressionAnalysis:
                     summary = cpu_summaries_list[idx]
                     qairt_regression_report += f"<tr>" f"<td>{runtime}</td>" f"<td><ul>{summary}</ul></td>" f"</tr>"
 
-        gerrit_cell = self.get_runtime_based_gerrit_row("all_runtimes", gerrits_data, rowspan)
+        gerrit_cell = self.generate_gerrits_merged_report()
+        gerrit_cell = f"<a href='{gerrit_cell}'>All Merged Gerrits</a>"
         if core_data:
             rowspan = len(core_data)
             if rowspan:
@@ -1310,17 +1315,18 @@ class CombinedRegressionAnalysis:
                     f"<td rowspan='{rowspan}'>Core</td>"
                     f"<td>{first_runtime}</td>"
                     f"<td><ul>{first_summary}</ul></td>"
-                    f"{gerrit_cell}"
+                    f"<td>{gerrit_cell}</td>"
                     f"</tr>"
                 )
                 for runtime, summary in core_data[1:]:
                     qairt_regression_report += f"<tr>" f"<td>{runtime}</td>" f"<td><ul>{summary}</ul></td>" f"</tr>"
         else:
-            qairt_regression_report += f"<tr>" f"<td>Core</td>" f"<td>-</td>" f"<td>-</td>" f"{gerrit_cell}" f"</tr>"
-
+            qairt_regression_report += (
+                f"<tr>" f"<td>Core</td>" f"<td>-</td>" f"<td>-</td>" f"<td>{gerrit_cell}</td>" f"</tr>"
+            )
         qairt_regression_report += "</table>"
-        bu_summary_path = self.generate_bu_regression_report(qairt_id)
 
+        bu_summary_path = self.generate_bu_regression_report(qairt_id)
         qairt_regression_report += "<h3> BU Summary Page </h3>"
         qairt_regression_report += self.list_to_html_ul(
             [f"<a href='https://aisw-hyd.qualcomm.com/fs/{bu_summary_path}' target='_blank'>BU Summary Page</a>"]
