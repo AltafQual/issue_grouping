@@ -389,24 +389,31 @@ async def get_run_id_cluster_info(cluster_info_object: OneClusterInfo) -> Dict:
         result = TTL_CACHE[cluster_info_object.run_id]
         result["time_taken"] = round(time.time() - start_time)
         return result
+    cols_to_keep = [
+        "tc_uuid",
+        "model_name",
+        "soc_name",
+        "runtime",
+        "type",
+        "result",
+        "score",
+        "reason",
+        "tags",
+        "converter_options",
+        "quantize_options",
+        "inference_options",
+        "graph_prepare",
+        "graph_execute",
+        "jira_id",
+        "log",
+        DataFrameKeys.cluster_name,
+        DataFrameKeys.cluster_class,
+    ]
 
     clustered_response = await helpers.async_sequential_process_by_type(dataframe)
     try:
         for test_type, df in clustered_response.items():
-            df = df.drop(
-                columns=[
-                    col
-                    for col in [
-                        DataFrameKeys.embeddings_key,
-                        DataFrameKeys.bins,
-                        DataFrameKeys.error_logs_length,
-                        DataFrameKeys.cluster_type_int,
-                        DataFrameKeys.preprocessed_text_key,
-                        DataFrameKeys.grouped_from_faiss,
-                    ]
-                    if col in df.columns
-                ]
-            )
+            df = df[df.columns.intersection(cols_to_keep)]
             response.type[test_type] = {}
             for runtime, runtime_df in df.groupby("runtime"):
                 response.type[test_type][runtime] = {}
