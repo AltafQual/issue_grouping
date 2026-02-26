@@ -834,7 +834,7 @@ class CombinedRegressionAnalysis:
             return unique_run_ids_for_qairt_id
 
         print(f"Got all the run ids for qairt id: {qairt_id}: Run IDS: {unique_run_ids_for_qairt_id}")
-        # self.load_regression_analysis_objects(qairt_id)
+        self.load_regression_analysis_objects(qairt_id)
         for _id in unique_run_ids_for_qairt_id:
             """
             Both the object and html should be available for the run_id to skip processing
