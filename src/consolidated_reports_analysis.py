@@ -1215,9 +1215,9 @@ class CombinedRegressionAnalysis:
                     graph_prepare_row_data.append(("graph prepare", gprepare_summary))
                     del types_dict["graph_prepare"]
 
-                for data in graph_prepare_row_data:
-                    if any(summay_to_avoid in data[1].lower() for summay_to_avoid in list_of_summay_to_avoid):
-                        graph_prepare_row_data.remove(data)
+                for idx, data in enumerate(graph_prepare_row_data):
+                    if any(summary_to_avoid in data[1].lower() for summary_to_avoid in list_of_summay_to_avoid):
+                        graph_prepare_row_data.pop(idx)
 
                 rowspan = len(graph_prepare_row_data)
                 if rowspan:
