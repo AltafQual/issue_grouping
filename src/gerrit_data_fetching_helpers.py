@@ -247,7 +247,7 @@ async def get_regression_gerrits_based_of_type(run_id_a, run_id_b, type_backend_
         backend_names = []
         added_to_any_backend = False
         for bck_name, list_of_config in GERRIT_CONFIGURATION.gerrit_backend_configuration.items():
-            if repo_name in list_of_config:
+            if any(repo_name == config for config in list_of_config):
                 backend_names.append(bck_name)
                 added_to_any_backend = True
 

@@ -375,7 +375,7 @@ async def initiate_consolidated_report_regression_analysis(
     response_model=OneClusterInfoResponse,
     status_code=200,
 )
-async def get_two_run_ids_cluster_info(cluster_info_object: OneClusterInfo) -> Dict:
+async def get_run_id_cluster_info(cluster_info_object: OneClusterInfo) -> Dict:
     start_time = time.time()
     response = OneClusterInfoResponse()
     response.run_id = cluster_info_object.run_id
