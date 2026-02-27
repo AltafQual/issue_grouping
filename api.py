@@ -411,8 +411,8 @@ async def get_run_id_cluster_info(cluster_info_object: OneClusterInfo) -> Dict:
         DataFrameKeys.cluster_class,
     ]
 
-    clustered_response = await helpers.async_sequential_process_by_type(dataframe)
     try:
+        clustered_response = await helpers.async_sequential_process_by_type(dataframe)
         for test_type, df in clustered_response.items():
             df = df[df.columns.intersection(cols_to_keep)]
             response.type[test_type] = {}
@@ -427,15 +427,16 @@ async def get_run_id_cluster_info(cluster_info_object: OneClusterInfo) -> Dict:
                 if model_name not in response.model:
                     response.model[model_name] = []
                 response.model[model_name].extend(model_cluster_details)
-        else:
-            response.status = 404
-            response.error_message = f"No data Found for runid: {cluster_info_object.run_id}"
     except Exception as e:
         logger.exception(f"{cluster_info_object.run_id}: Exception occured while finding regression: {e}")
         response.status = 500
 
+    if not response.type:
+        response.status = 404
+        response.error_message = f"No data Found for runid: {cluster_info_object.run_id}"
+    
     if response.status == 200:
-        TTL_CACHE[cluster_info_object.run_id] = result
+        TTL_CACHE[cluster_info_object.run_id] = response
 
     response.time_taken = round(time.time() - start_time, 2)
     return response.to_dict()
