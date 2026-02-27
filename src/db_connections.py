@@ -172,13 +172,22 @@ class ConnectToMySql(DatabaseConnection):
         Returns:
             DataFrame containing test plan results
         """
-        with self.connection_context() as cnx:
-            query = f'select * from result where testplan_id = "{runid}";'
-            df = pd.read_sql(query, cnx)
-            if df.empty:
-                logger.info(f"No Data Found for runid: {runid}")
-                return pd.DataFrame()
-            return df
+
+        def _get_df(table):
+            with self.connection_context() as cnx:
+                print(f"Checking in result table: {table}")
+                query = f'select * from {table} where testplan_id = "{runid}";'
+                return pd.read_sql(query, cnx)
+
+        df = pd.DataFrame()
+        tables_to_check = self._get_past_result_table_names(include_result=True)
+        for table in tables_to_check:
+            df = _get_df(table)
+            if not df.empty:
+                return df
+            print(f"No Data Found for runid: {runid} in table: {table}")
+
+        return df
 
     def fetch_data(self, query: str) -> pd.DataFrame:
         """
@@ -368,39 +377,72 @@ class ConnectToMySql(DatabaseConnection):
         ts1, ts2 = extract_ts(run_id1), extract_ts(run_id2)
         return (run_id1, run_id2) if ts1 >= ts2 else (run_id2, run_id1)
 
+    def _get_past_result_table_names(self, num_of_months_to_check=5, include_result=False):
+        now = datetime.now()
+        year, month = now.year, now.month
+        results_list = []
+
+        # start from the results table and add old tables
+        if include_result:
+            results_list.append("result")
+
+        for backtrack in range(1, num_of_months_to_check):  # check previous 3 months result table
+            m = month - backtrack
+            y = year
+            if m <= 0:
+                m += 12
+                y -= 1
+
+            if m <= 9:
+                results_list.append(f"result_{y}_0{m}")
+            else:
+                results_list.append(f"result_{y}_{m}")
+
+        return results_list
+
     def get_regressions(self, test_id_a: str, test_id_b: str):
+        def _get_df(table):
+            print(f"Checking in result table: {table}")
+            query = f"""
+            SELECT 
+                r1.tc_uuid AS tc_uuid,
+                r1.model_name AS name,
+                r1.soc_name AS soc_name,
+                r1.runtime AS runtime,
+                r1.type AS type,
+                r1.result AS result,
+                r1.score AS score,
+                r1.reason AS reason,
+                r1.tags as tags,
+                r1.converter_options as converter_options,
+                r1.quantize_options as quantize_options,
+                r1.inference_options as inference_options,
+                r1.graph_prepare as graph_prepare,
+                r1.graph_execute as graph_execute,
+                r1.jira_id as jira_id,
+                r1.log as log_path
+                            
+            FROM {table} r1
+            JOIN {table} r2 ON r1.tc_uuid = r2.tc_uuid
+            WHERE r1.testplan_id = "{test_id_a}"
+            AND r2.testplan_id = "{test_id_b}"
+            AND r1.result = 'FAIL'
+            AND r2.result ='PASS'
+            """
+            with self.connection_context() as cnx:
+                return pd.read_sql(query, cnx)
+
         print(f"Run id A: {test_id_a} : Run id B {test_id_b}")
         test_id_a, test_id_b = self.sort_run_ids(test_id_a, test_id_b)
         print(f"After Sorting Run id A: {test_id_a} : Run id B {test_id_b}")
 
-        query = f"""
-        SELECT 
-            r1.tc_uuid AS tc_uuid,
-            r1.model_name AS name,
-            r1.soc_name AS soc_name,
-            r1.runtime AS runtime,
-            r1.type AS type,
-            r1.result AS result,
-            r1.score AS score,
-            r1.reason AS reason,
-            r1.tags as tags,
-            r1.converter_options as converter_options,
-            r1.quantize_options as quantize_options,
-            r1.inference_options as inference_options,
-            r1.graph_prepare as graph_prepare,
-            r1.graph_execute as graph_execute,
-            r1.jira_id as jira_id,
-            r1.log as log_path
-                           
-        FROM result r1
-        JOIN result r2 ON r1.tc_uuid = r2.tc_uuid
-        WHERE r1.testplan_id = "{test_id_a}"
-        AND r2.testplan_id = "{test_id_b}"
-        AND r1.result = 'FAIL'
-        AND r2.result ='PASS'
-        """
-        with self.connection_context() as cnx:
-            df = pd.read_sql(query, cnx)
+        df = pd.DataFrame()
+        dates_to_check = self._get_past_result_table_names(include_result=True)
+        for table in dates_to_check:
+            df = _get_df(table)
+            if not df.empty:
+                return df
+
         return df
 
     def get_model_ops(self, models_list):

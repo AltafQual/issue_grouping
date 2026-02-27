@@ -389,6 +389,7 @@ async def get_run_id_cluster_info(cluster_info_object: OneClusterInfo) -> Dict:
         result = TTL_CACHE[cluster_info_object.run_id]
         result["time_taken"] = round(time.time() - start_time)
         return result
+    
     cols_to_keep = [
         "tc_uuid",
         "model_name",
