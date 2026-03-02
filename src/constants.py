@@ -60,18 +60,18 @@ class ErrorLogConfigurations:
 class GERRIT_CONFIGURATION:
     gerrit_info_path: str = "/prj/qct/webtech_hyd11/pgbs/output/tag_info.json"
     gerrit_backend_configuration: ClassVar[Dict[Tuple[str, ...], str]] = {
+        "cpu": ("qnn-cpu",),
         "htp_fp16": ("mlg-infra", "qnn-htp", "manifest", "genie"),
         "htp": ("mlg-infra", "qnn-htp", "manifest", "genie"),
-        "cpu": ("qnn-cpu"),
-        "gpu": ("qnn-gpu"),
-        "gpu_fp16": ("qnn-gpu"),
-        "lpai": ("qnn-eai"),
+        "gpu": ("qnn-gpu",),
+        "gpu_fp16": ("qnn-gpu",),
+        "lpai": ("qnn-eai",),
         "common": ("qnn", "qnn_qti", "mlg", "ml", "api"),
-        "converter": ("modeltools"),
+        "converter": ("modeltools",),
         "quantizer": ("modeltools", "qnn-cpu"),
         "mcp": ("mlg-infra", "qnn-htp", "manifest", "genie"),
         "mcp_x86": ("mlg-infra", "qnn-htp", "manifest", "genie"),
-        "hta": ("hta"),
+        "hta": ("hta",),
         "gpu:cpu": ("qnn-cpu", "qnn-gpu"),
     }
 

@@ -366,16 +366,31 @@ class ConnectToMySql(DatabaseConnection):
     def sort_run_ids(self, run_id1: str, run_id2: str):
         """
         Sort two run IDs so that the latest (based on embedded timestamp) is first.
-        Assumes timestamp is the 12-digit part after 'vX.X.X.' and before underscore.
-        Example: v2.44.0.260112072337_193906 → timestamp = 260112072337
+        Assumes timestamp is a 12-digit part immediately after 'vX.Y.Z.' and before a separator.
+        Examples:
+        - v2.45.0.260224074830-pt_nightly  -> timestamp = 260224074830
+        - v2.44.0.260112072337_193906-pt_nightly   -> timestamp = 260112072337
         """
 
-        def extract_ts(run_id):
-            m = re.search(r"v\d+\.\d+\.\d+\.(\d{12})_", run_id)
-            return int(m.group(1)) if m else 0
+        main_pat = re.compile(r"v\d+\.\d+\.\d+\.([0-9]{12})(?=[_-]|$)")
+        fallback_pat = re.compile(r"(\d{12})(?!\d)")
+
+        def extract_ts(run_id: str) -> int:
+            m = main_pat.search(run_id)
+            if m:
+                return int(m.group(1))
+            m2 = None
+            for m2 in fallback_pat.finditer(run_id):
+                pass
+            return int(m2.group(1)) if m2 else -1
 
         ts1, ts2 = extract_ts(run_id1), extract_ts(run_id2)
-        return (run_id1, run_id2) if ts1 >= ts2 else (run_id2, run_id1)
+
+        # Put the larger (latest) timestamp first. If equal, keep stable order.
+        if ts1 >= ts2:
+            return (run_id1, run_id2)
+        else:
+            return (run_id2, run_id1)
 
     def _get_past_result_table_names(self, num_of_months_to_check=5, include_result=False):
         now = datetime.now()

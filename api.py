@@ -389,7 +389,7 @@ async def get_run_id_cluster_info(cluster_info_object: OneClusterInfo) -> Dict:
         result = TTL_CACHE[cluster_info_object.run_id]
         result.time_taken = round(time.time() - start_time)
         return result.to_dict()
-    
+
     cols_to_keep = [
         "tc_uuid",
         "model_name",
@@ -410,11 +410,16 @@ async def get_run_id_cluster_info(cluster_info_object: OneClusterInfo) -> Dict:
         DataFrameKeys.cluster_name,
         DataFrameKeys.cluster_class,
     ]
+    column_names_to_rename = {"model_name": "name", "log": "log_path"}
 
     try:
         clustered_response = await helpers.async_sequential_process_by_type(dataframe)
         for test_type, df in clustered_response.items():
             df = df[df.columns.intersection(cols_to_keep)]
+            for col_name in column_names_to_rename:
+                if col_name in df.columns:
+                    df.rename(columns={col_name: column_names_to_rename[col_name]}, inplace=True)
+
             response.type[test_type] = {}
             for runtime, runtime_df in df.groupby("runtime"):
                 response.type[test_type][runtime] = {}
@@ -422,7 +427,7 @@ async def get_run_id_cluster_info(cluster_info_object: OneClusterInfo) -> Dict:
                     cluster_entries = cluster_df.to_dict(orient="records")
                     response.type[test_type][runtime][cluster_name] = cluster_entries
 
-            for model_name, model_df in df.groupby("model_name"):
+            for model_name, model_df in df.groupby("name"):
                 model_cluster_details = model_df.to_dict(orient="records")
                 if model_name not in response.model:
                     response.model[model_name] = []
@@ -434,7 +439,7 @@ async def get_run_id_cluster_info(cluster_info_object: OneClusterInfo) -> Dict:
     if not response.type:
         response.status = 404
         response.error_message = f"No data Found for runid: {cluster_info_object.run_id}"
-    
+
     if response.status == 200:
         TTL_CACHE[cluster_info_object.run_id] = response
 
