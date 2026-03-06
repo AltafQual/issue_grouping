@@ -1519,7 +1519,8 @@ def run_report_generation_for_all_qairt_ids():
     qairt_ids = sorted(os.listdir(CONSOLIDATED_REPORTS.path), reverse=True)
     qairt_ids = [q for q in qairt_ids if q.startswith("qaisw")]
     qairt_ids = [q for q in qairt_ids if should_process_id(q)]
-
+    print(f"Processing: {len(qairt_ids)} Qairt Ids")
+    
     for qairt_id in qairt_ids:
         if qairt_id.startswith("qaisw"):
             try:
