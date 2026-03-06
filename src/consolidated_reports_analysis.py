@@ -4,9 +4,12 @@ import re
 from collections import OrderedDict
 from collections.abc import Mapping
 from copy import deepcopy
+from datetime import date
 from html import escape
+from typing import Any, Dict
 
 import pandas as pd
+from dateutil.relativedelta import relativedelta
 from joblib import dump, load
 
 from src.constants import CONSOLIDATED_REPORTS
@@ -16,6 +19,7 @@ from src.regression_api_call import get_two_run_ids_cluster_info
 
 logger = logging.getLogger(__name__)
 
+NUM_FAILURES_TO_SHOW = 5
 REPORT_CSS = """
 <style>
     :root {
@@ -181,14 +185,16 @@ def filter_error_logs(error_logs_list, custom_filter_list=None):
 
 
 @execution_timer
-def get_cummilative_sumary(errors, filter=True, custom_filter=None):
+def get_cummilative_sumary(errors, filter=True, custom_filter=None, short_summary=False):
     from src.qgenie import cummilative_summary_generation
 
     if filter:
         print("Filter enabled, filtering logs")
-        return cummilative_summary_generation(filter_error_logs(errors, custom_filter))
+        return cummilative_summary_generation(
+            filter_error_logs(errors, custom_filter), short_final_summary=short_summary
+        )
     else:
-        return cummilative_summary_generation(errors)
+        return cummilative_summary_generation(errors, short_final_summary=short_summary)
 
 
 @execution_timer
@@ -801,29 +807,68 @@ class CombinedRegressionAnalysis:
         except Exception as e:
             logger.exception(f"Error occured while loading objects: {e}")
 
-    def merge_two_jsons(self, dst, src, dedupe=False):
-        for key, src_val in src.items():
+    def merge_two_jsons(self, dst: Dict[str, Any], src: Dict[str, Any], dedupe: bool = False) -> Dict[str, Any]:
+        """
+        Deeply merge JSON-like `src` into `dst` (in place), and return `dst`.
+
+        Merge rules:
+        1) If a key is missing in `dst`, copy it from `src`.
+        2) If both values are dicts, merge them recursively.
+        3) If both values are lists, extend `dst` with `src`'s list items.
+            - If `dedupe=True`, remove duplicates while preserving order:
+                * primitives (str/int/float/bool/None) compared by value
+                * non-primitives compared by their repr(item)
+        4) If value types differ or are scalars, overwrite `dst[key]` with a deep copy of `src[key]`.
+
+        Args:
+            dst: Destination dict that will be updated in-place.
+            src: Source dict whose contents will be merged into `dst`.
+            dedupe: If True and both values are lists, deduplicate after extending.
+
+        Returns:
+            The updated `dst` dict.
+
+        Notes:
+            - This function mutates `dst`.
+            - Deduplication for non-primitive list items uses repr(item), which is a heuristic.
+            If you need stable deduplication for complex objects, consider a custom key function.
+        """
+        for key, src_value in src.items():
+            # If key doesn't exist in dst, just deep-copy from src
             if key not in dst:
-                dst[key] = deepcopy(src_val)
+                dst[key] = deepcopy(src_value)
                 continue
 
-            dst_val = dst[key]
+            dst_value = dst[key]
 
-            if isinstance(dst_val, dict) and isinstance(src_val, dict):
-                self.merge_two_jsons(dst_val, src_val, dedupe=dedupe)
-            elif isinstance(dst_val, list) and isinstance(src_val, list):
-                dst_val.extend(src_val)
+            # Case 1: Both are dicts -> recursive deep merge
+            if isinstance(dst_value, dict) and isinstance(src_value, dict):
+                self.merge_two_jsons(dst_value, src_value, dedupe=dedupe)
+
+            # Case 2: Both are lists -> extend, optionally dedupe
+            elif isinstance(dst_value, list) and isinstance(src_value, list):
+                dst_value.extend(src_value)
+
                 if dedupe:
-                    seen = set()
-                    unique = []
-                    for item in dst_val:
-                        marker = item if isinstance(item, (str, int, float, bool, type(None))) else repr(item)
-                        if marker not in seen:
-                            seen.add(marker)
-                            unique.append(item)
-                    dst[key] = unique
+                    seen_markers = set()
+                    unique_items = []
+
+                    for item in dst_value:
+                        # Use direct value as marker for primitives; repr for complex types
+                        if isinstance(item, (str, int, float, bool, type(None))):
+                            marker = item
+                        else:
+                            marker = repr(item)
+
+                        if marker not in seen_markers:
+                            seen_markers.add(marker)
+                            unique_items.append(item)
+
+                    dst[key] = unique_items
+
+            # Case 3: Type mismatch or scalar values -> overwrite with src's deep copy
             else:
-                dst[key] = deepcopy(src_val)
+                dst[key] = deepcopy(src_value)
 
         return dst
 
@@ -1105,6 +1150,92 @@ class CombinedRegressionAnalysis:
 
         return qairt_html_report
 
+    def fetch_filtered_regression_data_from_all_ids(self, key="soc_name", filter=False) -> dict:
+        results = OrderedDefaultDict(list)
+        for run_id in self._regression_analysis_object:
+            model_failure_data = None
+            if self._regression_analysis_object[run_id].regression_data:
+                model_failure_data = self._regression_analysis_object[run_id].regression_data["model"]
+                print(f"Processing: {run_id}: total model failure: {len(model_failure_data)}")
+                for _, failures_list in model_failure_data.items():
+                    for failure in failures_list:
+                        if(key in failure
+                           and failure[key] 
+                           and "reason" in failure 
+                           and failure["reason"]):
+                            results[failure[key].lower()].append(failure["reason"])
+
+        updated_results = OrderedDefaultDict(list)
+        if filter:
+            for key, value in results.items():
+                updated_results[key] = filter_error_logs(value)
+        else:
+            updated_results = results
+
+        return dict(sorted(updated_results.items(), key=lambda kv: (-len(kv[1]), kv[0])))
+
+    def __get_soc_failure_table(self, top_k=NUM_FAILURES_TO_SHOW):
+        failure_data = self.fetch_filtered_regression_data_from_all_ids(filter=True)
+        html = "<h3>SOC Summary</h3>"
+        html += "<table border='1'><tr><th>Soc Name</th><th>Summary</th></tr>"
+
+        idx_count = 0
+        for soc_name, errors_list in failure_data.items():
+            # avoid `host` only for soc
+            if soc_name == "host":
+                continue
+
+            idx_count += 1
+            html += f"<tr><td>{soc_name}</td><td>{get_cummilative_sumary(errors_list, filter=False, short_summary=True)}</td></tr>"
+
+            if idx_count >= top_k:
+                break
+
+        if idx_count == 0:
+            html += "<tr><td colspan='2'><i>No failures found</i></td></tr>"
+        html += "</table>"
+        return html
+
+    def __get_model_failure_table(self, top_k=NUM_FAILURES_TO_SHOW):
+        failure_data = self.fetch_filtered_regression_data_from_all_ids(key="name", filter=True)
+        html = "<h3>Model Summary</h3>"
+        html += "<table border='1'><tr><th>Model Name</th><th>Summary</th></tr>"
+
+        idx_count = 0
+        for model_name, errors_list in failure_data.items():
+            idx_count += 1
+            html += f"<tr><td>{model_name}</td><td>{get_cummilative_sumary(errors_list, filter=False, short_summary=True)}</td></tr>"
+
+            if idx_count >= top_k:
+                break
+
+        if idx_count == 0:
+            html += "<tr><td colspan='2'><i>No failures found</i></td></tr>"
+        html += "</table>"
+        return html
+
+    def __get_dsp_type_wise_failure_table(self, top_k=NUM_FAILURES_TO_SHOW):
+        failure_data = self.fetch_filtered_regression_data_from_all_ids(key="dsp_type", filter=True)
+        html = "<h3>DSP Type Summary</h3>"
+        html += "<table border='1'><tr><th>DSP Name</th><th>Summary</th></tr>"
+
+        idx_count = 0
+        for dsp_name, errors_list in failure_data.items():
+            # avoid `host` only for soc
+            if dsp_name == "host":
+                continue
+
+            idx_count += 1
+            html += f"<tr><td>{dsp_name}</td><td>{get_cummilative_sumary(errors_list, filter=False, short_summary = True)}</td></tr>"
+
+            if idx_count >= top_k:
+                break
+
+        if idx_count == 0:
+            html += "<tr><td colspan='2'><i>No failures found</i></td></tr>"
+        html += "</table>"
+        return html
+
     def generate_qairt_regression_report(self, qairt_id):
         qairt_regression_report_path = os.path.join(
             CONSOLIDATED_REPORTS.path,
@@ -1115,7 +1246,6 @@ class CombinedRegressionAnalysis:
         # if no run id is processed return the previous path with any processing
         if not self.__processed_run_id:
             return qairt_regression_report_path
-
         qairt_regression_report = (
             f"<html><head><title>Regression Report</title>{REPORT_CSS}</head><body><div class='container'>"
         )
@@ -1332,6 +1462,10 @@ class CombinedRegressionAnalysis:
             [f"<a href='https://aisw-hyd.qualcomm.com/fs/{bu_summary_path}' target='_blank'>BU Summary Page</a>"]
         )
 
+        qairt_regression_report += self.__get_soc_failure_table()
+        qairt_regression_report += self.__get_model_failure_table()
+        qairt_regression_report += self.__get_dsp_type_wise_failure_table()
+
         qairt_regression_report += "</div></body></html>"
         with open(qairt_regression_report_path, "w") as f:
             f.write(qairt_regression_report)
@@ -1343,8 +1477,50 @@ class CombinedRegressionAnalysis:
         return self.generate_qairt_regression_report(qairt_id)
 
 
+def _extract_id_date(qaisw_id: str) -> date | None:
+    """
+    Extracts a date from the 12-digit stamp in qaisw IDs:
+    Example: qaisw-v2.44.0.260112072337_193906_nightly
+             ---------------- 260112072337 -> YYMMDDHHMMSS
+             Returns a datetime.date(YYYY, MM, DD)
+    """
+    m = re.search(r"-v\d+\.\d+\.\d+\.(\d{12})_", qaisw_id)
+    if not m:
+        return None
+    stamp = m.group(1)  # YYMMDDhhmmss
+    try:
+        yy = int(stamp[0:2])
+        mm = int(stamp[2:4])
+        dd = int(stamp[4:6])
+        # Map YY to 2000-2099 (adjust if your epoch differs)
+        yyyy = 2000 + yy
+        return date(yyyy, mm, dd)
+    except Exception:
+        return None
+
+
+def _months_back(d: date, months: int) -> date:
+    return d - relativedelta(months=months)
+
+
+def should_process_id(qaisw_id: str, reference_date: date = date.today(), months_window: int = 2) -> bool:
+    """
+    Return True if this id's date is within [reference_date - months_window, reference_date] inclusive.
+    Only compares dates (ignores time).
+    """
+    id_d = _extract_id_date(qaisw_id)
+    if not id_d:
+        return False
+    start = _months_back(reference_date, months_window)
+    return start <= id_d <= reference_date
+
+
 def run_report_generation_for_all_qairt_ids():
-    for qairt_id in sorted(os.listdir(CONSOLIDATED_REPORTS.path), reverse=True):
+    qairt_ids = sorted(os.listdir(CONSOLIDATED_REPORTS.path), reverse=True)
+    qairt_ids = [q for q in qairt_ids if q.startswith("qaisw")]
+    qairt_ids = [q for q in qairt_ids if should_process_id(q)]
+
+    for qairt_id in qairt_ids:
         if qairt_id.startswith("qaisw"):
             try:
                 report_analysis = CombinedRegressionAnalysis(ConsolidatedReportAnalysis())

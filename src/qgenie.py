@@ -151,7 +151,7 @@ def error_summary_generation(errors_list: list[str]) -> str:
 
 
 @execution_timer
-def cummilative_summary_generation(errors_list: list[str]) -> str:
+def cummilative_summary_generation(errors_list: list[str], short_final_summary=False) -> str:
     def _chunk(iterable, size: int):
         """Yield successive chunks of given size from the iterable."""
         for i in range(0, len(iterable), size):
@@ -173,6 +173,10 @@ def cummilative_summary_generation(errors_list: list[str]) -> str:
     prompt_template = ChatPromptTemplate.from_messages(
         [("system", prompts.PARENT_SUMMARY_GENERATION_PROMPT), ("human", prompts.ERROR_LOGS_LIST)]
     )
+    if short_final_summary:
+        prompt_template = ChatPromptTemplate.from_messages(
+            [("system", prompts.SHORT_PARENT_SUMMARY_GENERATION_PROMPT), ("human", prompts.ERROR_LOGS_LIST)]
+        )
     chain = prompt_template | gemini_pro_model | StrOutputParser()
     all_summaries_combined = "\n\n".join(
         f"Error Logs Summary {i}:\n{error}" for i, error in enumerate(errors_list, start=1)

@@ -250,6 +250,35 @@ You are given a list of summaries of error logs. Your goal is to generate a conc
 </OUTPUT FORMAT>
 """
 
+SHORT_PARENT_SUMMARY_GENERATION_PROMPT = """
+<TASK>
+You are given a list of summaries of error logs. Your goal is to generate a concise summary combining all these summaries that captures the key issues.
+</TASK>
+
+<REQUIREMENTS>
+- Summarize the main errors and their nature (e.g., common causes, affected components).
+- Do not include raw log lines or technical stack traces.
+- Keep the summary less than 5 bullet points.
+- Use clear, professional language suitable for an engineering report.
+- Focus on key patterns or recurring problems rather than individual details.
+- Do not include any introductory phrases or prefixes like “Here is the summary” or “Summary:”. Output should only contain the summary text.
+- Do NOT expand or explain any abbreviations or short forms. Keep them exactly as they appear
+- If There are No/Empty Logs, Just Return `No logs to provide summary` and don't include any suffix or prefix phrases along with this
+</REQUIREMENTS>
+
+<OUTPUT FORMAT>
+- Produce the summary ONLY as bullet points.
+- Each bullet point MUST strictly follow this exact structure:
+  <li>SUMMARY CONTENT GOES HERE</li>
+- The summary content MUST be placed inside the opening <li> and closing </li> tags.
+- Do NOT generate empty <li></li> tags.
+- Do NOT place any text outside of <li>...</li> tags.
+- Bold important keywords or important phrases using: <b> ... </b> within the <li> tags only.
+- Do NOT output any wrapper elements such as <ul>, <ol>, or <div>.
+- If any content cannot be wrapped inside <li> tags, it MUST NOT be generated.
+</OUTPUT FORMAT>
+"""
+
 ERROR_LOGS_LIST = """
 <LOGS>
 Below are the error logs to generate summary of:

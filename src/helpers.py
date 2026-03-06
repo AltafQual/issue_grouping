@@ -25,14 +25,8 @@ from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.neighbors import LocalOutlierFactor
 
-from src.constants import (
-    ClusterSpecificKeys,
-    DataFrameKeys,
-    ErrorLogConfigurations,
-    FaissConfigurations,
-    FaissDBPath,
-    regex_based_filteration_patterns,
-)
+from src.constants import (ClusterSpecificKeys, DataFrameKeys, ErrorLogConfigurations, FaissConfigurations, FaissDBPath,
+                           regex_based_filteration_patterns)
 from src.custom_clustering import CustomEmbeddingCluster
 from src.db_connections import ConnectToMySql
 from src.execution_timer_log import execution_timer
