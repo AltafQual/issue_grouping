@@ -735,6 +735,7 @@ class CombinedRegressionAnalysis:
         self.combined_model_errros_list = []
         self.combined_type_runtime_wise_errors_dict = {}
         self._qairt_id = None
+        self.list_of_summay_to_avoid = ["no logs to provide", "no logs"]
 
     def _regex(self, pattern: str):
         rx = re.compile(pattern, re.IGNORECASE)
@@ -1184,9 +1185,13 @@ class CombinedRegressionAnalysis:
             # avoid `host` only for soc
             if soc_name == "host":
                 continue
+            
+            summary = get_cummilative_sumary(errors_list, filter=False, short_summary=True)
+            if any(summay_to_avoid in summary.lower() for summay_to_avoid in self.list_of_summay_to_avoid):
+                continue
 
             idx_count += 1
-            html += f"<tr><td>{soc_name}</td><td>{get_cummilative_sumary(errors_list, filter=False, short_summary=True)}</td></tr>"
+            html += f"<tr><td>{soc_name}</td><td>{summary}</td></tr>"
 
             if idx_count >= top_k:
                 break
@@ -1203,8 +1208,13 @@ class CombinedRegressionAnalysis:
 
         idx_count = 0
         for model_name, errors_list in failure_data.items():
+            
+            summary = get_cummilative_sumary(errors_list, filter=False, short_summary=True)
+            if any(summay_to_avoid in summary.lower() for summay_to_avoid in self.list_of_summay_to_avoid):
+                continue
+            
             idx_count += 1
-            html += f"<tr><td>{model_name}</td><td>{get_cummilative_sumary(errors_list, filter=False, short_summary=True)}</td></tr>"
+            html += f"<tr><td>{model_name}</td><td>{summary}</td></tr>"
 
             if idx_count >= top_k:
                 break
@@ -1221,12 +1231,13 @@ class CombinedRegressionAnalysis:
 
         idx_count = 0
         for dsp_name, errors_list in failure_data.items():
-            # avoid `host` only for soc
-            if dsp_name == "host":
+            
+            summary = get_cummilative_sumary(errors_list, filter=False, short_summary=True)
+            if any(summay_to_avoid in summary.lower() for summay_to_avoid in self.list_of_summay_to_avoid):
                 continue
-
+            
             idx_count += 1
-            html += f"<tr><td>{dsp_name}</td><td>{get_cummilative_sumary(errors_list, filter=False, short_summary = True)}</td></tr>"
+            html += f"<tr><td>{dsp_name}</td><td>{summary}</td></tr>"
 
             if idx_count >= top_k:
                 break
@@ -1277,7 +1288,6 @@ class CombinedRegressionAnalysis:
 
         converter_quantizer_dict = self.extract_converter_quantizer_logs(combined_runtime_type_json_data)
         combined_runtime_type_json_data = self.pivot_type_to_runtime(combined_runtime_type_json_data)
-        list_of_summay_to_avoid = ["no logs to provide", "no logs"]
 
         # build qairt report
         qairt_regression_report += (
@@ -1294,7 +1304,7 @@ class CombinedRegressionAnalysis:
 
                 summary_idx_to_avoid = []
                 for idx, summary in enumerate(summaries_list):
-                    if any(summay_to_avoid in summary.lower() for summay_to_avoid in list_of_summay_to_avoid):
+                    if any(summay_to_avoid in summary.lower() for summay_to_avoid in self.list_of_summay_to_avoid):
                         summary_idx_to_avoid.append(idx)
 
                 updated_runtimes = []
@@ -1346,7 +1356,7 @@ class CombinedRegressionAnalysis:
                     del types_dict["graph_prepare"]
 
                 for idx, data in enumerate(graph_prepare_row_data):
-                    if any(summary_to_avoid in data[1].lower() for summary_to_avoid in list_of_summay_to_avoid):
+                    if any(summary_to_avoid in data[1].lower() for summary_to_avoid in self.list_of_summay_to_avoid):
                         graph_prepare_row_data.pop(idx)
 
                 rowspan = len(graph_prepare_row_data)
@@ -1371,7 +1381,7 @@ class CombinedRegressionAnalysis:
 
             summary_idx_to_avoid = []
             for idx, summary in enumerate(all_cpu_summaries):
-                if not any(summay_to_avoid in summary.lower() for summay_to_avoid in list_of_summay_to_avoid):
+                if not any(summay_to_avoid in summary.lower() for summay_to_avoid in self.list_of_summay_to_avoid):
                     if all_cpu_types[idx] not in types_to_process_cpu and all_cpu_types[idx] != "benchmark":
                         core_data.append((all_cpu_types[idx], summary))
                         summary_idx_to_avoid.append(idx)
@@ -1408,7 +1418,7 @@ class CombinedRegressionAnalysis:
             cpu_summaries_list = [get_cummilative_sumary(types_dict[runtime]) for runtime in runtimes]
             summary_idx_to_avoid = []
             for idx, summary in enumerate(cpu_summaries_list):
-                if any(summay_to_avoid in summary.lower() for summay_to_avoid in list_of_summay_to_avoid):
+                if any(summay_to_avoid in summary.lower() for summay_to_avoid in self.list_of_summay_to_avoid):
                     summary_idx_to_avoid.append(idx)
             updated_runtimes = []
             for idx, runtime in enumerate(runtimes):
