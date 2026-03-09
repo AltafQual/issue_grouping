@@ -1160,10 +1160,7 @@ class CombinedRegressionAnalysis:
                 print(f"Processing: {run_id}: total model failure: {len(model_failure_data)}")
                 for _, failures_list in model_failure_data.items():
                     for failure in failures_list:
-                        if(key in failure
-                           and failure[key] 
-                           and "reason" in failure 
-                           and failure["reason"]):
+                        if key in failure and failure[key] and "reason" in failure and failure["reason"]:
                             results[failure[key].lower()].append(failure["reason"])
 
         updated_results = OrderedDefaultDict(list)
@@ -1185,13 +1182,13 @@ class CombinedRegressionAnalysis:
             # avoid `host` only for soc
             if soc_name == "host":
                 continue
-            
+
             summary = get_cummilative_sumary(errors_list, filter=False, short_summary=True)
             if any(summay_to_avoid in summary.lower() for summay_to_avoid in self.list_of_summay_to_avoid):
                 continue
 
             idx_count += 1
-            html += f"<tr><td>{soc_name}</td><td>{summary}</td></tr>"
+            html += f"<tr><td>{soc_name}</td><td><ul>{summary}</ul></td></tr>"
 
             if idx_count >= top_k:
                 break
@@ -1208,13 +1205,13 @@ class CombinedRegressionAnalysis:
 
         idx_count = 0
         for model_name, errors_list in failure_data.items():
-            
+
             summary = get_cummilative_sumary(errors_list, filter=False, short_summary=True)
             if any(summay_to_avoid in summary.lower() for summay_to_avoid in self.list_of_summay_to_avoid):
                 continue
-            
+
             idx_count += 1
-            html += f"<tr><td>{model_name}</td><td>{summary}</td></tr>"
+            html += f"<tr><td>{model_name}</td><td><ul>{summary}</ul></td></tr>"
 
             if idx_count >= top_k:
                 break
@@ -1231,13 +1228,13 @@ class CombinedRegressionAnalysis:
 
         idx_count = 0
         for dsp_name, errors_list in failure_data.items():
-            
+
             summary = get_cummilative_sumary(errors_list, filter=False, short_summary=True)
             if any(summay_to_avoid in summary.lower() for summay_to_avoid in self.list_of_summay_to_avoid):
                 continue
-            
+
             idx_count += 1
-            html += f"<tr><td>{dsp_name}</td><td>{summary}</td></tr>"
+            html += f"<tr><td>{dsp_name}</td><td><ul>{summary}</ul></td></tr>"
 
             if idx_count >= top_k:
                 break
@@ -1347,17 +1344,17 @@ class CombinedRegressionAnalysis:
 
                 if savecontext_data:
                     savecontext_summary = get_cummilative_sumary(savecontext_data)
-                    graph_prepare_row_data.append(("savecontext", savecontext_summary))
-                    del types_dict["savecontext"]
+                    if not any(
+                        summary_to_avoid in savecontext_summary for summary_to_avoid in self.list_of_summay_to_avoid
+                    ):
+                        graph_prepare_row_data.append(("savecontext", savecontext_summary))
+                    del combined_runtime_type_json_data[current_runtime]["savecontext"]
 
                 if gprepare_data:
                     gprepare_summary = get_cummilative_sumary(gprepare_data)
-                    graph_prepare_row_data.append(("graph prepare", gprepare_summary))
-                    del types_dict["graph_prepare"]
-
-                for idx, data in enumerate(graph_prepare_row_data):
-                    if any(summary_to_avoid in data[1].lower() for summary_to_avoid in self.list_of_summay_to_avoid):
-                        graph_prepare_row_data.pop(idx)
+                    if not any(summary_to_avoid in gprepare_summary for summary_to_avoid in self.list_of_summay_to_avoid):
+                        graph_prepare_row_data.append(("graph prepare", gprepare_summary))
+                    del combined_runtime_type_json_data[current_runtime]["graph_prepare"]
 
                 rowspan = len(graph_prepare_row_data)
                 if rowspan:
@@ -1372,7 +1369,7 @@ class CombinedRegressionAnalysis:
                         f"{gerrit_cell}"
                         f"</tr>"
                     )
-                    for runtime, summary in runtimes[1:]:
+                    for runtime, summary in graph_prepare_row_data[1:]:
                         qairt_regression_report += f"<tr>" f"<td>{runtime}</td>" f"<td><ul>{summary}</ul></td>" f"</tr>"
 
             types_to_process_cpu = ["inference", "verifier", "bm_regression"]
@@ -1530,7 +1527,7 @@ def run_report_generation_for_all_qairt_ids():
     qairt_ids = [q for q in qairt_ids if q.startswith("qaisw")]
     qairt_ids = [q for q in qairt_ids if should_process_id(q)]
     print(f"Processing: {len(qairt_ids)} Qairt Ids")
-    
+
     for qairt_id in qairt_ids:
         if qairt_id.startswith("qaisw"):
             try:
