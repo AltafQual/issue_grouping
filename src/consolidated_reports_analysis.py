@@ -1469,9 +1469,9 @@ class CombinedRegressionAnalysis:
             [f"<a href='https://aisw-hyd.qualcomm.com/fs/{bu_summary_path}' target='_blank'>BU Summary Page</a>"]
         )
 
+        qairt_regression_report += self.__get_dsp_type_wise_failure_table()
         qairt_regression_report += self.__get_soc_failure_table()
         qairt_regression_report += self.__get_model_failure_table()
-        qairt_regression_report += self.__get_dsp_type_wise_failure_table()
 
         qairt_regression_report += "</div></body></html>"
         with open(qairt_regression_report_path, "w") as f:
