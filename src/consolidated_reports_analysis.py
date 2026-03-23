@@ -1345,14 +1345,14 @@ class CombinedRegressionAnalysis:
                 if savecontext_data:
                     savecontext_summary = get_cummilative_sumary(savecontext_data)
                     if not any(
-                        summary_to_avoid in savecontext_summary for summary_to_avoid in self.list_of_summay_to_avoid
+                        summary_to_avoid in savecontext_summary.lower() for summary_to_avoid in self.list_of_summay_to_avoid
                     ):
                         graph_prepare_row_data.append(("savecontext", savecontext_summary))
                     del combined_runtime_type_json_data[current_runtime]["savecontext"]
 
                 if gprepare_data:
                     gprepare_summary = get_cummilative_sumary(gprepare_data)
-                    if not any(summary_to_avoid in gprepare_summary for summary_to_avoid in self.list_of_summay_to_avoid):
+                    if not any(summary_to_avoid in gprepare_summary.lower() for summary_to_avoid in self.list_of_summay_to_avoid):
                         graph_prepare_row_data.append(("graph prepare", gprepare_summary))
                     del combined_runtime_type_json_data[current_runtime]["graph_prepare"]
 
