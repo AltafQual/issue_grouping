@@ -50,7 +50,14 @@ class FailureAnalyzer:
     def cluster_embeddings(self, embeddings: np.ndarray) -> np.ndarray:
         """Cluster the embeddings using HDBSCAN."""
         self.logger.info("Clustering embeddings")
-        cluster = HDBSCAN(min_cluster_size=2, min_samples=10, metric="cosine", n_jobs=-1)
+        cluster = HDBSCAN(
+            min_cluster_size=2,
+            min_samples=1,
+            metric="cosine",
+            cluster_selection_method="eom",
+            cluster_selection_epsilon=0.12,
+            n_jobs=-1,
+        )
         return cluster.fit_predict(embeddings)
 
     async def analyze(
@@ -109,7 +116,7 @@ class FailureAnalyzer:
 
             if not fuzzy_clustered_df.empty:
                 fuzzy_clustered_df[DataFrameKeys.embeddings_key] = pd.Series(
-                    self.generate_embeddings(fuzzy_clustered_df[DataFrameKeys.preprocessed_text_key].tolist()),
+                    self.generate_embeddings(fuzzy_clustered_df[DataFrameKeys.embedding_text_key].tolist()),
                     index=fuzzy_clustered_df.index,
                 )
 
@@ -135,7 +142,7 @@ class FailureAnalyzer:
                 ]
                 if not non_clustered_df.empty:
                     embeddings = self.generate_embeddings(
-                        non_clustered_df[DataFrameKeys.preprocessed_text_key].tolist()
+                        non_clustered_df[DataFrameKeys.embedding_text_key].tolist()
                     )
                     non_clustered_df.loc[:, DataFrameKeys.embeddings_key] = pd.Series(
                         embeddings, index=non_clustered_df.index
@@ -188,7 +195,7 @@ class FailureAnalyzer:
         )
 
         if not non_clustered_df.empty:
-            embeddings = self.generate_embeddings(non_clustered_df[DataFrameKeys.preprocessed_text_key].tolist())
+            embeddings = self.generate_embeddings(non_clustered_df[DataFrameKeys.embedding_text_key].tolist())
             non_clustered_df.loc[:, DataFrameKeys.embeddings_key] = pd.Series(embeddings, index=non_clustered_df.index)
 
             # Process non-clustered data
@@ -204,6 +211,9 @@ class FailureAnalyzer:
                 non_clustered_df = helpers.update_labels_with_merged_clusters(
                     non_clustered_df, merged_groups, DataFrameKeys.cluster_type_int
                 )
+
+                # Reassign noise points to nearest cluster before LLM post-processing
+                non_clustered_df = helpers.reassign_unclustered_logs(non_clustered_df, threshold=0.82)
 
                 # Log cluster statistics
                 cluster_counts = non_clustered_df[DataFrameKeys.cluster_type_int].value_counts()

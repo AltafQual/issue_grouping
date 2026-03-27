@@ -18,6 +18,7 @@ class DataFrameKeys:
     embeddings_key: str = "embeddings"
     error_reason: str = "reason"
     preprocessed_text_key: str = "preprocessed_reason"
+    embedding_text_key: str = "embedding_reason"
     cluster_type_int: str = "int_cluster"
     cluster_name: str = "clusters"
     bins: str = "bins"
@@ -36,7 +37,7 @@ class ClusterSpecificKeys:
 
 @dataclass
 class FaissConfigurations:
-    base_path: str = "issue_grouping_db"
+    base_path: str = "issue_grouping_db_copy"
 
 
 @dataclass

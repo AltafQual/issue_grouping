@@ -121,6 +121,8 @@ Return your response in the following JSON format and out of 3 failure only one 
 }}
 """
 CLASSIFY_CLUSTER_TYPE_LOG_MESSAGE = """
+Cluster name: {cluster_name}
+
 Below are the logs to classify:
 {logs}
 """

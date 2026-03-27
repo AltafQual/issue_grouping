@@ -46,9 +46,12 @@ class CustomEmbeddingCluster:
 
         for cluster_name, group in df.groupby(DataFrameKeys.cluster_name):
 
-            # Compute centroid
+            # Compute centroid and normalize for consistent cosine similarity
             embeddings = np.vstack(group[DataFrameKeys.embeddings_key])
             centroid = np.mean(embeddings, axis=0)
+            norm = np.linalg.norm(centroid)
+            if norm > 0:
+                centroid = centroid / norm
 
             centroids[cluster_name] = {
                 "centroid": centroid,
@@ -107,7 +110,6 @@ class CustomEmbeddingCluster:
                 type_dir = os.path.join(self.base_path, f"{type_}_custom")
                 os.makedirs(type_dir, exist_ok=True)
 
-                # Use lock for database operations
                 with lock:
                     update_error_map_qgenie_table(typed_dataframe)
 
@@ -115,10 +117,8 @@ class CustomEmbeddingCluster:
                     self.update(typed_dataframe, type_, run_id=run_id)
                     return f"Updated existing clusters for type: {type_}"
 
-                # Compute centroids
                 centroids = self._compute_centroids(typed_dataframe)
 
-                # Create metadata in the format you're currently using
                 metadata = {}
                 for cluster_name, data in centroids.items():
                     metadata[cluster_name] = {"class": data["class"], "run_ids": {}}
@@ -157,8 +157,9 @@ class CustomEmbeddingCluster:
                 with open(os.path.join(type_dir, "metadata.json"), "r") as f:
                     existing_metadata = json.load(f)
 
+                existing_cluster_names = [name.lower() for name in existing_metadata]
                 for cluster_name, group in grouped_df.groupby(DataFrameKeys.cluster_name):
-                    if cluster_name not in existing_metadata:
+                    if cluster_name.lower() not in existing_cluster_names:
                         print(
                             f"Cluster name: {cluster_name} didn't exists in metadata, but marked as already grouped for run_id {run_id} !!!!"
                         )
@@ -307,7 +308,7 @@ class CustomEmbeddingCluster:
         self,
         filtered_df: pd.DataFrame,
         type_: str,
-        similarity_threshold: float = 0.95,
+        similarity_threshold: float = 0.90,
         run_id: Optional[str] = None,
     ) -> None:
         """
@@ -321,20 +322,18 @@ class CustomEmbeddingCluster:
         """
         type_dir = os.path.join(self.base_path, f"{type_}_custom")
 
-        # Load existing data
         with open(os.path.join(type_dir, "metadata.json"), "r") as f:
             metadata = json.load(f)
 
         with open(os.path.join(type_dir, "centroids.npy"), "rb") as f:
             existing_centroids = np.load(f)
 
-        # Compute centroids for new data
         new_centroids_dict = self._compute_centroids(filtered_df)
 
         # For each new centroid, check if it's similar to an existing one
         updated_metadata = metadata.copy()
         updated_centroids = existing_centroids.copy()
-        existing_cluster_names = list(metadata.keys())
+        existing_cluster_names = [name.lower() for name in metadata.keys()]
 
         for cluster_name, data in new_centroids_dict.items():
             new_centroid = data["centroid"]
@@ -350,11 +349,9 @@ class CustomEmbeddingCluster:
                 max_sim_idx = np.argmax(similarities)
                 max_sim = similarities[max_sim_idx]
 
-                if (max_sim >= similarity_threshold) or cluster_name in updated_metadata:
-
-                    # Merge with existing cluster
-                    if cluster_name not in updated_metadata:
-                        existing_cluster_name = existing_cluster_names[max_sim_idx]
+                if (max_sim >= similarity_threshold):
+                    if cluster_name.lower() in existing_cluster_names:
+                        existing_cluster_name = list(updated_metadata.keys())[max_sim_idx]
                         print(
                             f"Merging new cluster {cluster_name} with existing {existing_cluster_name} (sim={max_sim:.3f})"
                         )
@@ -362,12 +359,15 @@ class CustomEmbeddingCluster:
                         existing_cluster_name = cluster_name
                         print(f"Cluster Name: {cluster_name} already exists in metadata updating with same")
                         for idx, _cluster_name in enumerate(existing_cluster_names):
-                            if _cluster_name == cluster_name:
+                            if _cluster_name == cluster_name.lower():
                                 max_sim_idx = idx
                                 break
 
-                    # Update centroid (weighted average)
+                    # Update centroid (weighted average), then re-normalize
                     updated_centroids[max_sim_idx] = 0.7 * updated_centroids[max_sim_idx] + 0.3 * new_centroid
+                    norm = np.linalg.norm(updated_centroids[max_sim_idx])
+                    if norm > 0:
+                        updated_centroids[max_sim_idx] = updated_centroids[max_sim_idx] / norm
 
                     # Update run_ids in metadata
                     if run_id and run_id not in updated_metadata[existing_cluster_name]["run_ids"]:
@@ -407,7 +407,7 @@ class CustomEmbeddingCluster:
 
         print(f"Updated to {len(updated_metadata)} clusters for type: {type_}")
 
-    def search(self, type_: str, query: str, similarity_threshold: float = 0.95) -> Tuple[str, str]:
+    def search(self, type_: str, query: str, similarity_threshold: float = 0.88) -> Tuple[str, str]:
         """
         Search for similar clusters for a single query.
 
@@ -430,7 +430,7 @@ class CustomEmbeddingCluster:
         type_: str,
         query_embedding: np.ndarray,
         original_query: str = "",
-        similarity_threshold: float = 0.95,
+        similarity_threshold: float = 0.88,
     ) -> Tuple[str, str]:
         """
         Search using a precomputed embedding.
@@ -493,7 +493,7 @@ class CustomEmbeddingCluster:
         type_: str,
         query_embeddings: np.ndarray,
         original_queries: List[str],
-        similarity_threshold: float = 0.95,
+        similarity_threshold: float = 0.88,
     ) -> Tuple[List[str], List[str]]:
         """
         Search using precomputed embeddings for multiple queries at once.
@@ -559,7 +559,7 @@ class CustomEmbeddingCluster:
         self,
         type_: str,
         queries: Union[str, List[str]],
-        similarity_threshold: float = 0.95,
+        similarity_threshold: float = 0.88,
     ) -> Tuple[List[str], List[str]]:
         """
         Search for similar clusters for multiple queries.

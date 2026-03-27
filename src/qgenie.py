@@ -185,12 +185,12 @@ def cummilative_summary_generation(errors_list: list[str], short_final_summary=F
 
 
 @execution_timer
-async def classify_cluster_based_of_type(cluster_logs: list[str]) -> dict:
+async def classify_cluster_based_of_type(cluster_logs: list[str], cluster_name: str = "") -> dict:
     prompt_template = ChatPromptTemplate.from_messages(
         [("system", prompts.CLASSIFY_CLUSTER_TYPE_SYS_MESSAGE), ("human", prompts.CLASSIFY_CLUSTER_TYPE_LOG_MESSAGE)]
     )
     chain = prompt_template | model | classify_cluster_based_on_type
-    result = await chain.ainvoke({"logs": cluster_logs})
+    result = await chain.ainvoke({"logs": cluster_logs, "cluster_name": cluster_name})
     return result
 
 

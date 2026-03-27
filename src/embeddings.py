@@ -10,7 +10,7 @@ from src.constants import QGENEIE_API_KEY
 from src.execution_timer_log import execution_timer
 from src.logger import AppLogger
 
-logger = AppLogger.get_logger(__name__)
+logger = AppLogger().get_logger(__name__)
 
 
 class QGenieBGEM3Embedding(Embeddings):

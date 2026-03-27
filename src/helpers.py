@@ -118,7 +118,7 @@ async def assign_cluster_class(df: pd.DataFrame) -> pd.DataFrame:
         logger.info(f"Found {len(unique_clusters)} clusters that need classification")
 
         # Create a semaphore to limit concurrent requests
-        semaphore = asyncio.Semaphore(3)
+        semaphore = asyncio.Semaphore(6)
 
         async def classify_cluster(cluster_name):
             async with semaphore:
@@ -127,15 +127,16 @@ async def assign_cluster_class(df: pd.DataFrame) -> pd.DataFrame:
                 if cluster_df.empty:
                     logger.warning(f"Empty cluster dataframe for {cluster_name}")
                     return None, None
-                # Use a single representative preprocessed log
-                representative_log = cluster_df.iloc[0][DataFrameKeys.preprocessed_text_key]
-                if not isinstance(representative_log, str) or representative_log.strip() == "":
+                # Use up to 5 representative preprocessed logs for better classification accuracy
+                sample_logs = cluster_df[DataFrameKeys.preprocessed_text_key].dropna().tolist()
+                sample_logs = [s for s in sample_logs if isinstance(s, str) and s.strip()][:5]
+                if not sample_logs:
                     logger.warning(f"Invalid representative log for cluster {cluster_name}")
                     return None, None
                 try:
 
                     logger.info(f"Sending classification request for cluster: {cluster_name}")
-                    result = await classify_cluster_based_of_type([representative_log])
+                    result = await classify_cluster_based_of_type(sample_logs, cluster_name=cluster_name)
                     class_str = get_cluster_class(result)
                     logger.info(f"Received classification for {cluster_name}: {class_str}")
 
@@ -362,6 +363,8 @@ def remove_empty_and_misc_rows(df: pd.DataFrame, errors: list, error_column_name
     ]
     df = pd.concat([df_with_error_reason, partial_error_reasons], axis=0).reset_index(drop=True)
     df.loc[:, DataFrameKeys.cluster_name] = df[error_column_name].apply(is_empty_error_log)
+    # Save unmasked text for embeddings before applying number masking for fuzzy matching
+    df.loc[:, DataFrameKeys.embedding_text_key] = df[error_column_name]
     df.loc[:, error_column_name] = df[error_column_name].apply(mask_numbers)
     df = df.reset_index(drop=True)
     return df
@@ -382,7 +385,7 @@ async def update_rows_by_regex_patterns(df: pd.DataFrame) -> pd.DataFrame:
 
 
 @execution_timer
-def merge_similar_clusters(embeddings, labels, threshold=0.95):
+def merge_similar_clusters(embeddings, labels, threshold=0.87):
     unique_labels = set(labels) - {-1}
     centroids = {
         label: np.mean([embeddings[i] for i in range(len(labels)) if labels[i] == label], axis=0)
@@ -406,7 +409,7 @@ def merge_similar_clusters(embeddings, labels, threshold=0.95):
 
 
 @execution_timer
-def reassign_unclustered_logs(df: pd.DataFrame, threshold=0.95):
+def reassign_unclustered_logs(df: pd.DataFrame, threshold=0.88):
     # Step 1: Compute centroids for all valid clusters
     valid_clusters = set(df[DataFrameKeys.cluster_name]) - {-1}
     logger.info(f"Valid clusters for reassigning unclustered logs: {valid_clusters}")
@@ -583,6 +586,7 @@ def create_excel_with_clusters(df: pd.DataFrame, cluster_column: str, columns_to
                         clean_excel_string
                     )
 
+                cluster_df = cluster_df.applymap(clean_excel_string)
                 cluster_df.to_excel(writer, sheet_name=sheet_name, index=False)
                 sheet_created = True
 
@@ -605,13 +609,18 @@ def detect_cluster_outlier(df: pd.DataFrame) -> pd.DataFrame:
         cluster_df = df[df[DataFrameKeys.cluster_name] == cluster]
         embedding_matrix = np.vstack(cluster_df[DataFrameKeys.embeddings_key].values)
 
+        if len(embedding_matrix) < 2:
+            # Cannot detect outliers in a single-member cluster
+            continue
+
         # Step 1: Compute cosine similarity to cluster centroid
         centroid = np.mean(embedding_matrix, axis=0).reshape(1, -1)
         similarities = cosine_similarity(embedding_matrix, centroid).flatten()
         cluster_df["cosine_similarity_to_centroid"] = similarities
 
-        # Step 2: Apply Local Outlier Factor
-        lof = LocalOutlierFactor(n_neighbors=15, metric="cosine", n_jobs=-1)
+        # Step 2: Apply Local Outlier Factor with adaptive k
+        k = min(15, len(embedding_matrix) - 1)
+        lof = LocalOutlierFactor(n_neighbors=k, metric="cosine", n_jobs=-1)
         outlier_flags = lof.fit_predict(embedding_matrix)
         cluster_df["lof_outlier"] = outlier_flags  # -1 indicates outlier
 
@@ -637,10 +646,10 @@ async def check_if_issue_alread_grouped(df: pd.DataFrame) -> pd.DataFrame:
     ungrouped_df = df[mask]
 
     if not ungrouped_df.empty:
-        # Get cluster names using FAISS
+        # Get cluster names using FAISS — use unmasked embedding text for better similarity
         new_cluster_names, class_names = await CustomEmbeddingCluster().batch_search(
             type_=ungrouped_df.iloc[0]["type"],  # assuming same type for batch
-            queries=ungrouped_df[DataFrameKeys.preprocessed_text_key].tolist(),
+            queries=ungrouped_df[DataFrameKeys.embedding_text_key].tolist(),
         )
 
         # Update the original DataFrame
