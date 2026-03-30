@@ -37,7 +37,7 @@ class ClusterSpecificKeys:
 
 @dataclass
 class FaissConfigurations:
-    base_path: str = "issue_grouping_db_copy"
+    base_path: str = "issue_grouping_db"
 
 
 @dataclass

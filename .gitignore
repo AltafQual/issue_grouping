@@ -11,4 +11,6 @@ issue_grouping_hosting/
 UNKNOWN.egg-info
 *.ipynb
 issue_grouping_db
+issue_grouping_db_*
 .vscode
+CLAUDE.md
