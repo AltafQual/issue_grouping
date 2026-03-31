@@ -1457,7 +1457,7 @@ class CombinedRegressionAnalysis:
                     if not isinstance(gerrit_entries, list):
                         continue
                     for g in gerrit_entries:
-                        url = g.get("commit_url", "")
+                        url = g.get("commit_url", "").lower()
                         if url and url not in gerrit_url_set:
                             gerrit_url_set.add(url)
                             total_gerrits += 1
