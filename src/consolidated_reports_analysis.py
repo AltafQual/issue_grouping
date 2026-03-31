@@ -16,10 +16,11 @@ from src.constants import CONSOLIDATED_REPORTS
 from src.execution_timer_log import execution_timer
 from src.get_prev_testplan_id import iterate_db_get_testplan
 from src.regression_api_call import get_two_run_ids_cluster_info
+from src.logger import AppLogger
 
-logger = logging.getLogger(__name__)
+logger = AppLogger().get_logger()
 
-NUM_FAILURES_TO_SHOW = 5
+NUM_FAILURES_TO_SHOW = 10
 REPORT_CSS = """
 <style>
     :root {
@@ -225,7 +226,7 @@ def filter_error_logs(error_logs_list, custom_filter_list=None):
         if error_log and not any(pattern.search(error_log) for pattern in __error_filters):
             filtered_error_logs.append(error_log)
 
-    print(f"Error logs in total: {len(error_logs_list)}, filtered error logs: {len(filtered_error_logs)}")
+    logger.info(f"Error logs in total: {len(error_logs_list)}, filtered error logs: {len(filtered_error_logs)}")
     return filtered_error_logs
 
 
@@ -234,7 +235,7 @@ def get_cummilative_sumary(errors, filter=True, custom_filter=None, short_summar
     from src.qgenie_llm_calls import cummilative_summary_generation
 
     if filter:
-        print("Filter enabled, filtering logs")
+        logger.info("Filter enabled, filtering logs")
         return cummilative_summary_generation(
             filter_error_logs(errors, custom_filter), short_final_summary=short_summary
         )
@@ -337,14 +338,13 @@ class ConsolidatedReportAnalysis:
 
     def build_prev_run_id(self, run_id: str):
         _, _, previous_testplan_id, previous_release_testplan_id = iterate_db_get_testplan(run_id)
-        print(
+        logger.info(
             f"previous testplan id: {previous_testplan_id} : Current testplan id: {run_id}: previous release id: {previous_release_testplan_id}"
         )
         return previous_testplan_id if previous_testplan_id else previous_release_testplan_id
 
     def get_unqiue_runids(self, qairt_id):
         try:
-            print(f"Processing QAIRT Id: {qairt_id}")
             qairt_folder = os.path.join(self.reports_folder_path, qairt_id)
             functional_report_file = None
             for file in os.listdir(qairt_folder):
@@ -428,14 +428,14 @@ class RegressionAnalysisReport:
                 elif error_log_key and error_log_key in data:
                     error_str = data.get(error_log_key)
                 else:
-                    print(f"Skipping {data} no {error_log_key}/{filter_key} exists")
+                    logger.info(f"Skipping {data} no {error_log_key}/{filter_key} exists")
                     continue
 
                 if error_str:
                     error.append(error_str)
             final_error_list = error
         else:
-            print(f"Either `error` or (`raw_data_dict` and `error_log_key`) has to be provided")
+            logger.info(f"Either `error` or (`raw_data_dict` and `error_log_key`) has to be provided")
             return error_summary
 
         from src.qgenie_llm_calls import error_summary_generation
@@ -673,7 +673,8 @@ class RegressionAnalysisReport:
         self.__prev_run_id = run_id_b
         self.regression_data = regression_data
         self.gerrits_information = regression_data.get("gerrit_info", {})
-        print(f"Processing: {run_id_a}: {run_id_b}")
+        logger.info(f"Processing: {run_id_a}: {run_id_b}")
+        
         if any("rc" in run_id.lower() for run_id in [run_id_a, run_id_b]):
             self._has_rc_in_runid = True
 
@@ -684,14 +685,14 @@ class RegressionAnalysisReport:
             regression_data.get("model", {}), _processing_type="model"
         )
         if not regression_data or (isinstance(regression_data, dict) and regression_data.get("status", 500) != 200):
-            print(
+            logger.info(
                 f"Empty regression data found between: {self.__current_run_id} and {self.__prev_run_id} \n Regression Data received: {regression_data}"
             )
             return ""
         head = f"<html><head><title>Regression Analysis</title>{REPORT_CSS}</head><body><div class='container'>"
         regression_html = ""
 
-        print("Building html for Type based Failures")
+        logger.info("Building html for Type based Failures")
         regression_html += f"<h3>Type based Failures</h3>"
         type_based_data_dict = {}
         for test_type, types_dict in type_based_regression_data.items():
@@ -717,7 +718,7 @@ class RegressionAnalysisReport:
             regression_html += "</tr>"
         regression_html += "</table>"
 
-        print("Building model failure report")
+        logger.info("Building model failure report")
         regression_html += f"<h3>Failed Model Report</h3>"
         detailed_page_link = self.__create_detailed_model_failure_regression_page(model_based_regression_data)
         regression_html += f"<tr><td><a href='{detailed_page_link}'>Model Failure report</a></td><td> -- Total Models Failed {len(model_based_regression_data.keys())}</td></tr>"
@@ -731,7 +732,7 @@ class RegressionAnalysisReport:
                         soc_regression_data[data["soc_name"]] = soc_regression_data.get(data["soc_name"], []) + [data]
                         runtimes_regression_data[runtime] = runtimes_regression_data.get(runtime, []) + [data]
 
-        print("Building runtime based failure report")
+        logger.info("Building runtime based failure report")
         regression_html += f"<h3>Runtime based Failures</h3>"
         regression_html += "<table><tr><th>Runtime</th><th>Failure Count</th><th>Qgenie Summary</th>"
         if not regression_html.endswith("</tr>"):
@@ -861,6 +862,7 @@ class CombinedRegressionAnalysis:
 
     def merge_two_jsons(self, dst: Dict[str, Any], src: Dict[str, Any], dedupe: bool = False) -> Dict[str, Any]:
         """
+        ### Qgenie generated code, don't modify unless you know what you are doing !!!
         Deeply merge JSON-like `src` into `dst` (in place), and return `dst`.
 
         Merge rules:
@@ -930,7 +932,7 @@ class CombinedRegressionAnalysis:
             logger.error(f"No run ids found for {qairt_id}")
             return unique_run_ids_for_qairt_id
 
-        print(f"Got all the run ids for qairt id: {qairt_id}: Run IDS: {unique_run_ids_for_qairt_id}")
+        logger.info(f"Got all the run ids for qairt id: {qairt_id}: Run IDS: {unique_run_ids_for_qairt_id}")
         self.load_regression_analysis_objects(qairt_id)
         for _id in unique_run_ids_for_qairt_id:
             """
@@ -944,15 +946,15 @@ class CombinedRegressionAnalysis:
                 and self._regression_analysis_object.get(_id)
                 and self._regression_html_paths.get(_id)
             ):
-                print(f"{_id} already processed skipping")
+                logger.info(f"{_id} already processed skipping")
                 continue
 
             prev_id = self.consolidated_report_analysis.build_prev_run_id(_id)
-            print(f"Processing: {_id}: {prev_id}")
+            logger.info(f"Processing: {_id}: {prev_id}")
             regression_json = get_two_run_ids_cluster_info(_id, prev_id, force=True)
             regression_analysis = RegressionAnalysisReport(qairt_id)
             html_path = regression_analysis.generate_regression_analysis_report(_id, prev_id, regression_json)
-            print(f"HTML for {_id}: {html_path}")
+            logger.info(f"HTML for {_id}: {html_path}")
 
             self._regression_analysis_object[_id] = regression_analysis
             self._regression_html_paths[_id] = html_path
@@ -1015,7 +1017,7 @@ class CombinedRegressionAnalysis:
         return f"<ul>{li_html}</ul>"
 
     def get_runtime_based_gerrit_row(self, runtime, gerrit_data, rows_span=0):
-        print(f"All types of gerrits merged: {gerrit_data.keys()}, runtime: {runtime}")
+        logger.info(f"All types of gerrits merged: {gerrit_data.keys()}, runtime: {runtime}")
         if runtime == "tools":
             runtime_gerrits = list(gerrit_data.get("quantizer") or []) + list(gerrit_data.get("converter") or [])
         else:
@@ -1162,7 +1164,7 @@ class CombinedRegressionAnalysis:
             bu_wise_run_ids[self.classify_run_id(run_id)].append(run_id)
 
         for bu, run_ids in bu_wise_run_ids.items():
-            print(f"Generating executing summary for bu: {bu}: {run_ids}")
+            logger.info(f"Generating executing summary for bu: {bu}: {run_ids}")
             qairt_regression_report += f"<h3>{bu.upper()} Analysis Report</h3>"
             updated_run_ids = []
             for run_id in run_ids:
@@ -1181,7 +1183,7 @@ class CombinedRegressionAnalysis:
 
             self.combined_soc_errors_list.extend(soc_errors_list)
 
-            print(f"Total errors: {len(soc_errors_list)}")
+            logger.info(f"Total errors: {len(soc_errors_list)}")
             qairt_regression_report += generate_executive_summary(soc_errors_list)
 
         qairt_regression_report += "</div></body></html>"
@@ -1207,7 +1209,7 @@ class CombinedRegressionAnalysis:
             model_failure_data = None
             if self._regression_analysis_object[run_id].regression_data:
                 model_failure_data = self._regression_analysis_object[run_id].regression_data["model"]
-                print(f"Processing: {run_id}: total model failure: {len(model_failure_data)}")
+                logger.info(f"Processing: {run_id}: total model failure: {len(model_failure_data)}")
                 for _, failures_list in model_failure_data.items():
                     for failure in failures_list:
                         if (
@@ -1220,7 +1222,7 @@ class CombinedRegressionAnalysis:
                             not in self._regression_analysis_object[run_id].types_to_filter_for_regression_analysis
                         ):
                             results[failure[key].lower()].append(failure["reason"])
-
+        logger.info(f"Total filtered erros: {len(results)}")
         updated_results = OrderedDefaultDict(list)
         if filter:
             for key, value in results.items():
@@ -1231,18 +1233,19 @@ class CombinedRegressionAnalysis:
         return dict(sorted(updated_results.items(), key=lambda kv: (-len(kv[1]), kv[0])))
 
     def __get_soc_failure_table(self, top_k=NUM_FAILURES_TO_SHOW):
+        logger.info("Building Soc Failure Table")
         failure_data = self.fetch_filtered_regression_data_from_all_ids(filter=True)
         soc_counts = sorted([(k, len(v)) for k, v in failure_data.items() if k and k != "host"], key=lambda x: -x[1])[
-            :10
+            :top_k
         ]
         html = '<div class="chart-wrap"><h3>SOC Summary</h3>'
         html += '<div class="chart-grid-2col">'
         html += (
-            '<div class="chart-box"><h4>Failure Count by SOC (Top 10)</h4>'
+            f'<div class="chart-box"><h4>Failure Count by SOC (Top {top_k})</h4>'
             + self._bar_chart_html(soc_counts, color="#e74c3c")
             + "</div>"
         )
-        html += '<div class="chart-box"><h4>SOC Distribution (Top 10)</h4>' + self._donut_html(soc_counts) + "</div>"
+        html += f'<div class="chart-box"><h4>SOC Distribution (Top {top_k})</h4>' + self._donut_html(soc_counts) + "</div>"
         html += "</div>"
         html += "<table border='1'><tr><th>Soc Name</th><th>Summary</th></tr>"
 
@@ -1268,17 +1271,18 @@ class CombinedRegressionAnalysis:
         return html
 
     def __get_model_failure_table(self, top_k=NUM_FAILURES_TO_SHOW):
+        logger.info("Building model failure table")
         failure_data = self.fetch_filtered_regression_data_from_all_ids(key="name", filter=True)
-        model_counts = sorted([(k, len(v)) for k, v in failure_data.items() if k], key=lambda x: -x[1])[:10]
+        model_counts = sorted([(k, len(v)) for k, v in failure_data.items() if k], key=lambda x: -x[1])[:top_k]
         html = '<div class="chart-wrap"><h3>Model Summary</h3>'
         html += '<div class="chart-grid-2col">'
         html += (
-            '<div class="chart-box"><h4>Failure Count by Model (Top 10)</h4>'
+            f'<div class="chart-box"><h4>Failure Count by Model (Top {top_k})</h4>'
             + self._bar_chart_html(model_counts, color="#8e44ad")
             + "</div>"
         )
         html += (
-            '<div class="chart-box"><h4>Model Distribution (Top 10)</h4>' + self._donut_html(model_counts) + "</div>"
+            f'<div class="chart-box"><h4>Model Distribution (Top {top_k})</h4>' + self._donut_html(model_counts) + "</div>"
         )
         html += "</div>"
         html += "<table border='1'><tr><th>Model Name</th><th>Summary</th></tr>"
@@ -1350,6 +1354,7 @@ class CombinedRegressionAnalysis:
         )
 
     def __get_dsp_type_wise_failure_table(self, top_k=NUM_FAILURES_TO_SHOW):
+        logger.info("Building DSP type failure table")
         failure_data = self.fetch_filtered_regression_data_from_all_ids(key="dsp_type", filter=True)
         dsp_counts = sorted([(k, len(v)) for k, v in failure_data.items() if k], key=lambda x: -x[1])
         html = '<div class="chart-wrap"><h3>DSP Type Summary</h3>'
@@ -1384,7 +1389,8 @@ class CombinedRegressionAnalysis:
         """
         Build an Executive Overview KPI card grid from all processed run IDs
         """
-
+        logger.info("Building KPI dashboard Card")
+        
         total_failures = 0
         total_models_failed = 0
         total_model_failure_entries = 0
@@ -1421,7 +1427,7 @@ class CombinedRegressionAnalysis:
                                 entry for entry in entries if (entry.get("cluster_class") or "") == "sdk_issue"
                             ]
                             total_failures += len(only_sdk_issue_entries)
-                            cluster_name_set.add(cluster_name)
+                            cluster_name_set.add(cluster_name.lower())
                             for entry in only_sdk_issue_entries:
                                 if isinstance(entry, dict) and entry.get("soc_name"):
                                     soc_set.add(entry["soc_name"])
@@ -1474,6 +1480,7 @@ class CombinedRegressionAnalysis:
         Build a BU × Runtime failure heatmap table from all processed run IDs,
         matching the heatmap section in enhanced_consolidated_report.py.
         """
+        logger.info("Building BU runtime heatmap")
         _BU_ORDER = ["Auto", "Compute", "Mobile/IOT/XR", "GenAI", "Unknown"]
         _BU_COLORS = {
             "Auto": "#e74c3c",
@@ -1579,7 +1586,7 @@ class CombinedRegressionAnalysis:
         qairt_regression_report_path = os.path.join(
             CONSOLIDATED_REPORTS.path,
             qairt_id,
-            f"{qairt_id}.html_sample",
+            f"{qairt_id}.html",
         )
 
         # if no run id is processed return the previous path with any processing
@@ -1805,8 +1812,8 @@ class CombinedRegressionAnalysis:
         qairt_regression_report += self.__get_model_failure_table()
 
         qairt_regression_report += self.__build_bu_runtime_heatmap_html()
-        # bu_summary_path = self.generate_bu_regression_report(qairt_id)
-        bu_summary_path = f"{CONSOLIDATED_REPORTS.path}/{qairt_id}/regression_htmls/BU_{qairt_id}.html"
+        bu_summary_path = self.generate_bu_regression_report(qairt_id)
+        # bu_summary_path = f"{CONSOLIDATED_REPORTS.path}/{qairt_id}/regression_htmls/BU_{qairt_id}.html"
         qairt_regression_report += self.list_to_html_ul(
             [f"<a href='https://aisw-hyd.qualcomm.com/fs/{bu_summary_path}' target='_blank'>BU Summary Page</a>"]
         )
@@ -1864,18 +1871,18 @@ def run_report_generation_for_all_qairt_ids():
     qairt_ids = sorted(os.listdir(CONSOLIDATED_REPORTS.path), reverse=True)
     qairt_ids = [q for q in qairt_ids if q.startswith("qaisw")]
     qairt_ids = [q for q in qairt_ids if should_process_id(q)]
-    print(f"Processing: {len(qairt_ids)} Qairt Ids")
+    logger.info(f"Processing: {len(qairt_ids)} Qairt Ids")
 
     for qairt_id in qairt_ids:
         if qairt_id.startswith("qaisw"):
             try:
                 report_analysis = CombinedRegressionAnalysis(ConsolidatedReportAnalysis())
                 report_analysis.generate_final_summary_report(qairt_id)
-                print(f"{qairt_id} Successfully processed !!")
-            except Exception as e:
+                logger.info(f"{qairt_id} Successfully processed !!")
+            except Exception:
                 continue
         else:
-            print(f"Non Qaisw folder found: {qairt_id}... Skipping !!!")
+            logger.info(f"Non Qaisw folder found: {qairt_id}... Skipping !!!")
 
 
 if __name__ == "__main__":

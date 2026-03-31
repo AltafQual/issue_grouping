@@ -157,17 +157,35 @@ def cummilative_summary_generation(errors_list: list[str], short_final_summary=F
         for i in range(0, len(iterable), size):
             yield iterable[i : i + size]
 
-    print(f"Total logs for cummilative summary generation: {len(errors_list)}")
-    summaries_list = []
+    async def _process_windows_concurrently(windows: list) -> list[str]:
+        semaphore = asyncio.Semaphore(5)
 
-    for index, error_window in enumerate(_chunk(errors_list, 10), start=1):
-        print(f"Processing window: {index} with lenght: {len(error_window)}")
-        prompt_template = ChatPromptTemplate.from_messages(
-            [("system", prompts.SUMMARY_GENERATION_PROMPT), ("human", prompts.ERROR_LOGS_LIST)]
-        )
-        chain = prompt_template | gemini_pro_model | StrOutputParser()
-        error_logs = "\n\n".join(f"Error Logs {i}:\n{error}" for i, error in enumerate(error_window, start=1))
-        summaries_list.append(chain.invoke({"logs": error_logs}))
+        async def _process_window(index: int, error_window: list) -> tuple[int, str]:
+            async with semaphore:
+                print(f"Processing window: {index} with lenght: {len(error_window)}")
+                prompt_template = ChatPromptTemplate.from_messages(
+                    [("system", prompts.SUMMARY_GENERATION_PROMPT), ("human", prompts.ERROR_LOGS_LIST)]
+                )
+                chain = prompt_template | gemini_pro_model | StrOutputParser()
+                error_logs = "\n\n".join(f"Error Logs {i}:\n{error}" for i, error in enumerate(error_window, start=1))
+                summary = await chain.ainvoke({"logs": error_logs})
+                return index, summary
+
+        tasks = [_process_window(i, window) for i, window in enumerate(windows, start=1)]
+        results = await asyncio.gather(*tasks)
+        return [summary for _, summary in sorted(results, key=lambda x: x[0])]
+
+    print(f"Total logs for cummilative summary generation: {len(errors_list)}")
+    error_windows = list(_chunk(errors_list, 10))
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_closed():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    summaries_list = loop.run_until_complete(_process_windows_concurrently(error_windows))
 
     print(f"Total summaries generated: {len(summaries_list)}. Generating final summary")
     prompt_template = ChatPromptTemplate.from_messages(
