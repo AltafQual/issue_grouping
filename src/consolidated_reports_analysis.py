@@ -1,4 +1,3 @@
-import logging
 import os
 import re
 from collections import OrderedDict, defaultdict
@@ -348,14 +347,14 @@ class ConsolidatedReportAnalysis:
             qairt_folder = os.path.join(self.reports_folder_path, qairt_id)
             functional_report_file = None
             for file in os.listdir(qairt_folder):
-                if file.startswith("Functional"):
+                if file.startswith("Functional_"):
                     functional_report_file = file
                     break
 
             if functional_report_file is None:
                 logger.warning(f"Not able to find any Functional report for: {qairt_id}")
                 return []
-
+            logger.info(f"Attempting to read file: {functional_report_file}")
             df = pd.read_excel(
                 os.path.join(qairt_folder, functional_report_file),
                 sheet_name=CONSOLIDATED_REPORTS.sheet_name,
@@ -1812,8 +1811,9 @@ class CombinedRegressionAnalysis:
         qairt_regression_report += self.__get_model_failure_table()
 
         qairt_regression_report += self.__build_bu_runtime_heatmap_html()
-        bu_summary_path = self.generate_bu_regression_report(qairt_id)
-        # bu_summary_path = f"{CONSOLIDATED_REPORTS.path}/{qairt_id}/regression_htmls/BU_{qairt_id}.html"
+        bu_summary_path = f"{CONSOLIDATED_REPORTS.path}/{qairt_id}/regression_htmls/BU_{qairt_id}.html"
+        if not os.path.exists(bu_summary_path):
+            bu_summary_path = self.generate_bu_regression_report(qairt_id)
         qairt_regression_report += self.list_to_html_ul(
             [f"<a href='https://aisw-hyd.qualcomm.com/fs/{bu_summary_path}' target='_blank'>BU Summary Page</a>"]
         )
