@@ -121,6 +121,7 @@ a:hover{text-decoration:underline}
 
 # ─── Data loading ─────────────────────────────────────────────────────────────
 
+
 def _load_joblib(qairt_id: str):
     """
     Load the regression analysis joblib for a given qairt_id.
@@ -140,12 +141,8 @@ def _load_joblib(qairt_id: str):
     for stub_name in ["src.get_prev_testplan_id", "src.regression_api_call"]:
         if stub_name not in sys.modules:
             sys.modules[stub_name] = types.ModuleType(stub_name)
-    sys.modules["src.get_prev_testplan_id"].iterate_db_get_testplan = (
-        lambda *a, **kw: (None, None, None, None)
-    )
-    sys.modules["src.regression_api_call"].get_two_run_ids_cluster_info = (
-        lambda *a, **kw: {}
-    )
+    sys.modules["src.get_prev_testplan_id"].iterate_db_get_testplan = lambda *a, **kw: (None, None, None, None)
+    sys.modules["src.regression_api_call"].get_two_run_ids_cluster_info = lambda *a, **kw: {}
 
     # Import the real module to get the actual classes for unpickling
     import src.consolidated_reports_analysis as cra_real
@@ -175,6 +172,7 @@ def _load_joblib(qairt_id: str):
 
 # ─── Classification ───────────────────────────────────────────────────────────
 
+
 def classify_run_id(run_id: str) -> str:
     r = run_id.lower()
     if "win" in r:
@@ -189,6 +187,7 @@ def classify_run_id(run_id: str) -> str:
 
 
 # ─── Aggregation ──────────────────────────────────────────────────────────────
+
 
 def aggregate(obj: dict) -> dict:
     """
@@ -345,6 +344,7 @@ def aggregate(obj: dict) -> dict:
 
 # ─── LLM summaries ───────────────────────────────────────────────────────────
 
+
 def _is_empty_summary(s: str) -> bool:
     return not s or s.strip().lower() in ("no logs to provide summary", "no logs", "")
 
@@ -370,9 +370,7 @@ def generate_llm_summaries(data: dict, cache_path: str | None = None) -> dict:
     results: dict = {"executive": "", "bu": {}, "cluster_class": {}}
 
     logger.info("Generating executive LLM summary (%d errors)...", len(data["combined_errors"]))
-    results["executive"] = get_cummilative_sumary(
-        data["combined_errors"], filter=True, short_summary=False
-    )
+    results["executive"] = get_cummilative_sumary(data["combined_errors"], filter=True, short_summary=False)
 
     for bu, stats in data["bu_stats"].items():
         errs = stats["error_summary_list"]
@@ -382,9 +380,7 @@ def generate_llm_summaries(data: dict, cache_path: str | None = None) -> dict:
     for cc, errs in data["cluster_class_errors"].items():
         sample = errs[:80]
         logger.info("Generating cluster-class LLM summary for %s (%d errors)...", cc, len(sample))
-        results["cluster_class"][cc] = get_cummilative_sumary(
-            sample, filter=True, short_summary=True
-        )
+        results["cluster_class"][cc] = get_cummilative_sumary(sample, filter=True, short_summary=True)
 
     if cache_path:
         os.makedirs(os.path.dirname(cache_path), exist_ok=True)
@@ -396,6 +392,7 @@ def generate_llm_summaries(data: dict, cache_path: str | None = None) -> dict:
 
 
 # ─── HTML helpers ─────────────────────────────────────────────────────────────
+
 
 def llm_box(summary_html: str, title: str = "LLM Analysis", collapsed: bool = True) -> str:
     """Wrap an LLM summary in a collapsible <details> block."""
@@ -428,12 +425,12 @@ def bar_chart_html(data: list, color: str = "#00629B", max_width: int = 280) -> 
     for label, val in data:
         w = int((val / max_val) * max_width) if max_val else 0
         rows += (
-            f'<tr>'
+            f"<tr>"
             f'<td style="width:190px;white-space:nowrap;font-size:.84em;padding:4px 8px 4px 0">{escape(str(label))}</td>'
             f'<td style="padding:4px 0">'
             f'<div style="background:{color};height:16px;width:{w}px;border-radius:3px;display:inline-block;vertical-align:middle"></div>'
             f'<span style="margin-left:8px;font-size:.84em;font-weight:700">{val:,}</span>'
-            f'</td></tr>'
+            f"</td></tr>"
         )
     return f'<table style="border:none;margin-bottom:0">{rows}</table>'
 
@@ -463,10 +460,10 @@ def donut_html(data: list) -> str:
         f'<div style="position:relative;flex-shrink:0">'
         f'<div style="width:110px;height:110px;border-radius:50%;background:conic-gradient({gradient})"></div>'
         f'<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);'
-        f'width:56px;height:56px;background:white;border-radius:50%;display:flex;align-items:center;'
+        f"width:56px;height:56px;background:white;border-radius:50%;display:flex;align-items:center;"
         f'justify-content:center;font-size:.72em;font-weight:800;color:#333;text-align:center">'
-        f'{total:,}<br>total</div></div>'
-        f'<div>{legend}</div></div>'
+        f"{total:,}<br>total</div></div>"
+        f"<div>{legend}</div></div>"
     )
 
 
@@ -486,6 +483,7 @@ def heat_class(val: int, max_val: int) -> str:
 
 
 # ─── HTML builder ─────────────────────────────────────────────────────────────
+
 
 def build_html(qairt_id: str, data: dict, llm: dict, obj: dict) -> str:
     from datetime import date as _date
@@ -508,8 +506,8 @@ def build_html(qairt_id: str, data: dict, llm: dict, obj: dict) -> str:
     html = (
         f'<!DOCTYPE html><html lang="en"><head>'
         f'<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
-        f'<title>QAIRT Analysis Report - {qairt_id}</title>'
-        f'{REPORT_CSS}</head><body>'
+        f"<title>QAIRT Analysis Report - {qairt_id}</title>"
+        f"{REPORT_CSS}</head><body>"
     )
 
     # ── Header ────────────────────────────────────────────────────────────
@@ -653,7 +651,14 @@ def build_html(qairt_id: str, data: dict, llm: dict, obj: dict) -> str:
     gt = sum(sum(d["heatmap"][bu][rt] for rt in ALL_RUNTIMES_ORDERED) for bu in BU_ORDER)
     html += f'<td style="font-weight:800">{gt:,}</td></tr></table></div>'
     html += '<div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap"><span style="font-size:.8em;color:var(--muted)">Intensity:</span>'
-    for cls, lbl in [("heat-0","0"),("heat-1","Low"),("heat-2","Medium"),("heat-3","High"),("heat-4","Very High"),("heat-5","Critical")]:
+    for cls, lbl in [
+        ("heat-0", "0"),
+        ("heat-1", "Low"),
+        ("heat-2", "Medium"),
+        ("heat-3", "High"),
+        ("heat-4", "Very High"),
+        ("heat-5", "Critical"),
+    ]:
         html += f'<span class="badge {cls}" style="border-radius:4px">{lbl}</span>'
     html += "</div></div>"
 
@@ -694,8 +699,8 @@ def build_html(qairt_id: str, data: dict, llm: dict, obj: dict) -> str:
 
     # ── Section 6: Cluster Analysis + LLM per-class ───────────────────────
     class_meta = {
-        "sdk_issue":   ("bd", "&#128308; SDK Issues",   "SDK / Product bug — needs engineering fix"),
-        "env_issue":   ("bw", "&#128993; Env Issues",   "Environment / infra issue — test setup problem"),
+        "sdk_issue": ("bd", "&#128308; SDK Issues", "SDK / Product bug — needs engineering fix"),
+        "env_issue": ("bw", "&#128993; Env Issues", "Environment / infra issue — test setup problem"),
         "setup_issue": ("bs", "&#128994; Setup Issues", "Test configuration issue — script/config error"),
     }
     max_c = top_clusters[0][1] if top_clusters else 1
@@ -754,9 +759,9 @@ def build_html(qairt_id: str, data: dict, llm: dict, obj: dict) -> str:
     for i, (model, cnt) in enumerate(top_models, 1):
         bw = int(cnt / max_m * 240)
         sev = (
-            "<span class='badge bd'>Critical</span>" if cnt > 200
-            else "<span class='badge bw'>High</span>" if cnt > 50
-            else "<span class='badge bi'>Medium</span>"
+            "<span class='badge bd'>Critical</span>"
+            if cnt > 200
+            else "<span class='badge bw'>High</span>" if cnt > 50 else "<span class='badge bi'>Medium</span>"
         )
         html += f'<tr><td style="color:var(--muted)">{i}</td><td style="font-family:monospace;font-size:.83em">{escape(model)}</td><td><b>{cnt:,}</b></td><td>{sev}</td><td><div style="background:#8e44ad;height:8px;border-radius:4px;width:{bw}px;display:inline-block"></div></td></tr>'
     html += f"""</table></div>
@@ -777,7 +782,7 @@ def build_html(qairt_id: str, data: dict, llm: dict, obj: dict) -> str:
       <tr><th>DSP Type</th><th>Failures</th><th>% Share</th></tr>"""
     for dsp, cnt in top_dsps:
         pct = cnt / total_dsp * 100 if total_dsp else 0
-        html += f'<tr><td><b>{escape(dsp)}</b></td><td>{cnt:,}</td><td>{pct:.1f}%</td></tr>'
+        html += f"<tr><td><b>{escape(dsp)}</b></td><td>{cnt:,}</td><td>{pct:.1f}%</td></tr>"
     html += f'<tr style="background:#f8f9fa"><td><b>Total</b></td><td><b>{total_dsp:,}</b></td><td>100%</td></tr>'
     html += "</table></div></div></div></div>"
 
@@ -841,15 +846,15 @@ def build_html(qairt_id: str, data: dict, llm: dict, obj: dict) -> str:
                                 gc += 1
         soc_str = ", ".join(sorted(socs_s)[:3]) + ("..." if len(socs_s) > 3 else "")
         html += (
-            f'<tr>'
+            f"<tr>"
             f'<td style="font-family:monospace;font-size:.79em">{escape(run_id)}</td>'
             f'<td><span class="badge" style="background:{bc};color:#fff;font-size:.76em">{bu}</span></td>'
-            f'<td><b>{tc:,}</b></td>'
-            f'<td><b>{mc:,}</b></td>'
+            f"<td><b>{tc:,}</b></td>"
+            f"<td><b>{mc:,}</b></td>"
             f'<td style="font-size:.8em">{soc_str}</td>'
             f'<td style="font-size:.8em">{", ".join(sorted(rts_s))}</td>'
-            f'<td>{gc}</td>'
-            f'</tr>'
+            f"<td>{gc}</td>"
+            f"</tr>"
         )
     html += "</table></div></div>"
 
@@ -866,6 +871,7 @@ def build_html(qairt_id: str, data: dict, llm: dict, obj: dict) -> str:
 
 
 # ─── Entry point ──────────────────────────────────────────────────────────────
+
 
 def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")

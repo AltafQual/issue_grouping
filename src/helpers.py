@@ -38,7 +38,7 @@ from src.db_connections import ConnectToMySql
 from src.execution_timer_log import execution_timer
 from src.faiss_db import FaissIVFFlatIndex
 from src.logger import AppLogger
-from src.qgenie import classify_cluster_based_of_type, generate_cluster_name
+from src.qgenie_llm_calls import classify_cluster_based_of_type, generate_cluster_name
 
 logger = AppLogger().get_logger(__name__)
 sql_connection = ConnectToMySql()
@@ -781,6 +781,7 @@ async def process_tc_ids_async_bg_job(run_ids):
 
             continue
 
+    requeue_failed_run_ids()
     swap_issue_grouping_db_to_prod()
     logger.info("Finished background job processing of TC IDs")
 
@@ -1111,3 +1112,48 @@ def fetch_model_ops(models_list):
         pass
 
     return model_ops_data
+
+
+def requeue_failed_run_ids():
+    """
+    Reads failed_processing_runids_log.txt, removes those run IDs from
+    processed_runids.json so they get reprocessed, then clears the log file.
+    """
+    failed_log_path = os.path.join(FaissConfigurations.base_path, "failed_processing_runids_log.txt")
+    processed_run_ids_path = os.path.join(FaissConfigurations.base_path, "processed_runids.json")
+
+    if not os.path.isfile(failed_log_path):
+        logger.info("No failed_processing_runids_log.txt found. Nothing to requeue.")
+        return
+
+    with open(failed_log_path, "r") as f:
+        content = f.read()
+
+    # Extract run IDs from lines like "Run ID: <run_id>"
+    failed_run_ids = re.findall(r"^Run ID:\s*(.+)$", content, re.MULTILINE)
+    failed_run_ids = [r.strip() for r in failed_run_ids if r.strip()]
+
+    if not failed_run_ids:
+        logger.info("No run IDs found in failed log. Clearing empty log file.")
+        open(failed_log_path, "w").close()
+        return
+
+    logger.info(f"Found {len(failed_run_ids)} failed run IDs to requeue: {failed_run_ids}")
+
+    processed_run_ids = []
+    if os.path.isfile(processed_run_ids_path):
+        with open(processed_run_ids_path, "r") as f:
+            processed_run_ids = json.load(f)
+
+    original_count = len(processed_run_ids)
+    processed_run_ids = [r for r in processed_run_ids if r not in failed_run_ids]
+    removed_count = original_count - len(processed_run_ids)
+
+    with open(processed_run_ids_path, "w") as f:
+        json.dump(processed_run_ids, f, indent=2)
+
+    logger.info(f"Removed {removed_count} run IDs from processed_runids.json.")
+
+    # Clear the failed log
+    open(failed_log_path, "w").close()
+    logger.info("Cleared failed_processing_runids_log.txt.")

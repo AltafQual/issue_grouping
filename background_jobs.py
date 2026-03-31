@@ -48,6 +48,12 @@ if __name__ == "__main__":
         next_run_time=datetime.now(IST),
     )
     scheduler.add_job(
-        run_ids_issue_grouping_processing, "interval", hours=12, max_instances=1, coalesce=True, misfire_grace_time=3600
+        run_ids_issue_grouping_processing,
+        "interval",
+        hours=12,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=3600,
+        next_run_time=datetime.now(IST),
     )
     scheduler.start()

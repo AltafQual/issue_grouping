@@ -14,3 +14,4 @@ issue_grouping_db
 issue_grouping_db_*
 .vscode
 CLAUDE.md
+.claude

@@ -3,7 +3,7 @@ import os
 
 import requests
 
-ISSUE_GROUPING_API_URL = os.getenv("ISSUE_GROUPING_API_URL", "http://go/issuegroupingapi")
+ISSUE_GROUPING_API_URL = os.getenv("ISSUE_GROUPING_API_URL", "http://hyd-lablnx904:8010")
 
 
 def get_two_run_ids_cluster_info(run_id_a: str, run_id_b: str, timeout: int = 600, force: bool = False) -> dict:

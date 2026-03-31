@@ -1,7 +1,7 @@
 import logging
 import os
 import re
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 from collections.abc import Mapping
 from copy import deepcopy
 from datetime import date
@@ -152,6 +152,51 @@ REPORT_CSS = """
         font-size: 0.9em;
         text-align: center;
     }
+
+    /* Failure distribution charts */
+    .chart-wrap { margin-bottom: 20px; }
+    .chart-grid-2col { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 16px; }
+    .chart-box { background: #f8f9fa; border: 1px solid var(--border-color); border-radius: 6px; padding: 14px 16px; }
+    .chart-box h4 { margin: 0 0 12px; font-size: .9em; color: var(--primary); }
+    .bar-row { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; font-size: .83em; }
+    .bar-row .bar-label { width: 170px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 0; }
+    .bar-row .bar-track { flex: 1; background: #e9ecef; border-radius: 3px; height: 13px; }
+    .bar-row .bar-fill { height: 13px; border-radius: 3px; }
+    .bar-row .bar-val { width: 45px; text-align: right; font-weight: 700; flex-shrink: 0; }
+    .donut-wrap { display: flex; align-items: center; gap: 18px; }
+    .donut-legend { font-size: .82em; line-height: 1.9; }
+    .donut-legend .dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
+
+    /* BU × Runtime heatmap */
+    .heatmap-wrap { margin-bottom: 24px; overflow-x: auto; }
+    .heatmap-wrap table { border-collapse: collapse; font-size: .88em; }
+    .heatmap-wrap th { background: var(--table-head-bg); color: var(--table-head-text); padding: 8px 12px; font-size: .8em; text-transform: uppercase; letter-spacing: .5px; }
+    .heatmap-wrap td { text-align: center; padding: 8px 12px; font-weight: 700; font-size: .86em; border: 1px solid var(--border-color); }
+    .heat-0 { background: #f8f9fa; color: #bbb; }
+    .heat-1 { background: #fff3cd; color: #856404; }
+    .heat-2 { background: #ffd6a5; color: #7d4e00; }
+    .heat-3 { background: #ffb3b3; color: #8b0000; }
+    .heat-4 { background: #ff6b6b; color: #fff; }
+    .heat-5 { background: #c0392b; color: #fff; }
+    .heat-legend { display: flex; gap: 10px; margin-top: 8px; flex-wrap: wrap; align-items: center; font-size: .8em; color: var(--text-muted); }
+    .heat-legend span { padding: 2px 10px; border-radius: 4px; font-weight: 700; }
+
+    /* KPI overview cards */
+    .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px; margin-bottom: 28px; }
+    .kpi { background: #fff; border-radius: 10px; padding: 18px; box-shadow: var(--shadow); border-left: 5px solid var(--primary); }
+    .kpi.d { border-left-color: #e74c3c; }
+    .kpi.w { border-left-color: #e67e22; }
+    .kpi.s { border-left-color: #27ae60; }
+    .kpi.p { border-left-color: #8e44ad; }
+    .kpi .lbl { font-size: .76em; color: var(--text-muted); text-transform: uppercase; letter-spacing: .8px; font-weight: 600; margin-bottom: 5px; }
+    .kpi .val { font-size: 2em; font-weight: 800; color: var(--primary); line-height: 1; }
+    .kpi.d .val { color: #e74c3c; }
+    .kpi.w .val { color: #e67e22; }
+    .kpi.s .val { color: #27ae60; }
+    .kpi.p .val { color: #8e44ad; }
+    .kpi .sub { font-size: .76em; color: var(--text-muted); margin-top: 3px; }
+    .overview-section { background: #fff; border: 1px solid var(--border-color); border-radius: 8px; padding: 22px 24px; margin-bottom: 28px; }
+    .overview-section .section-title { font-size: 1.1em; font-weight: 700; color: var(--primary); margin: 0 0 16px; padding-bottom: 10px; border-bottom: 2px solid var(--border-color); }
 </style>
 """
 
@@ -186,7 +231,7 @@ def filter_error_logs(error_logs_list, custom_filter_list=None):
 
 @execution_timer
 def get_cummilative_sumary(errors, filter=True, custom_filter=None, short_summary=False):
-    from src.qgenie import cummilative_summary_generation
+    from src.qgenie_llm_calls import cummilative_summary_generation
 
     if filter:
         print("Filter enabled, filtering logs")
@@ -335,7 +380,7 @@ class ConsolidatedReportAnalysis:
 class RegressionAnalysisReport:
     def __init__(self, qairt_id: str):
         self.model_regressed_errors_list, self.error_summary_list = [], []
-        self.types_to_filter_for_regression_analysis = ["bm_regression"]
+        self.types_to_filter_for_regression_analysis = ["bm_regression", "bm_verifier"]
         self.__destination_folder = os.path.join(CONSOLIDATED_REPORTS.path, qairt_id)
         self.__server_prefix = "https://aisw-hyd.qualcomm.com/fs"
         self.regression_data = None
@@ -393,7 +438,7 @@ class RegressionAnalysisReport:
             print(f"Either `error` or (`raw_data_dict` and `error_log_key`) has to be provided")
             return error_summary
 
-        from src.qgenie import error_summary_generation
+        from src.qgenie_llm_calls import error_summary_generation
 
         error_summary = error_summary_generation(final_error_list)
         for error in final_error_list:
@@ -463,12 +508,17 @@ class RegressionAnalysisReport:
                     if not entries:
                         continue
                     first = entries[0]
-                    if isinstance(first, dict) and "reason" in first and first["reason"] is not None:
+                    if (
+                        isinstance(first, dict)
+                        and "reason" in first
+                        and first["reason"] is not None
+                        and first["cluster_class"] == "sdk_issue"
+                    ):
                         reasons_list.append(first["reason"])
 
         self.runtime_type_regression_error_data = runtime_type_regression_error_data
 
-    def __filter_regression_data(self, data, _processing_type=None):
+    def filter_regression_data(self, data, _processing_type=None):
         if _processing_type is None or not data:
             return data
 
@@ -477,7 +527,7 @@ class RegressionAnalysisReport:
             for _type, data_in_type in data.items():
                 if _type.lower() not in self.types_to_filter_for_regression_analysis:
                     updated_data[_type] = data_in_type
-            self.__type_runtime_based_error_data(data)
+                    self.__type_runtime_based_error_data(updated_data)
             return updated_data
 
         elif _processing_type == "model":
@@ -627,10 +677,10 @@ class RegressionAnalysisReport:
         if any("rc" in run_id.lower() for run_id in [run_id_a, run_id_b]):
             self._has_rc_in_runid = True
 
-        type_based_regression_data = self.__filter_regression_data(
+        type_based_regression_data = self.filter_regression_data(
             regression_data.get("type", {}), _processing_type="type"
         )
-        model_based_regression_data = self.__filter_regression_data(
+        model_based_regression_data = self.filter_regression_data(
             regression_data.get("model", {}), _processing_type="model"
         )
         if not regression_data or (isinstance(regression_data, dict) and regression_data.get("status", 500) != 200):
@@ -639,7 +689,7 @@ class RegressionAnalysisReport:
             )
             return ""
         head = f"<html><head><title>Regression Analysis</title>{REPORT_CSS}</head><body><div class='container'>"
-        regression_html = f"<h2>Regression Analysis between {run_id_a} : {run_id_b}</h2>"
+        regression_html = ""
 
         print("Building html for Type based Failures")
         regression_html += f"<h3>Type based Failures</h3>"
@@ -707,7 +757,8 @@ class RegressionAnalysisReport:
             regression_html += "</tr>"
         regression_html += "</table>"
 
-        executive_summary_html = "<h2>Executive Summary of Failures</h2>"
+        executive_summary_html = f"<h2>Regression Analysis between {run_id_a} : {run_id_b}</h2>"
+        executive_summary_html += "<h2>Executive Summary of Failures</h2>"
         executive_summary_html += generate_executive_summary(
             self.error_summary_list, self.model_regressed_errors_list, filter=False
         )
@@ -755,7 +806,7 @@ class CombinedRegressionAnalysis:
         if rules is None:
             rules = [
                 ("Compute", self._regex(r"(?:^|[^a-z0-9])win(?:dows)?(?:[^a-z0-9]|$)")),
-                ("auto", self._regex(r"(?:^|[^a-z0-9])auto(?:[^a-z0-9]|$)")),
+                ("Auto", self._regex(r"(?:^|[^a-z0-9])auto(?:[^a-z0-9]|$)")),
                 ("GenAI", self._regex(r"(?:^|[^a-z0-9])llm(?:[^a-z0-9]|$)")),
                 ("Mobile/IOT/XR", self._regex(r"(?:^|[^a-z0-9])pt(?:[^a-z0-9]|$)")),
             ]
@@ -1034,7 +1085,6 @@ class CombinedRegressionAnalysis:
 
         If neither exists, returns {}, data unchanged
         """
-
         targets_present = {"converter": None, "quantizer": None}
         for k in list(data.keys()):
             kl = k.lower()
@@ -1160,7 +1210,15 @@ class CombinedRegressionAnalysis:
                 print(f"Processing: {run_id}: total model failure: {len(model_failure_data)}")
                 for _, failures_list in model_failure_data.items():
                     for failure in failures_list:
-                        if key in failure and failure[key] and "reason" in failure and failure["reason"]:
+                        if (
+                            key in failure
+                            and failure[key]
+                            and "reason" in failure
+                            and failure["reason"]
+                            and (failure.get("cluster_class") or "") == "sdk_issue"
+                            and (failure.get("type") or "").lower()
+                            not in self._regression_analysis_object[run_id].types_to_filter_for_regression_analysis
+                        ):
                             results[failure[key].lower()].append(failure["reason"])
 
         updated_results = OrderedDefaultDict(list)
@@ -1174,7 +1232,18 @@ class CombinedRegressionAnalysis:
 
     def __get_soc_failure_table(self, top_k=NUM_FAILURES_TO_SHOW):
         failure_data = self.fetch_filtered_regression_data_from_all_ids(filter=True)
-        html = "<h3>SOC Summary</h3>"
+        soc_counts = sorted([(k, len(v)) for k, v in failure_data.items() if k and k != "host"], key=lambda x: -x[1])[
+            :10
+        ]
+        html = '<div class="chart-wrap"><h3>SOC Summary</h3>'
+        html += '<div class="chart-grid-2col">'
+        html += (
+            '<div class="chart-box"><h4>Failure Count by SOC (Top 10)</h4>'
+            + self._bar_chart_html(soc_counts, color="#e74c3c")
+            + "</div>"
+        )
+        html += '<div class="chart-box"><h4>SOC Distribution (Top 10)</h4>' + self._donut_html(soc_counts) + "</div>"
+        html += "</div>"
         html += "<table border='1'><tr><th>Soc Name</th><th>Summary</th></tr>"
 
         idx_count = 0
@@ -1195,12 +1264,23 @@ class CombinedRegressionAnalysis:
 
         if idx_count == 0:
             html += "<tr><td colspan='2'><i>No failures found</i></td></tr>"
-        html += "</table>"
+        html += "</table></div>"
         return html
 
     def __get_model_failure_table(self, top_k=NUM_FAILURES_TO_SHOW):
         failure_data = self.fetch_filtered_regression_data_from_all_ids(key="name", filter=True)
-        html = "<h3>Model Summary</h3>"
+        model_counts = sorted([(k, len(v)) for k, v in failure_data.items() if k], key=lambda x: -x[1])[:10]
+        html = '<div class="chart-wrap"><h3>Model Summary</h3>'
+        html += '<div class="chart-grid-2col">'
+        html += (
+            '<div class="chart-box"><h4>Failure Count by Model (Top 10)</h4>'
+            + self._bar_chart_html(model_counts, color="#8e44ad")
+            + "</div>"
+        )
+        html += (
+            '<div class="chart-box"><h4>Model Distribution (Top 10)</h4>' + self._donut_html(model_counts) + "</div>"
+        )
+        html += "</div>"
         html += "<table border='1'><tr><th>Model Name</th><th>Summary</th></tr>"
 
         idx_count = 0
@@ -1218,17 +1298,73 @@ class CombinedRegressionAnalysis:
 
         if idx_count == 0:
             html += "<tr><td colspan='2'><i>No failures found</i></td></tr>"
-        html += "</table>"
+        html += "</table></div>"
         return html
+
+    def _bar_chart_html(self, data: list, color: str = "#00629B") -> str:
+        """Render a horizontal bar chart from [(label, count), ...] as HTML."""
+        if not data:
+            return "<p><i>No data</i></p>"
+        max_val = max(v for _, v in data)
+        rows = ""
+        for label, val in data:
+            pct = int(val / max_val * 100) if max_val else 0
+            rows += (
+                f'<div class="bar-row">'
+                f'<span class="bar-label" title="{escape(str(label))}">{escape(str(label))}</span>'
+                f'<div class="bar-track"><div class="bar-fill" style="width:{pct}%;background:{color}"></div></div>'
+                f'<span class="bar-val">{val:,}</span>'
+                f"</div>"
+            )
+        return rows
+
+    def _donut_html(self, data: list) -> str:
+        """Render a CSS conic-gradient donut + legend from [(label, count), ...]."""
+        if not data:
+            return "<p><i>No data</i></p>"
+        total = sum(v for _, v in data)
+        if not total:
+            return "<p><i>No data</i></p>"
+        colors = ["#e74c3c", "#f39c12", "#27ae60", "#3498db", "#9b59b6", "#1abc9c", "#e67e22", "#2ecc71"]
+        stops, cum = [], 0
+        for i, (_, val) in enumerate(data):
+            s = cum / total * 100
+            cum += val
+            e = cum / total * 100
+            stops.append(f"{colors[i % len(colors)]} {s:.1f}% {e:.1f}%")
+        legend = "".join(
+            f'<div><span class="dot" style="background:{colors[i % len(colors)]}"></span>'
+            f"{escape(str(lbl))}: <b>{val:,}</b> ({val / total * 100:.1f}%)</div>"
+            for i, (lbl, val) in enumerate(data)
+        )
+        gradient = ", ".join(stops)
+        return (
+            f'<div class="donut-wrap">'
+            f'<div style="position:relative;flex-shrink:0">'
+            f'<div style="width:110px;height:110px;border-radius:50%;background:conic-gradient({gradient})"></div>'
+            f'<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);'
+            f"width:56px;height:56px;background:white;border-radius:50%;display:flex;align-items:center;"
+            f'justify-content:center;font-size:.72em;font-weight:800;color:#333;text-align:center">'
+            f"{total:,}<br>total</div></div>"
+            f'<div class="donut-legend">{legend}</div></div>'
+        )
 
     def __get_dsp_type_wise_failure_table(self, top_k=NUM_FAILURES_TO_SHOW):
         failure_data = self.fetch_filtered_regression_data_from_all_ids(key="dsp_type", filter=True)
-        html = "<h3>DSP Type Summary</h3>"
+        dsp_counts = sorted([(k, len(v)) for k, v in failure_data.items() if k], key=lambda x: -x[1])
+        html = '<div class="chart-wrap"><h3>DSP Type Summary</h3>'
+        html += '<div class="chart-grid-2col">'
+        html += (
+            '<div class="chart-box"><h4>Failure Count by DSP Type</h4>'
+            + self._bar_chart_html(dsp_counts, color="#1abc9c")
+            + "</div>"
+        )
+        html += '<div class="chart-box"><h4>DSP Type Distribution</h4>' + self._donut_html(dsp_counts) + "</div>"
+        html += "</div>"
         html += "<table border='1'><tr><th>DSP Name</th><th>Summary</th></tr>"
 
         idx_count = 0
         for dsp_name, errors_list in failure_data.items():
-
             summary = get_cummilative_sumary(errors_list, filter=False, short_summary=True)
             if any(summay_to_avoid in summary.lower() for summay_to_avoid in self.list_of_summay_to_avoid):
                 continue
@@ -1241,23 +1377,220 @@ class CombinedRegressionAnalysis:
 
         if idx_count == 0:
             html += "<tr><td colspan='2'><i>No failures found</i></td></tr>"
+        html += "</table></div>"
+        return html
+
+    def __build_kpi_overview_html(self) -> str:
+        """
+        Build an Executive Overview KPI card grid from all processed run IDs
+        """
+
+        total_failures = 0
+        total_models_failed = 0
+        total_model_failure_entries = 0
+        total_gerrits = 0
+        soc_set = set()
+        runtime_set = set()
+        bu_set = set()
+        cluster_name_set = set()
+        gerrit_url_set = set()
+
+        for run_id, run_obj in self._regression_analysis_object.items():
+            if not run_obj:
+                continue
+            rd = run_obj.regression_data
+            if not rd or rd.get("status") != 200:
+                continue
+
+            bu_set.add(self.classify_run_id(run_id))
+
+            for _type, runtimes in rd.get("type", {}).items():
+                if _type.lower() in run_obj.types_to_filter_for_regression_analysis:
+                    continue
+
+                if not isinstance(runtimes, dict):
+                    continue
+
+                for rt, clusters in runtimes.items():
+                    if not isinstance(clusters, dict):
+                        continue
+                    runtime_set.add(rt)
+                    for cluster_name, entries in clusters.items():
+                        if isinstance(entries, list):
+                            only_sdk_issue_entries = [
+                                entry for entry in entries if (entry.get("cluster_class") or "") == "sdk_issue"
+                            ]
+                            total_failures += len(only_sdk_issue_entries)
+                            cluster_name_set.add(cluster_name)
+                            for entry in only_sdk_issue_entries:
+                                if isinstance(entry, dict) and entry.get("soc_name"):
+                                    soc_set.add(entry["soc_name"])
+
+            for _, entries in rd.get("model", {}).items():
+                only_sdk_issue_entries = []
+                for entry in entries:
+                    if (entry.get("cluster_class") or "") == "sdk_issue" and (
+                        entry.get("type") or ""
+                    ).lower() not in run_obj.types_to_filter_for_regression_analysis:
+                        only_sdk_issue_entries.append(entry)
+
+                if only_sdk_issue_entries:
+                    total_models_failed += 1
+                    total_model_failure_entries += len(only_sdk_issue_entries)
+                    for entry in only_sdk_issue_entries:
+                        if isinstance(entry, dict):
+                            if entry.get("soc_name"):
+                                soc_set.add(entry["soc_name"])
+                            if entry.get("runtime"):
+                                runtime_set.add(entry["runtime"])
+
+            for _, runtime_data in rd.get("gerrit_info", {}).items():
+                if not isinstance(runtime_data, dict):
+                    continue
+                for _, gerrit_entries in runtime_data.items():
+                    if not isinstance(gerrit_entries, list):
+                        continue
+                    for g in gerrit_entries:
+                        url = g.get("commit_url", "")
+                        if url and url not in gerrit_url_set:
+                            gerrit_url_set.add(url)
+                            total_gerrits += 1
+
+        total_run_ids = len(self._regression_analysis_object)
+
+        html = '<div class="overview-section">'
+        html += '<div class="section-title">&#128202; Executive Overview</div>'
+        html += '<div class="kpi-grid">'
+        html += f'<div class="kpi d"><div class="lbl">Total Failures</div><div class="val">{total_failures:,}</div><div class="sub">Across all run IDs</div></div>'
+        html += f'<div class="kpi w"><div class="lbl">Models Failed</div><div class="val">{total_models_failed:,}</div><div class="sub">{total_model_failure_entries:,} failure entries</div></div>'
+        html += f'<div class="kpi"><div class="lbl">Run IDs Processed</div><div class="val">{total_run_ids}</div><div class="sub">{len(bu_set)} Business Units</div></div>'
+        html += f'<div class="kpi s"><div class="lbl">Gerrits Merged</div><div class="val">{total_gerrits}</div><div class="sub">Unique commits</div></div>'
+        html += f'<div class="kpi w"><div class="lbl">Failure Clusters</div><div class="val">{len(cluster_name_set)}</div><div class="sub">Unique issue patterns</div></div>'
+        html += "</div></div>"
+        return html
+
+    def __build_bu_runtime_heatmap_html(self) -> str:
+        """
+        Build a BU × Runtime failure heatmap table from all processed run IDs,
+        matching the heatmap section in enhanced_consolidated_report.py.
+        """
+        _BU_ORDER = ["Auto", "Compute", "Mobile/IOT/XR", "GenAI", "Unknown"]
+        _BU_COLORS = {
+            "Auto": "#e74c3c",
+            "Compute": "#2980b9",
+            "Mobile/IOT/XR": "#27ae60",
+            "GenAI": "#8e44ad",
+            "Unknown": "#95a5a6",
+        }
+        _ALL_RUNTIMES = ["cpu", "gpu", "gpu_fp16", "htp", "htp_fp16", "mcp", "mcp_x86", "lpai"]
+
+        def _heat_class(val: int, max_val: int) -> str:
+            if val == 0:
+                return "heat-0"
+            r = val / max_val
+            if r < 0.10:
+                return "heat-1"
+            if r < 0.25:
+                return "heat-2"
+            if r < 0.50:
+                return "heat-3"
+            if r < 0.75:
+                return "heat-4"
+            return "heat-5"
+
+        # Build heatmap[bu][runtime] = failure count
+        heatmap = defaultdict(lambda: defaultdict(int))
+
+        for run_id, run_obj in self._regression_analysis_object.items():
+            if not run_obj:
+                continue
+            rd = run_obj.regression_data
+            if not rd or rd.get("status") != 200:
+                continue
+            bu = self.classify_run_id(run_id)
+            for _type, runtimes in rd.get("type", {}).items():
+                if _type.lower() in run_obj.types_to_filter_for_regression_analysis:
+                    continue
+
+                if not isinstance(runtimes, dict):
+                    continue
+                for rt, clusters in runtimes.items():
+                    if not isinstance(clusters, dict):
+                        continue
+                    cnt = 0
+                    for errors_list in clusters.values():
+                        updated_errors_list = [
+                            err for err in errors_list if (err.get("cluster_class") or "") == "sdk_issue"
+                        ]
+                        cnt += len(updated_errors_list)
+                    heatmap[bu][rt] += cnt
+
+        # Only include BUs that have data
+        active_bus = [bu for bu in _BU_ORDER if bu in heatmap]
+        if not active_bus:
+            return ""
+
+        all_vals = [heatmap[bu][rt] for bu in active_bus for rt in _ALL_RUNTIMES]
+        max_heat = max(all_vals) if all_vals else 1
+
+        html = '<div class="heatmap-wrap">'
+        html += "<h3>Failure Heatmap: BU &times; Runtime</h3>"
+        html += '<p style="color:var(--text-muted);font-size:.86em;margin-top:-8px;margin-bottom:12px">Cell values = total failure count. Color intensity = severity.</p>'
+        html += "<table><tr><th>BU / Runtime</th>"
+        for rt in _ALL_RUNTIMES:
+            html += f"<th>{rt.upper()}</th>"
+        html += "<th>TOTAL</th></tr>"
+
+        for bu in active_bus:
+            row_total = sum(heatmap[bu][rt] for rt in _ALL_RUNTIMES)
+            color = _BU_COLORS.get(bu, "#95a5a6")
+            html += f'<tr><td style="font-weight:700;background:{color};color:#fff;text-align:left;padding:8px 12px">{bu}</td>'
+            for rt in _ALL_RUNTIMES:
+                val = heatmap[bu][rt]
+                html += f'<td class="{_heat_class(val, max_heat)}">{val:,}</td>'
+            html += f'<td style="font-weight:800;background:#f8f9fa">{row_total:,}</td></tr>'
+
+        # Totals row
+        html += '<tr style="background:#f0f2f5"><td style="font-weight:700;text-align:left;padding:8px 12px">TOTAL</td>'
+        grand_total = 0
+        for rt in _ALL_RUNTIMES:
+            ct = sum(heatmap[bu][rt] for bu in active_bus)
+            grand_total += ct
+            html += f'<td style="font-weight:700">{ct:,}</td>'
+        html += f'<td style="font-weight:800">{grand_total:,}</td></tr>'
         html += "</table>"
+
+        # Legend
+        html += '<div class="heat-legend">Intensity:'
+        for cls, lbl in [
+            ("heat-0", "0"),
+            ("heat-1", "Low"),
+            ("heat-2", "Medium"),
+            ("heat-3", "High"),
+            ("heat-4", "Very High"),
+            ("heat-5", "Critical"),
+        ]:
+            html += f'<span class="{cls}">{lbl}</span>'
+        html += "</div>"
+        html += "</div>"
         return html
 
     def generate_qairt_regression_report(self, qairt_id):
         qairt_regression_report_path = os.path.join(
             CONSOLIDATED_REPORTS.path,
             qairt_id,
-            f"{qairt_id}.html",
+            f"{qairt_id}.html_sample",
         )
 
         # if no run id is processed return the previous path with any processing
         if not self.__processed_run_id:
             return qairt_regression_report_path
+
         qairt_regression_report = (
             f"<html><head><title>Regression Report</title>{REPORT_CSS}</head><body><div class='container'>"
         )
         qairt_regression_report += f"<h2>QAIRT Analysis Report ({qairt_id})</h2>"
+        qairt_regression_report += self.__build_kpi_overview_html()
 
         prev_run_id = None
         combined_runtime_type_json_data = None
@@ -1321,14 +1654,14 @@ class CombinedRegressionAnalysis:
                                 f"<tr>"
                                 f"<td rowspan='{rowspan}'>Tools</td>"
                                 f"<td>{runtime.capitalize()}</td>"
-                                f"<td><ul>{summary_html}</ul></td>"
+                                f"<td>{summary_html}</td>"
                                 f"{gerrit_cell}"
                                 f"</tr>"
                             )
                             first_row = False
                         else:
                             qairt_regression_report += (
-                                f"<tr>" f"<td>{runtime.capitalize()}</td>" f"<td><ul>{summary_html}</ul></td>" f"</tr>"
+                                f"<tr>" f"<td>{runtime.capitalize()}</td>" f"<td>{summary_html}</td>" f"</tr>"
                             )
         core_data = []
         # process CPU seprately
@@ -1345,14 +1678,18 @@ class CombinedRegressionAnalysis:
                 if savecontext_data:
                     savecontext_summary = get_cummilative_sumary(savecontext_data)
                     if not any(
-                        summary_to_avoid in savecontext_summary.lower() for summary_to_avoid in self.list_of_summay_to_avoid
+                        summary_to_avoid in savecontext_summary.lower()
+                        for summary_to_avoid in self.list_of_summay_to_avoid
                     ):
                         graph_prepare_row_data.append(("savecontext", savecontext_summary))
                     del combined_runtime_type_json_data[current_runtime]["savecontext"]
 
                 if gprepare_data:
                     gprepare_summary = get_cummilative_sumary(gprepare_data)
-                    if not any(summary_to_avoid in gprepare_summary.lower() for summary_to_avoid in self.list_of_summay_to_avoid):
+                    if not any(
+                        summary_to_avoid in gprepare_summary.lower()
+                        for summary_to_avoid in self.list_of_summay_to_avoid
+                    ):
                         graph_prepare_row_data.append(("graph prepare", gprepare_summary))
                     del combined_runtime_type_json_data[current_runtime]["graph_prepare"]
 
@@ -1372,7 +1709,7 @@ class CombinedRegressionAnalysis:
                     for runtime, summary in graph_prepare_row_data[1:]:
                         qairt_regression_report += f"<tr>" f"<td>{runtime}</td>" f"<td><ul>{summary}</ul></td>" f"</tr>"
 
-            types_to_process_cpu = ["inference", "verifier", "bm_regression"]
+            types_to_process_cpu = ["inference", "verifier"]
             all_cpu_types = list(types_dict.keys())
             all_cpu_summaries = [get_cummilative_sumary(types_dict[_type]) for _type in all_cpu_types]
 
@@ -1452,7 +1789,7 @@ class CombinedRegressionAnalysis:
                     f"<td rowspan='{rowspan}'>Core</td>"
                     f"<td>{first_runtime}</td>"
                     f"<td><ul>{first_summary}</ul></td>"
-                    f"<td>{gerrit_cell}</td>"
+                    f"<td rowspan='{rowspan}'>{gerrit_cell}</td>"
                     f"</tr>"
                 )
                 for runtime, summary in core_data[1:]:
@@ -1463,15 +1800,16 @@ class CombinedRegressionAnalysis:
             )
         qairt_regression_report += "</table>"
 
-        bu_summary_path = self.generate_bu_regression_report(qairt_id)
-        qairt_regression_report += "<h3> BU Summary Page </h3>"
-        qairt_regression_report += self.list_to_html_ul(
-            [f"<a href='https://aisw-hyd.qualcomm.com/fs/{bu_summary_path}' target='_blank'>BU Summary Page</a>"]
-        )
-
         qairt_regression_report += self.__get_dsp_type_wise_failure_table()
         qairt_regression_report += self.__get_soc_failure_table()
         qairt_regression_report += self.__get_model_failure_table()
+
+        qairt_regression_report += self.__build_bu_runtime_heatmap_html()
+        # bu_summary_path = self.generate_bu_regression_report(qairt_id)
+        bu_summary_path = f"{CONSOLIDATED_REPORTS.path}/{qairt_id}/regression_htmls/BU_{qairt_id}.html"
+        qairt_regression_report += self.list_to_html_ul(
+            [f"<a href='https://aisw-hyd.qualcomm.com/fs/{bu_summary_path}' target='_blank'>BU Summary Page</a>"]
+        )
 
         qairt_regression_report += "</div></body></html>"
         with open(qairt_regression_report_path, "w") as f:

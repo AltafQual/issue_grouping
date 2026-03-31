@@ -13,8 +13,8 @@ from langchain_core.output_parsers import JsonOutputParser, StrOutputParser
 from langchain_core.outputs import ChatResult
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
-
 from qgenie.integrations.langchain import QGenieChat
+
 from src import prompts
 from src.constants import QGENEIE_API_KEY, ClusterSpecificKeys, DataFrameKeys
 from src.execution_timer_log import execution_timer
@@ -386,9 +386,9 @@ async def merge_duplicate_clusters(
             cluster_results[base_cluster_id]["cluster_name"] = response["merged_name"]
 
             # Move all rows from next_cluster to base_cluster
-            df.loc[
-                df[DataFrameKeys.cluster_type_int] == next_cluster_id, DataFrameKeys.cluster_type_int
-            ] = base_cluster_id
+            df.loc[df[DataFrameKeys.cluster_type_int] == next_cluster_id, DataFrameKeys.cluster_type_int] = (
+                base_cluster_id
+            )
 
             # Move outliers to cluster -1
             outlier_indices = [int(index) for index in response.get("outlier_indices")]
@@ -409,9 +409,9 @@ def give_cluster_names_and_reassign_misc_clusters(df: pd.DataFrame, cluster_resu
     for cluster_id, result in cluster_results.items():
         misclassified_ids = result.get("misclassified_ids", [])
         if misclassified_ids:
-            df.loc[
-                df.index.isin(misclassified_ids), DataFrameKeys.cluster_type_int
-            ] = ClusterSpecificKeys.non_grouped_key
+            df.loc[df.index.isin(misclassified_ids), DataFrameKeys.cluster_type_int] = (
+                ClusterSpecificKeys.non_grouped_key
+            )
 
         cluster_name = result.get("cluster_name")
         if cluster_name:
@@ -509,9 +509,9 @@ def inter_cluster_merging(df: pd.DataFrame) -> pd.DataFrame:
                 merge_response = merge_clusters(df, current_cluster_name, merge_target_name)
 
                 # Update cluster labels in df
-                df.loc[
-                    df[DataFrameKeys.cluster_name] == current_cluster_name, DataFrameKeys.cluster_name
-                ] = merge_response["merged_name"]
+                df.loc[df[DataFrameKeys.cluster_name] == current_cluster_name, DataFrameKeys.cluster_name] = (
+                    merge_response["merged_name"]
+                )
 
                 # Handle outliers
                 outlier_indices = merge_response.get("outlier_indices", [])

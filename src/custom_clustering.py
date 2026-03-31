@@ -349,7 +349,7 @@ class CustomEmbeddingCluster:
                 max_sim_idx = np.argmax(similarities)
                 max_sim = similarities[max_sim_idx]
 
-                if (max_sim >= similarity_threshold):
+                if max_sim >= similarity_threshold:
                     if cluster_name.lower() in existing_cluster_names:
                         existing_cluster_name = list(updated_metadata.keys())[max_sim_idx]
                         print(

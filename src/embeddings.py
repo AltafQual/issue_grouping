@@ -3,9 +3,9 @@ import threading
 import time
 
 from langchain.embeddings.base import Embeddings
+from qgenie.integrations.langchain import QGenieEmbeddings
 from sentence_transformers import SentenceTransformer
 
-from qgenie.integrations.langchain import QGenieEmbeddings
 from src.constants import QGENEIE_API_KEY
 from src.execution_timer_log import execution_timer
 from src.logger import AppLogger
