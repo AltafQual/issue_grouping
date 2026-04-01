@@ -673,7 +673,7 @@ class RegressionAnalysisReport:
         self.regression_data = regression_data
         self.gerrits_information = regression_data.get("gerrit_info", {})
         logger.info(f"Processing: {run_id_a}: {run_id_b}")
-        
+
         if any("rc" in run_id.lower() for run_id in [run_id_a, run_id_b]):
             self._has_rc_in_runid = True
 
@@ -787,6 +787,7 @@ class CombinedRegressionAnalysis:
         self.combined_type_runtime_wise_errors_dict = {}
         self._qairt_id = None
         self.list_of_summay_to_avoid = ["no logs to provide", "no logs"]
+        self.unique_gerrits_count = 0
 
     def _regex(self, pattern: str):
         rx = re.compile(pattern, re.IGNORECASE)
@@ -981,8 +982,8 @@ class CombinedRegressionAnalysis:
 
         for repo_name, gerrits_data in project_wise_gerrits.items():
             html_content += f"<h3>Repository Name: {repo_name}</h3>"
+            html_content += "<table border='1'><tr><th>Gerrit Raised By</th><th>Email</th><th>Commit Message</th><th>Gerrit Link</th></tr>"
             for data in gerrits_data:
-                html_content += "<table border='1'><tr><th>Gerrit Raised By</th><th>Email</th><th>Commit Message</th><th>Gerrit Link</th></tr>"
                 commit_url = f"<a href='{data['commit_url']}' target='_blank'>Gerrit</a>"
                 html_content += f"<tr><td>{data['gerrit_raised_by'][0]['name']}</td><td>{data['gerrit_raised_by'][0]['email']}</td><td>{data['commit_message']}</td><td>{commit_url}</td></tr>"
             html_content += "</table>"
@@ -991,6 +992,7 @@ class CombinedRegressionAnalysis:
         with open(file_path, "w") as f:
             f.write(html_content)
 
+        self.unique_gerrits_count = len(unique_gerrits)
         return "https://aisw-hyd.qualcomm.com/fs/" + file_path
 
     def _get_gerrits_data(self, runtime_first=False):
@@ -1007,7 +1009,9 @@ class CombinedRegressionAnalysis:
 
         return gerrits_data
 
-    def generate_gerrits_merged_report(self):
+    def generate_gerrits_merged_report(self, gerrits_data=None):
+        if gerrits_data:
+            return self.__generated_regressed_gerrits_page(self._qairt_id, gerrits_data)
         return self.__generated_regressed_gerrits_page(self._qairt_id, self._get_gerrits_data())
 
     def list_to_html_ul(self, items):
@@ -1244,7 +1248,9 @@ class CombinedRegressionAnalysis:
             + self._bar_chart_html(soc_counts, color="#e74c3c")
             + "</div>"
         )
-        html += f'<div class="chart-box"><h4>SOC Distribution (Top {top_k})</h4>' + self._donut_html(soc_counts) + "</div>"
+        html += (
+            f'<div class="chart-box"><h4>SOC Distribution (Top {top_k})</h4>' + self._donut_html(soc_counts) + "</div>"
+        )
         html += "</div>"
         html += "<table border='1'><tr><th>Soc Name</th><th>Summary</th></tr>"
 
@@ -1281,7 +1287,9 @@ class CombinedRegressionAnalysis:
             + "</div>"
         )
         html += (
-            f'<div class="chart-box"><h4>Model Distribution (Top {top_k})</h4>' + self._donut_html(model_counts) + "</div>"
+            f'<div class="chart-box"><h4>Model Distribution (Top {top_k})</h4>'
+            + self._donut_html(model_counts)
+            + "</div>"
         )
         html += "</div>"
         html += "<table border='1'><tr><th>Model Name</th><th>Summary</th></tr>"
@@ -1389,16 +1397,14 @@ class CombinedRegressionAnalysis:
         Build an Executive Overview KPI card grid from all processed run IDs
         """
         logger.info("Building KPI dashboard Card")
-        
+
         total_failures = 0
         total_models_failed = 0
         total_model_failure_entries = 0
-        total_gerrits = 0
         soc_set = set()
         runtime_set = set()
         bu_set = set()
         cluster_name_set = set()
-        gerrit_url_set = set()
 
         for run_id, run_obj in self._regression_analysis_object.items():
             if not run_obj:
@@ -1449,18 +1455,6 @@ class CombinedRegressionAnalysis:
                             if entry.get("runtime"):
                                 runtime_set.add(entry["runtime"])
 
-            for _, runtime_data in rd.get("gerrit_info", {}).items():
-                if not isinstance(runtime_data, dict):
-                    continue
-                for _, gerrit_entries in runtime_data.items():
-                    if not isinstance(gerrit_entries, list):
-                        continue
-                    for g in gerrit_entries:
-                        url = g.get("commit_url", "").lower()
-                        if url and url not in gerrit_url_set:
-                            gerrit_url_set.add(url)
-                            total_gerrits += 1
-
         total_run_ids = len(self._regression_analysis_object)
 
         html = '<div class="overview-section">'
@@ -1469,8 +1463,7 @@ class CombinedRegressionAnalysis:
         html += f'<div class="kpi d"><div class="lbl">Total Failures</div><div class="val">{total_failures:,}</div><div class="sub">Across all run IDs</div></div>'
         html += f'<div class="kpi w"><div class="lbl">Models Failed</div><div class="val">{total_models_failed:,}</div><div class="sub">{total_model_failure_entries:,} failure entries</div></div>'
         html += f'<div class="kpi"><div class="lbl">Run IDs Processed</div><div class="val">{total_run_ids}</div><div class="sub">{len(bu_set)} Business Units</div></div>'
-        html += f'<div class="kpi s"><div class="lbl">Gerrits Merged</div><div class="val">{total_gerrits}</div><div class="sub">Unique commits</div></div>'
-        html += f'<div class="kpi w"><div class="lbl">Failure Clusters</div><div class="val">{len(cluster_name_set)}</div><div class="sub">Unique issue patterns</div></div>'
+        html += f'<div class="kpi s"><div class="lbl">Gerrits Merged</div><div class="val">{self.unique_gerrits_count}</div><div class="sub">Unique commits</div></div>'
         html += "</div></div>"
         return html
 
@@ -1592,6 +1585,9 @@ class CombinedRegressionAnalysis:
         if not self.__processed_run_id:
             return qairt_regression_report_path
 
+        gerrits_data = self._get_gerrits_data(runtime_first=True)
+        all_merged_gerrits_report = self.generate_gerrits_merged_report(gerrits_data)
+
         qairt_regression_report = (
             f"<html><head><title>Regression Report</title>{REPORT_CSS}</head><body><div class='container'>"
         )
@@ -1629,7 +1625,6 @@ class CombinedRegressionAnalysis:
         qairt_regression_report += (
             "<table border='1'><tr><th>Runtime/Tools</th><th>Type</th><th>Summary</th><th>Gerrits Merged</th></tr>"
         )
-        gerrits_data = self._get_gerrits_data(runtime_first=True)
 
         # add tools row
         if converter_quantizer_dict:
@@ -1783,8 +1778,7 @@ class CombinedRegressionAnalysis:
                     summary = cpu_summaries_list[idx]
                     qairt_regression_report += f"<tr>" f"<td>{runtime}</td>" f"<td><ul>{summary}</ul></td>" f"</tr>"
 
-        gerrit_cell = self.generate_gerrits_merged_report()
-        gerrit_cell = f"<a href='{gerrit_cell}'>All Merged Gerrits</a>"
+        all_merged_gerrits_report_url = f"<a href='{all_merged_gerrits_report}'>All Merged Gerrits</a>"
         if core_data:
             rowspan = len(core_data)
             if rowspan:
@@ -1795,14 +1789,19 @@ class CombinedRegressionAnalysis:
                     f"<td rowspan='{rowspan}'>Core</td>"
                     f"<td>{first_runtime}</td>"
                     f"<td><ul>{first_summary}</ul></td>"
-                    f"<td rowspan='{rowspan}'>{gerrit_cell}</td>"
+                    f"<td rowspan='{rowspan}'>{all_merged_gerrits_report_url}</td>"
                     f"</tr>"
                 )
                 for runtime, summary in core_data[1:]:
                     qairt_regression_report += f"<tr>" f"<td>{runtime}</td>" f"<td><ul>{summary}</ul></td>" f"</tr>"
         else:
             qairt_regression_report += (
-                f"<tr>" f"<td>Core</td>" f"<td>-</td>" f"<td>-</td>" f"<td>{gerrit_cell}</td>" f"</tr>"
+                f"<tr>"
+                f"<td>Core</td>"
+                f"<td>-</td>"
+                f"<td>-</td>"
+                f"<td>{all_merged_gerrits_report_url}</td>"
+                f"</tr>"
             )
         qairt_regression_report += "</table>"
 
