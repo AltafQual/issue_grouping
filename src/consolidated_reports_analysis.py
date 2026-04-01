@@ -1010,8 +1010,6 @@ class CombinedRegressionAnalysis:
         return gerrits_data
 
     def generate_gerrits_merged_report(self, gerrits_data=None):
-        if gerrits_data:
-            return self.__generated_regressed_gerrits_page(self._qairt_id, gerrits_data)
         return self.__generated_regressed_gerrits_page(self._qairt_id, self._get_gerrits_data())
 
     def list_to_html_ul(self, items):
