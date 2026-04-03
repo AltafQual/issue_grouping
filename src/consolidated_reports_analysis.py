@@ -1167,6 +1167,8 @@ class CombinedRegressionAnalysis:
         for bu, run_ids in bu_wise_run_ids.items():
             logger.info(f"Generating executing summary for bu: {bu}: {run_ids}")
             qairt_regression_report += f"<h3>{bu.upper()} Analysis Report</h3>"
+            
+            qairt_regression_report += "<h4>Run IDS Processed</h4>"
             updated_run_ids = []
             for run_id in run_ids:
                 if self._regression_html_paths.get(run_id):
@@ -1176,15 +1178,14 @@ class CombinedRegressionAnalysis:
                 else:
                     updated_run_ids.append(run_id)
             qairt_regression_report += self.list_to_html_ul(updated_run_ids)
-
+            
+            failure_data =  self.fetch_filtered_regression_data_from_all_ids(filter=True, run_ids=run_ids)
             soc_errors_list = []
-            for run_id in run_ids:
-                if self._regression_analysis_object[run_id]:
-                    soc_errors_list.extend(self._regression_analysis_object[run_id].error_summary_list)
-
-            self.combined_soc_errors_list.extend(soc_errors_list)
+            for _, errors in failure_data.items():
+                soc_errors_list.extend(errors)
 
             logger.info(f"Total errors: {len(soc_errors_list)}")
+            qairt_regression_report += self.__get_bu_metrics_charts(run_ids)
             qairt_regression_report += generate_executive_summary(soc_errors_list)
 
         qairt_regression_report += "</div></body></html>"
@@ -1204,11 +1205,12 @@ class CombinedRegressionAnalysis:
 
         return qairt_html_report
 
-    def fetch_filtered_regression_data_from_all_ids(self, key="soc_name", filter=False) -> dict:
+    def fetch_filtered_regression_data_from_all_ids(self, key="soc_name", filter=False, run_ids=None) -> dict:
         results = OrderedDefaultDict(list)
-        for run_id in self._regression_analysis_object:
+        ids_to_process = run_ids if run_ids is not None else list(self._regression_analysis_object.keys())
+        for run_id in ids_to_process:
             model_failure_data = None
-            if self._regression_analysis_object[run_id].regression_data:
+            if self._regression_analysis_object[run_id] and self._regression_analysis_object[run_id].regression_data:
                 model_failure_data = self._regression_analysis_object[run_id].regression_data["model"]
                 logger.info(f"Processing: {run_id}: total model failure: {len(model_failure_data)}")
                 for _, failures_list in model_failure_data.items():
@@ -1223,6 +1225,7 @@ class CombinedRegressionAnalysis:
                             not in self._regression_analysis_object[run_id].types_to_filter_for_regression_analysis
                         ):
                             results[failure[key].lower()].append(failure["reason"])
+                            
         logger.info(f"Total filtered erros: {len(results)}")
         updated_results = OrderedDefaultDict(list)
         if filter:
@@ -1388,6 +1391,38 @@ class CombinedRegressionAnalysis:
         if idx_count == 0:
             html += "<tr><td colspan='2'><i>No failures found</i></td></tr>"
         html += "</table></div>"
+        return html
+
+    def __get_bu_metrics_charts(self, run_ids, top_k=NUM_FAILURES_TO_SHOW):
+        html = ""
+
+        # SOC chart
+        soc_data = self.fetch_filtered_regression_data_from_all_ids(key="soc_name", filter=True, run_ids=run_ids)
+        soc_counts = sorted([(k, len(v)) for k, v in soc_data.items() if k and k != "host"], key=lambda x: -x[1])[:top_k]
+        if soc_counts:
+            html += '<div class="chart-wrap"><h4>SOC Summary</h4><div class="chart-grid-2col">'
+            html += f'<div class="chart-box"><h4>Failure Count by SOC (Top {top_k})</h4>' + self._bar_chart_html(soc_counts, color="#e74c3c") + "</div>"
+            html += f'<div class="chart-box"><h4>SOC Distribution (Top {top_k})</h4>' + self._donut_html(soc_counts) + "</div>"
+            html += "</div></div>"
+
+        # Model chart
+        model_data = self.fetch_filtered_regression_data_from_all_ids(key="name", filter=True, run_ids=run_ids)
+        model_counts = sorted([(k, len(v)) for k, v in model_data.items() if k], key=lambda x: -x[1])[:top_k]
+        if model_counts:
+            html += '<div class="chart-wrap"><h4>Model Summary</h4><div class="chart-grid-2col">'
+            html += f'<div class="chart-box"><h4>Failure Count by Model (Top {top_k})</h4>' + self._bar_chart_html(model_counts, color="#8e44ad") + "</div>"
+            html += f'<div class="chart-box"><h4>Model Distribution (Top {top_k})</h4>' + self._donut_html(model_counts) + "</div>"
+            html += "</div></div>"
+
+        # DSP chart
+        dsp_data = self.fetch_filtered_regression_data_from_all_ids(key="dsp_type", filter=True, run_ids=run_ids)
+        dsp_counts = sorted([(k, len(v)) for k, v in dsp_data.items() if k], key=lambda x: -x[1])
+        if dsp_counts:
+            html += '<div class="chart-wrap"><h4>DSP Type Summary</h4><div class="chart-grid-2col">'
+            html += '<div class="chart-box"><h4>Failure Count by DSP Type</h4>' + self._bar_chart_html(dsp_counts, color="#1abc9c") + "</div>"
+            html += '<div class="chart-box"><h4>DSP Type Distribution</h4>' + self._donut_html(dsp_counts) + "</div>"
+            html += "</div></div>"
+
         return html
 
     def __build_kpi_overview_html(self) -> str:
@@ -1808,11 +1843,11 @@ class CombinedRegressionAnalysis:
         qairt_regression_report += self.__get_model_failure_table()
 
         qairt_regression_report += self.__build_bu_runtime_heatmap_html()
-        bu_summary_path = f"{CONSOLIDATED_REPORTS.path}/{qairt_id}/regression_htmls/BU_{qairt_id}.html"
-        if not os.path.exists(bu_summary_path):
-            bu_summary_path = self.generate_bu_regression_report(qairt_id)
+        # bu_summary_path = f"{CONSOLIDATED_REPORTS.path}/{qairt_id}/regression_htmls/BU_{qairt_id}.html"
+        # if not os.path.exists(bu_summary_path):
+        bu_summary_path = self.generate_bu_regression_report(qairt_id)
         qairt_regression_report += self.list_to_html_ul(
-            [f"<a href='https://aisw-hyd.qualcomm.com/fs/{bu_summary_path}' target='_blank'>BU Summary Page</a>"]
+            [f"<a href='https://aisw-hyd.qualcomm.com/fs/{bu_summary_path}' target='_blank' style='font-size: 20px; text-decoration: none;'>BU Summary Page</a>"]
         )
 
         qairt_regression_report += "</div></body></html>"
