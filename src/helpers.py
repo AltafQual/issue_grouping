@@ -296,6 +296,42 @@ def replace_limiting_reason_with_actual_reason(df, error_reason_column):
     return df
 
 
+def extract_error_lines(self, error_msg):
+    """
+    Given the raw error_msg string from execution_results.json (which is a Python
+    list repr embedded in a larger string), extracts only the lines that contain
+    error markers (<e>, <E>, [ error ], [ Error ], [ ERROR ]).
+    Deduplicates by stripping the leading timestamp so repeated identical errors
+    across iterations are collapsed.
+
+    Returns a newline-joined string of unique error lines, or the original string
+    if no error markers are found (so the fallback is always non-empty).
+    """
+    # The log lines are stored as quoted elements inside a Python list repr.
+    # Extract them with a regex that matches single-quoted strings.
+    lines = re.findall(r"'([^']*?)'", error_msg)
+    if not lines:
+        # Not a list repr — treat the whole string as one block
+        lines = error_msg.splitlines()
+
+    error_lines = [l for l in lines if self._ERROR_PATTERN.search(l)]
+
+    if not error_lines:
+        # No recognised error markers — return the original so caller can still use it
+        return error_msg
+
+    # Deduplicate: strip leading timestamp, keep insertion order
+    seen = set()
+    unique = []
+    for line in error_lines:
+        key = self._TIMESTAMP_PREFIX.sub("", line).strip()
+        if key not in seen:
+            seen.add(key)
+            unique.append(key)
+
+    return "\n".join(unique)
+
+
 @execution_timer
 def replace_limiting_reason_with_actual_reason_concurrently(df, error_reason_column, max_workers=None):
     """
@@ -325,9 +361,24 @@ def replace_limiting_reason_with_actual_reason_concurrently(df, error_reason_col
             # Skip NaN or empty paths
             if path is None or (isinstance(path, float) and math.isnan(path)) or str(path).strip() == "":
                 return i, ("", "")
-            log_data = get_log_tail(path)
-            parsed = extract_errors(log_data)
-            preprocessed = preprocess_error_log(parsed)
+            exec_result_path = os.path.join(str(path), "execution_results.json")
+            parsed = preprocessed = None
+            if os.path.exists(exec_result_path):
+                try:
+                    with open(exec_result_path) as f:
+                        exec_result = json.load(f)
+                    raw = exec_result.get("error_msg")
+                    if raw:
+                        parsed = extract_error_lines(str(raw))
+                        preprocessed = preprocess_error_log(parsed)
+                except Exception as e:
+                    print(f"Exception while fetching failure logs from execution_results.json: {e}")
+                    pass
+
+            if not parsed:
+                log_data = get_log_tail(path)
+                parsed = extract_errors(log_data)
+                preprocessed = preprocess_error_log(parsed)
             return i, (preprocessed, parsed)
         except Exception as e:
             print(f"[WARN] Failed for row {i} ({path}): {e}")
@@ -351,11 +402,9 @@ def replace_limiting_reason_with_actual_reason_concurrently(df, error_reason_col
 def remove_empty_and_misc_rows(df: pd.DataFrame, errors: list, error_column_name: str):
     df[DataFrameKeys.extracted_error_log] = None
     df[error_column_name] = errors
-    df_with_error_reason = df[
-        ~df[error_column_name].str.startswith("limiting reason to 3000")  # not starting with that phrase
-    ]
+    df_with_error_reason = df[~df[error_column_name].str.startswith("limiting reason")]
     partial_error_reasons = replace_limiting_reason_with_actual_reason_concurrently(
-        df[df[error_column_name].str.startswith("limiting reason to 3000")],  # not starting with that phrase
+        df[df[error_column_name].str.startswith("limiting reason")],
         error_column_name,
     )
     partial_error_reasons.loc[:, DataFrameKeys.extracted_error_log] = partial_error_reasons[
@@ -755,31 +804,34 @@ async def process_tc_ids_async_bg_job(run_ids):
     logger.info("processing the parquet and updating faiss as background job")
     run_ids_list = run_ids["testplan_id"].tolist()
     for run_id in run_ids_list:
-        try:
-            processed_run_ids_path = os.path.join(FaissConfigurations.base_path, "processed_runids.json")
-            processed_run_ids = []
-            if os.path.isfile(processed_run_ids_path):
-                processed_run_ids = json.loads(open(processed_run_ids_path).read())
+        if run_id and any(run_id.startsiwth(tag) for tag in ["QNN", "SNPE"]):
+            try:
+                processed_run_ids_path = os.path.join(FaissConfigurations.base_path, "processed_runids.json")
+                processed_run_ids = []
+                if os.path.isfile(processed_run_ids_path):
+                    processed_run_ids = json.loads(open(processed_run_ids_path).read())
 
-            if run_id not in processed_run_ids:
-                logger.info(f"Processing: {run_id}")
-                await async_sequential_process_by_type(
-                    FailureAnalyzer().load_data(tc_id=run_id), update_faiss_and_sql=True, run_id=run_id
-                )
-                await asyncio.sleep(30)
-            else:
-                logger.info(f"Skipping processing: {run_id} already processed")
-        except Exception as e:
-            logger.error(f"Error occured while processing: {run_id}: \n{e}")
-            # Append full traceback to a log file
-            error_log_path = os.path.join(FaissConfigurations.base_path, "failed_processing_runids_log.txt")
-            with open(error_log_path, "a") as log_file:
-                log_file.write(f"\nRun ID: {run_id}\n")
-                log_file.write(f"\nFailed with error: {e}\n")
-                log_file.write(traceback.format_exc())
-                log_file.write("\n" + "-" * 80 + "\n")
+                if run_id not in processed_run_ids:
+                    logger.info(f"Processing: {run_id}")
+                    await async_sequential_process_by_type(
+                        FailureAnalyzer().load_data(tc_id=run_id), update_faiss_and_sql=True, run_id=run_id
+                    )
+                    await asyncio.sleep(30)
+                else:
+                    logger.info(f"Skipping processing: {run_id} already processed")
+            except Exception as e:
+                logger.error(f"Error occured while processing: {run_id}: \n{e}")
+                # Append full traceback to a log file
+                error_log_path = os.path.join(FaissConfigurations.base_path, "failed_processing_runids_log.txt")
+                with open(error_log_path, "a") as log_file:
+                    log_file.write(f"\nRun ID: {run_id}\n")
+                    log_file.write(f"\nFailed with error: {e}\n")
+                    log_file.write(traceback.format_exc())
+                    log_file.write("\n" + "-" * 80 + "\n")
 
-            continue
+                continue
+        else:
+            print(f"Skipping processing: {run_id} doesn't start with QNN/SNPE")
 
     requeue_failed_run_ids()
     swap_issue_grouping_db_to_prod()
@@ -1148,6 +1200,9 @@ def requeue_failed_run_ids():
     original_count = len(processed_run_ids)
     processed_run_ids = [r for r in processed_run_ids if r not in failed_run_ids]
     removed_count = original_count - len(processed_run_ids)
+
+    if len(processed_run_ids) > 500:
+        processed_run_ids = processed_run_ids[100:]
 
     with open(processed_run_ids_path, "w") as f:
         json.dump(processed_run_ids, f, indent=2)
