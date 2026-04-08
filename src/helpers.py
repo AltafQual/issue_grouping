@@ -804,7 +804,7 @@ async def process_tc_ids_async_bg_job(run_ids):
     logger.info("processing the parquet and updating faiss as background job")
     run_ids_list = run_ids["testplan_id"].tolist()
     for run_id in run_ids_list:
-        if run_id and any(run_id.startsiwth(tag) for tag in ["QNN", "SNPE"]):
+        if run_id and any(run_id.startswith(tag) for tag in ["QNN", "SNPE"]):
             try:
                 processed_run_ids_path = os.path.join(FaissConfigurations.base_path, "processed_runids.json")
                 processed_run_ids = []
