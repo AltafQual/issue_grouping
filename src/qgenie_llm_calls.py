@@ -90,12 +90,35 @@ class CustomQGenieChat(QGenieChat):
         return self._create_chat_result({})
 
 
-gemini_pro_model = CustomQGenieChat(
-    model="vertexai::gemini-2.5-pro", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=500
-)
-model = CustomQGenieChat(
-    model="vertexai::gemini-2.5-flash", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=500
-)
+class QgenieModels:
+    gemini_2_5_pro: CustomQGenieChat = CustomQGenieChat(
+        model="vertexai::gemini-2.5-pro", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=500
+    )
+    gemini_2_5_flash: CustomQGenieChat = CustomQGenieChat(
+        model="vertexai::gemini-2.5-flash", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=500
+    )
+
+    azure_o3_mini: CustomQGenieChat = CustomQGenieChat(
+        model="azure::o3-mini", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=500
+    )
+    azure_o3: CustomQGenieChat = CustomQGenieChat(
+        model="azure::o3-mini", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=500
+    )
+    azure_gpt_5_4_mini: CustomQGenieChat = CustomQGenieChat(
+        model="azure::gpt-5.4-mini", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=500
+    )
+    azure_gpt_5_4_mini: CustomQGenieChat = CustomQGenieChat(
+        model="azure::gpt-5.4", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=500
+    )
+    claude_4_5_haiku: CustomQGenieChat = CustomQGenieChat(
+        model="anthropic::claude-4-5-haiku", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=500
+    )
+    claude_4_5_sonnet: CustomQGenieChat = CustomQGenieChat(
+        model="anthropic::claude-4-5-sonnet", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=500
+    )
+    claude_4_5_opus: CustomQGenieChat = CustomQGenieChat(
+        model="anthropic::claude-4-6-opus:1M", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=500
+    )
 
 
 class ClusteringResult(BaseModel):
@@ -141,9 +164,9 @@ def error_summary_generation(errors_list: list[str]) -> str:
     prompt_template = ChatPromptTemplate.from_messages(
         [("system", prompts.ERROR_SUMMARIZATION_PROMPT), ("human", prompts.ERROR_LOGS_LIST)]
     )
-    model_to_use = model
+    model_to_use = QgenieModels.azure_o3_mini
     if len(errors_list) >= 10:
-        model_to_use = gemini_pro_model
+        model_to_use = QgenieModels.gemini_2_5_pro
     chain = prompt_template | model_to_use | StrOutputParser()
     error_logs = "\n\n".join(f"Error Logs {i}:\n{error}" for i, error in enumerate(errors_list, start=1))
 
@@ -166,7 +189,7 @@ def cummilative_summary_generation(errors_list: list[str], short_final_summary=F
                 prompt_template = ChatPromptTemplate.from_messages(
                     [("system", prompts.SUMMARY_GENERATION_PROMPT), ("human", prompts.ERROR_LOGS_LIST)]
                 )
-                chain = prompt_template | gemini_pro_model | StrOutputParser()
+                chain = prompt_template | QgenieModels.claude_4_5_sonnet | StrOutputParser()
                 error_logs = "\n\n".join(f"Error Logs {i}:\n{error}" for i, error in enumerate(error_window, start=1))
                 summary = await chain.ainvoke({"logs": error_logs})
                 return index, summary
@@ -195,7 +218,7 @@ def cummilative_summary_generation(errors_list: list[str], short_final_summary=F
         prompt_template = ChatPromptTemplate.from_messages(
             [("system", prompts.SHORT_PARENT_SUMMARY_GENERATION_PROMPT), ("human", prompts.ERROR_LOGS_LIST)]
         )
-    chain = prompt_template | gemini_pro_model | StrOutputParser()
+    chain = prompt_template | QgenieModels.gemini_2_5_pro | StrOutputParser()
     all_summaries_combined = "\n\n".join(
         f"Error Logs Summary {i}:\n{error}" for i, error in enumerate(errors_list, start=1)
     )
@@ -207,7 +230,7 @@ async def classify_cluster_based_of_type(cluster_logs: list[str], cluster_name: 
     prompt_template = ChatPromptTemplate.from_messages(
         [("system", prompts.CLASSIFY_CLUSTER_TYPE_SYS_MESSAGE), ("human", prompts.CLASSIFY_CLUSTER_TYPE_LOG_MESSAGE)]
     )
-    chain = prompt_template | model | classify_cluster_based_on_type
+    chain = prompt_template | QgenieModels.azure_o3 | classify_cluster_based_on_type
     result = await chain.ainvoke({"logs": cluster_logs, "cluster_name": cluster_name})
     return result
 
@@ -224,7 +247,7 @@ async def generate_cluster_name(grouped_cluster: pd.DataFrame) -> dict:
     else:
         logs = [logs]
     logs = logs[:5] if len(logs) > 5 else logs
-    chain = prompt_template | model | nameparser
+    chain = prompt_template | QgenieModels.azure_o3 | nameparser
     response = await chain.ainvoke({"logs": logs})
     return response
 
@@ -249,7 +272,7 @@ async def analyze_cluster(cluster_df: pd.DataFrame) -> dict:
         [("system", prompts.CLUSTERING_SYS_MESSAGE), ("human", prompts.CLUSTERING_LOG_MESSAGE)]
     )
 
-    chain = prompt_template | gemini_pro_model | parser
+    chain = prompt_template | QgenieModels.azure_o3 | parser
 
     tasks = [process_chunk(chunk) for chunk in chunk_logs(error_logs)]
     responses = await asyncio.gather(*tasks)
@@ -290,7 +313,7 @@ def merge_clusters(
         {"index": int(idx), "error log": row[DataFrameKeys.preprocessed_text_key]} for idx, row in df_b.iterrows()
     ]
 
-    chain = ChatPromptTemplate.from_template(prompts.MERGE_PROMPT_TEMPLATE) | gemini_pro_model | merge_parser
+    chain = ChatPromptTemplate.from_template(prompts.MERGE_PROMPT_TEMPLATE) | QgenieModels.azure_o3 | merge_parser
     response = chain.invoke({"id_a": cluster_id_a, "logs_a": logs_a, "id_b": cluster_id_b, "logs_b": logs_b})
 
     return response
@@ -330,7 +353,7 @@ async def async_merge_clusters(
     ]
 
     # Prepare prompt chain
-    chain = ChatPromptTemplate.from_template(prompts.MERGE_PROMPT_TEMPLATE) | gemini_pro_model | merge_parser
+    chain = ChatPromptTemplate.from_template(prompts.MERGE_PROMPT_TEMPLATE) | QgenieModels.azure_o3 | merge_parser
 
     # Chunk logs to avoid token overflow
     logs_a_chunks = list(chunk_logs(logs_a))
@@ -444,7 +467,7 @@ def recluster_with_context(df: pd.DataFrame) -> pd.DataFrame:
         {"index": int(idx), "error log": row[DataFrameKeys.preprocessed_text_key]}
         for idx, row in unclustered_df.iterrows()
     ]
-    chain = ChatPromptTemplate.from_template(prompts.RECLUSTERING_PROMPT) | model | recluster_parser
+    chain = ChatPromptTemplate.from_template(prompts.RECLUSTERING_PROMPT) | QgenieModels.azure_o3 | recluster_parser
     outliers_recluster_results = chain.invoke({"error_logs": error_logs})
     # Create a set of valid indices from the DataFrame for efficient lookup
     df_index_set = set(df.index)
@@ -586,7 +609,7 @@ def subcluster_verifier_failed(df: pd.DataFrame):
             ("human", prompts.SUBCLUSTER_VERIFIER_FAILED_LOG_MESSAGE),
         ]
     )
-    chain = prompt_template | model | subcluster_verifer_failed
+    chain = prompt_template | QgenieModels.azure_o3 | subcluster_verifer_failed
 
     # previous_clusters as a dict[str, set[int]] for consolidation
     previous_clusters_agg: dict[str, set[int]] = {}

@@ -17,7 +17,7 @@ class QGenieBGEM3Embedding(Embeddings):
     name = "qgenie_embedd"
 
     def __init__(self):
-        self.model = QGenieEmbeddings(model=self.name, api_key=QGENEIE_API_KEY)
+        self.model = QGenieEmbeddings(model=self.name, api_key=QGENEIE_API_KEY, max_model_len=120220)
         super().__init__()
 
     def _retry_sync(self, func, *args, **kwargs):
@@ -44,7 +44,7 @@ class QGenieBGEM3Embedding(Embeddings):
 
     def embed(self, data: list):
         logger.info(f"Starting embedding process for {len(data)} documents")
-        batch_size = 300
+        batch_size = 50
         results = []
 
         for i in range(0, len(data), batch_size):
@@ -152,38 +152,119 @@ class FallbackEmbeddings(Embeddings):
             logger.warning(f"QGenie embedding timed out after {self.timeout} seconds")
             return None
 
+    def _try_embed_sub_batch(self, sub_batch):
+        """Embed a single sub-batch using a thread with timeout. Returns result or raises."""
+        result = [None]
+        exception = [None]
+        completed = [False]
+
+        def target(b=sub_batch):
+            try:
+                result[0] = self.qgenie_embeddings.embed_without_retry(b)
+                completed[0] = True
+            except Exception as e:
+                exception[0] = e
+
+        thread = threading.Thread(target=target)
+        thread.daemon = True
+        thread.start()
+        thread.join(timeout=self.timeout)
+
+        if completed[0]:
+            return result[0]
+        elif exception[0] is not None:
+            raise exception[0]
+        else:
+            raise TimeoutError(f"QGenie embedding timed out after {self.timeout} seconds")
+
+    def _embed_batch_with_size_reduction(self, batch):
+        """Try embedding a batch, reducing batch size by 5 on 500 errors until size reaches 1."""
+        current_batch_size = len(batch)
+        while current_batch_size >= 1:
+            sub_results = []
+            got_500 = False
+            for j in range(0, len(batch), current_batch_size):
+                sub_batch = batch[j : j + current_batch_size]
+                try:
+                    sub_results.extend(self._try_embed_sub_batch(sub_batch))
+                except Exception as e:
+                    err_str = str(e)
+                    if "500" in err_str or "internal server error" in err_str.lower():
+                        if current_batch_size == 1:
+                            raise Exception(f"Failed to generate embeddings even with batch size 1: {e}")
+                        logger.warning(f"500 error with batch size {current_batch_size}, reducing by 5 and retrying")
+                        got_500 = True
+                        break
+                    else:
+                        raise
+
+            if not got_500:
+                return sub_results
+
+            current_batch_size = max(1, current_batch_size - 5)
+
     @execution_timer
     def embed(self, data: list):
         if not data:
             return []
         results = []
         logger.info(f"Attempting to generate embeddings with QGenie: lenght of data: {len(data)}")
-        batch_size = 100
+        batch_size = 500
 
         for i in range(0, len(data), batch_size):
             batch = data[i : i + batch_size]
             batch_end = min(i + batch_size, len(data))
             logger.info(f"Processing batch: documents {i} to {batch_end-1}")
-            qgenie_result = self._run_with_timeout(self.qgenie_embeddings.embed_without_retry, batch)
-            results.extend(qgenie_result)
-
+            batch_result = self._embed_batch_with_size_reduction(batch)
+            results.extend(batch_result)
             logger.info(f"Completed batch with {len(batch)} documents")
 
         return results
+
+    async def _try_aembed_sub_batch(self, sub_batch):
+        """Async embed a single sub-batch. Returns result or raises."""
+        return await self.qgenie_embeddings.aembed_without_retry(sub_batch)
+
+    async def _aembed_batch_with_size_reduction(self, batch, batch_start):
+        """Try async embedding a batch, reducing batch size by 5 on 500 errors until size reaches 1."""
+        current_batch_size = len(batch)
+        while current_batch_size >= 1:
+            sub_results = []
+            got_500 = False
+            for j in range(0, len(batch), current_batch_size):
+                sub_batch = batch[j : j + current_batch_size]
+                try:
+                    sub_results.extend(await self._try_aembed_sub_batch(sub_batch))
+                except Exception as e:
+                    err_str = str(e)
+                    if "500" in err_str or "internal server error" in err_str.lower():
+                        if current_batch_size == 1:
+                            raise Exception(f"Failed to generate embeddings even with batch size 1: {e}")
+                        logger.warning(f"500 error with batch size {current_batch_size}, reducing by 5 and retrying")
+                        got_500 = True
+                        break
+                    else:
+                        raise
+
+            if not got_500:
+                return sub_results
+
+            current_batch_size = max(1, current_batch_size - 5)
 
     @execution_timer
     async def aembed(self, data: list):
         if not data:
             return []
         logger.info(f"Attempting to generate embeddings with QGenie: lenght of data: {len(data)}")
-        batch_size = 100
+        batch_size = 500
 
         batches = [data[i : i + batch_size] for i in range(0, len(data), batch_size)]
 
         async def process_batch(batch, index):
-            batch_end = min((index * batch_size) + batch_size, len(data))
-            logger.info(f"Processing batch: documents {index * batch_size} to {batch_end-1}")
-            result = await self.qgenie_embeddings.aembed_without_retry(batch)
+            batch_start = index * batch_size
+            batch_end = min(batch_start + batch_size, len(data))
+            logger.info(f"Processing batch: documents {batch_start} to {batch_end-1}")
+            result = await self._aembed_batch_with_size_reduction(batch, batch_start)
             logger.info(f"Completed batch with {len(batch)} documents")
             return result
 

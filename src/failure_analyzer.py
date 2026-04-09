@@ -1,21 +1,19 @@
-import asyncio
 import threading
 from typing import List, Optional
 
 import numpy as np
 import pandas as pd
 import streamlit as st
-import swifter
 from sklearn.cluster import HDBSCAN
 
 from src import helpers
 from src.constants import ClusterSpecificKeys, DataFrameKeys, ErrorLogConfigurations
 from src.custom_clustering import CustomEmbeddingCluster
 from src.data_loader import ExcelLoader
-from src.embeddings import BGEM3Embeddings, FallbackEmbeddings, QGenieBGEM3Embedding
+from src.embeddings import FallbackEmbeddings
 from src.faiss_db import FaissIVFFlatIndex
 from src.logger import AppLogger
-from src.qgenie_llm_calls import generate_cluster_name, qgenie_post_processing, subcluster_verifier_failed
+from src.qgenie_llm_calls import qgenie_post_processing, subcluster_verifier_failed
 
 threading.Thread(target=helpers.faissdb_update_worker, daemon=True).start()
 
@@ -116,7 +114,7 @@ class FailureAnalyzer:
 
             if not fuzzy_clustered_df.empty:
                 fuzzy_clustered_df[DataFrameKeys.embeddings_key] = pd.Series(
-                    self.generate_embeddings(fuzzy_clustered_df[DataFrameKeys.embedding_text_key].tolist()),
+                    self.generate_embeddings(fuzzy_clustered_df[DataFrameKeys.preprocessed_text_key].tolist()),
                     index=fuzzy_clustered_df.index,
                 )
 
@@ -141,7 +139,9 @@ class FailureAnalyzer:
                     failure_df[DataFrameKeys.cluster_name] == ClusterSpecificKeys.non_grouped_key
                 ]
                 if not non_clustered_df.empty:
-                    embeddings = self.generate_embeddings(non_clustered_df[DataFrameKeys.embedding_text_key].tolist())
+                    embeddings = self.generate_embeddings(
+                        non_clustered_df[DataFrameKeys.preprocessed_text_key].tolist()
+                    )
                     non_clustered_df.loc[:, DataFrameKeys.embeddings_key] = pd.Series(
                         embeddings, index=non_clustered_df.index
                     )
@@ -193,7 +193,7 @@ class FailureAnalyzer:
         )
 
         if not non_clustered_df.empty:
-            embeddings = self.generate_embeddings(non_clustered_df[DataFrameKeys.embedding_text_key].tolist())
+            embeddings = self.generate_embeddings(non_clustered_df[DataFrameKeys.preprocessed_text_key].tolist())
             non_clustered_df.loc[:, DataFrameKeys.embeddings_key] = pd.Series(embeddings, index=non_clustered_df.index)
 
             # Process non-clustered data

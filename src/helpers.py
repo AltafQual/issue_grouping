@@ -31,7 +31,7 @@ from src.constants import (
     ErrorLogConfigurations,
     FaissConfigurations,
     FaissDBPath,
-    regex_based_filteration_patterns,
+    regex_based_filteration_patterns
 )
 from src.custom_clustering import CustomEmbeddingCluster
 from src.db_connections import ConnectToMySql
@@ -393,7 +393,7 @@ def replace_limiting_reason_with_actual_reason_concurrently(df, error_reason_col
             results[idx] = pair
 
     # Unpack to columns
-    df[error_reason_column] = [pre for pre, _ in results]
+    df[error_reason_column] = [mask_numbers(pre) for pre, _ in results]
     df[DataFrameKeys.error_reason] = [raw for _, raw in results]
     return df
 
@@ -413,7 +413,7 @@ def remove_empty_and_misc_rows(df: pd.DataFrame, errors: list, error_column_name
     df = pd.concat([df_with_error_reason, partial_error_reasons], axis=0).reset_index(drop=True)
     df.loc[:, DataFrameKeys.cluster_name] = df[error_column_name].apply(is_empty_error_log)
     # Save unmasked text for embeddings before applying number masking for fuzzy matching
-    df.loc[:, DataFrameKeys.embedding_text_key] = df[error_column_name]
+    df.loc[:, DataFrameKeys.preprocessed_text_key] = df[error_column_name]
     df.loc[:, error_column_name] = df[error_column_name].apply(mask_numbers)
     df = df.reset_index(drop=True)
     return df
@@ -698,7 +698,7 @@ async def check_if_issue_alread_grouped(df: pd.DataFrame) -> pd.DataFrame:
         # Get cluster names using FAISS — use unmasked embedding text for better similarity
         new_cluster_names, class_names = await CustomEmbeddingCluster().batch_search(
             type_=ungrouped_df.iloc[0]["type"],  # assuming same type for batch
-            queries=ungrouped_df[DataFrameKeys.embedding_text_key].tolist(),
+            queries=ungrouped_df[DataFrameKeys.preprocessed_text_key].tolist(),
         )
 
         # Update the original DataFrame
@@ -1181,17 +1181,14 @@ def requeue_failed_run_ids():
     with open(failed_log_path, "r") as f:
         content = f.read()
 
-    # Extract run IDs from lines like "Run ID: <run_id>"
     failed_run_ids = re.findall(r"^Run ID:\s*(.+)$", content, re.MULTILINE)
     failed_run_ids = [r.strip() for r in failed_run_ids if r.strip()]
 
     if not failed_run_ids:
         logger.info("No run IDs found in failed log. Clearing empty log file.")
-        open(failed_log_path, "w").close()
         return
 
     logger.info(f"Found {len(failed_run_ids)} failed run IDs to requeue: {failed_run_ids}")
-
     processed_run_ids = []
     if os.path.isfile(processed_run_ids_path):
         with open(processed_run_ids_path, "r") as f:
@@ -1208,7 +1205,4 @@ def requeue_failed_run_ids():
         json.dump(processed_run_ids, f, indent=2)
 
     logger.info(f"Removed {removed_count} run IDs from processed_runids.json.")
-
-    # Clear the failed log
-    open(failed_log_path, "w").close()
     logger.info("Cleared failed_processing_runids_log.txt.")
