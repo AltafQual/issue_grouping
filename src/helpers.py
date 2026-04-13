@@ -1,17 +1,14 @@
 import asyncio
-import hashlib
 import json
 import math
 import os
 import queue
-import random
 import re
 import shutil
 import subprocess
 import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
-from functools import wraps
 from io import BytesIO
 from queue import Queue
 
@@ -51,17 +48,6 @@ _tc_id_cache = TTLCache(ttl=36000, maxsize=500)
 parquet_file = "run_ids.parquet"
 
 
-def add_hashed_unique_id(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.reset_index(drop=True)
-
-    def generate_hash(row):
-        raw_string = f"{random.randint(0, df.shape[0])}_{row['type']}_{row['tc_uuid']}_{row['runtime']}_{row['soc_name']}".lower()
-        return hashlib.md5(raw_string.encode()).hexdigest()
-
-    df[DataFrameKeys.index] = df.apply(generate_hash, axis=1)
-    return df
-
-
 def get_cluster_class(cluster_dict):
     if not isinstance(cluster_dict, dict):
         return "sdk_issue"
@@ -92,7 +78,7 @@ async def assign_cluster_class(df: pd.DataFrame) -> pd.DataFrame:
 
         # Ensure the target column exists
         if DataFrameKeys.cluster_class not in df.columns:
-            df.loc[:, DataFrameKeys.cluster_class] = np.nan
+            df[DataFrameKeys.cluster_class] = pd.array([np.nan] * len(df), dtype=object)
 
         # Exclude non-grouped and empty/no-error clusters
         exclude_names = {
@@ -213,8 +199,6 @@ def preprocess_error_log(log: str) -> str:
 
     # Step 7: Normalize whitespace
     log = re.sub(r"\s+", " ", log).strip()
-
-    # Step 8: Lowercase for consistency
     return log.lower()
 
 
@@ -225,6 +209,22 @@ def is_empty_error_log(s):
         return ErrorLogConfigurations.empty_error
 
     return ClusterSpecificKeys.non_grouped_key
+
+
+def is_t2t_garbage_output(row):
+    if row.type == "transformer_run" and any(
+        failure_reason in row["preprocessed_reason"]
+        for failure_reason in ["context size was exceeded", "segmentation fault"]
+    ):
+        return DataFrameKeys.t2t_garbage_cluster
+
+    return ClusterSpecificKeys.non_grouped_key
+
+
+def t2t_garbage_output_class_assign(row):
+    if row[DataFrameKeys.cluster_name] == DataFrameKeys.t2t_garbage_cluster:
+        return "sdk_issue"
+    return None
 
 
 def mask_numbers(text: str) -> str:
@@ -277,23 +277,6 @@ def get_log_tail(log_path):
         return result.stdout if result.returncode == 0 else ""
     except Exception as e:
         return f"Error reading log: {e}"
-
-
-@execution_timer
-def replace_limiting_reason_with_actual_reason(df, error_reason_column):
-    if df.empty:
-        return df
-    results = []
-    log_path_key = "log"
-    if "log_path" in df.columns:
-        log_path_key = "log_path"
-    for path in df[log_path_key]:
-        log_data = get_log_tail(path)
-        parsed = extract_errors(log_data)
-        results.append(parsed)
-    df[error_reason_column] = [preprocess_error_log(r) for r in results]
-    df[DataFrameKeys.error_reason] = results
-    return df
 
 
 def extract_error_lines(self, error_msg):
@@ -393,7 +376,7 @@ def replace_limiting_reason_with_actual_reason_concurrently(df, error_reason_col
             results[idx] = pair
 
     # Unpack to columns
-    df[error_reason_column] = [mask_numbers(pre) for pre, _ in results]
+    df[error_reason_column] = [pre for pre, _ in results]
     df[DataFrameKeys.error_reason] = [raw for _, raw in results]
     return df
 
@@ -402,7 +385,9 @@ def replace_limiting_reason_with_actual_reason_concurrently(df, error_reason_col
 def remove_empty_and_misc_rows(df: pd.DataFrame, errors: list, error_column_name: str):
     df[DataFrameKeys.extracted_error_log] = None
     df[error_column_name] = errors
-    df_with_error_reason = df[~df[error_column_name].str.startswith("limiting reason")]
+    df_with_error_reason = df[
+        ~df[error_column_name].str.startswith("limiting reason")
+    ]  # instead of starts with check if the string has this !! sometime appears in middle
     partial_error_reasons = replace_limiting_reason_with_actual_reason_concurrently(
         df[df[error_column_name].str.startswith("limiting reason")],
         error_column_name,
@@ -412,6 +397,8 @@ def remove_empty_and_misc_rows(df: pd.DataFrame, errors: list, error_column_name
     ]
     df = pd.concat([df_with_error_reason, partial_error_reasons], axis=0).reset_index(drop=True)
     df.loc[:, DataFrameKeys.cluster_name] = df[error_column_name].apply(is_empty_error_log)
+    df.loc[:, DataFrameKeys.cluster_name] = df.apply(is_t2t_garbage_output, axis=1)
+    df.loc[:, DataFrameKeys.cluster_class] = df.apply(t2t_garbage_output_class_assign, axis=1)
     # Save unmasked text for embeddings before applying number masking for fuzzy matching
     df.loc[:, DataFrameKeys.preprocessed_text_key] = df[error_column_name]
     df.loc[:, error_column_name] = df[error_column_name].apply(mask_numbers)
@@ -507,7 +494,7 @@ def trim(log, head_ratio=0.3, max_length=5000):
             tail_length = max_length - head_length
             head = log_str[:head_length]
             tail = log_str[-tail_length:]
-            return head + tail
+            return head + " ... " + tail
         else:
             return log_str
     except Exception as e:
@@ -742,20 +729,7 @@ def find_regressions_between_two_tests(tc_id_a: str, tc_id_b: str) -> pd.DataFra
     return sql_connection.get_regressions(tc_id_a, tc_id_b)
 
 
-def cache_tc_id(func):
-    @wraps(func)
-    def wrapper(tc_id: str):
-        if tc_id in _tc_id_cache:
-            return _tc_id_cache[tc_id]
-        result = func(tc_id)
-        _tc_id_cache[tc_id] = result
-        return result
-
-    return wrapper
-
-
 @execution_timer
-@cache_tc_id
 def get_tc_id_df(tc_id: str):
     return sql_connection.fetch_result_based_on_runid(tc_id)
 
@@ -1155,15 +1129,6 @@ def filter_and_sort_by_embedded_datetime(strings: list[str], n_remove: int = 0) 
 
     # Drop the first n_remove in the chosen order
     return [s for _, s in dated[n_remove:]]
-
-
-def fetch_model_ops(models_list):
-    model_ops_data = {}
-
-    for model in models_list:
-        pass
-
-    return model_ops_data
 
 
 def requeue_failed_run_ids():

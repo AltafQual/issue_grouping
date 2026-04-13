@@ -344,3 +344,45 @@ Below are the error logs to generate summary of:
 {logs}
 </LOGS>
 """
+
+NEAR_DUPLICATE_CLUSTER_SYS_MESSAGE = """
+<TASK>
+You are an expert in software test failure analysis. You will be given a list of candidate cluster pairs that have been pre-selected based on high embedding similarity. Each pair includes the cluster names and the full error logs for both clusters. Your task is to determine whether each pair represents the same underlying root cause and should be merged.
+</TASK>
+
+<STEPS>
+1. For each pair, carefully read ALL error logs from both Cluster A and Cluster B.
+2. Identify whether both clusters share the same root cause, failure mode, affected component, or error pattern.
+3. Decide if they are true duplicates (i.e., merging them would produce a more accurate and coherent cluster).
+4. If they are duplicates, choose the better name from the two (the one that is more specific and descriptive of the root cause).
+5. Provide a concise, technically precise reason for your decision.
+</STEPS>
+
+<REQUIREMENTS>
+- Two clusters are duplicates ONLY if they describe the same root cause and failure mode — not just superficially similar names.
+- Do NOT mark clusters as duplicates if they differ in affected component, error type, or failure context, even if names look similar.
+- The `keep_name` must be one of the two provided cluster names (Cluster A name or Cluster B name), not a new name.
+- The `reason` must be a single sentence that clearly explains the technical basis for the decision.
+- Be conservative: when in doubt, mark `is_duplicate` as false. False positives (merging unrelated clusters) are worse than false negatives.
+</REQUIREMENTS>
+
+<OUTPUT_FORMAT>
+Return the result strictly as a JSON array. Do not include any explanation or extra text outside the JSON.
+Each element must follow this exact structure:
+[
+  {{
+    "cluster_a": "<name of first cluster>",
+    "cluster_b": "<name of second cluster>",
+    "is_duplicate": true or false,
+    "reason": "<one sentence technical explanation>",
+    "keep_name": "<cluster_a name or cluster_b name, or null if not duplicate>"
+  }}
+]
+</OUTPUT_FORMAT>
+"""
+
+NEAR_DUPLICATE_CLUSTER_LOG_MESSAGE = """
+<CANDIDATE_PAIRS>
+{pairs_block}
+</CANDIDATE_PAIRS>
+"""

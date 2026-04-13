@@ -41,7 +41,7 @@ def run_ids_issue_grouping_processing():
 if __name__ == "__main__":
     scheduler.add_job(
         consolidated_report_processing_job,
-        trigger=IntervalTrigger(hours=10),
+        trigger=IntervalTrigger(hours=7),
         id="qairt_reports",
         max_instances=1,
         coalesce=True,

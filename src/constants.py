@@ -27,6 +27,7 @@ class DataFrameKeys:
     grouped_from_faiss: str = "issue_already_occured"
     cluster_class: str = "cluster_class"
     extracted_error_log: str = "extracted_error_log"
+    t2t_garbage_cluster: str = "T2TGarbageResponse"
 
 
 @dataclass

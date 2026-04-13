@@ -13,7 +13,11 @@ from src.data_loader import ExcelLoader
 from src.embeddings import FallbackEmbeddings
 from src.faiss_db import FaissIVFFlatIndex
 from src.logger import AppLogger
-from src.qgenie_llm_calls import qgenie_post_processing, subcluster_verifier_failed
+from src.qgenie_llm_calls import (
+    detect_and_merge_near_duplicate_clusters,
+    qgenie_post_processing,
+    subcluster_verifier_failed
+)
 
 threading.Thread(target=helpers.faissdb_update_worker, daemon=True).start()
 
@@ -70,12 +74,13 @@ class FailureAnalyzer:
 
         self.logger.info(f"Loaded {len(dataframe)} rows")
         current_type = dataframe.iloc[0]["type"]
-
         # Initialize all rows as non-grouped
-        dataframe.loc[:, DataFrameKeys.cluster_name] = ClusterSpecificKeys.non_grouped_key
+        dataframe[DataFrameKeys.cluster_name] = pd.array(
+            [ClusterSpecificKeys.non_grouped_key] * len(dataframe), dtype=object
+        )
         dataframe.loc[:, DataFrameKeys.cluster_type_int] = ClusterSpecificKeys.non_grouped_key
-        dataframe.loc[:, DataFrameKeys.grouped_from_faiss] = np.nan
-        dataframe.loc[:, DataFrameKeys.embeddings_key] = np.nan
+        dataframe[DataFrameKeys.grouped_from_faiss] = pd.array([np.nan] * len(dataframe), dtype=object)
+        dataframe[DataFrameKeys.embeddings_key] = pd.array([np.nan] * len(dataframe), dtype=object)
 
         # Preprocess failure texts
         failure_texts = dataframe[failure_column].astype(str).tolist()
@@ -177,6 +182,7 @@ class FailureAnalyzer:
                 failure_df.loc[mask, DataFrameKeys.cluster_name] = cluster_names
 
             failure_df = await helpers.assign_cluster_class(failure_df)
+            # failure_df = await detect_and_merge_near_duplicate_clusters(failure_df)
             self.logger.info(f"Finished processing: {current_type}")
             return failure_df
 
@@ -254,6 +260,7 @@ class FailureAnalyzer:
             final_df.loc[mask, DataFrameKeys.cluster_name] = cluster_names
 
         final_df = await helpers.assign_cluster_class(final_df)
+        # final_df = await detect_and_merge_near_duplicate_clusters(final_df)
         self.logger.info(f"Finished processing: {current_type}")
         return final_df
 

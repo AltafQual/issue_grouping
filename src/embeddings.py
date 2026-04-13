@@ -17,7 +17,7 @@ class QGenieBGEM3Embedding(Embeddings):
     name = "qgenie_embedd"
 
     def __init__(self):
-        self.model = QGenieEmbeddings(model=self.name, api_key=QGENEIE_API_KEY, max_model_len=120220)
+        self.model = QGenieEmbeddings(model=self.name, api_key=QGENEIE_API_KEY)
         super().__init__()
 
     def _retry_sync(self, func, *args, **kwargs):
