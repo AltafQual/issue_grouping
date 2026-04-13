@@ -48,8 +48,8 @@ class CustomQGenieChat(QGenieChat):
         run_manager: CallbackManagerForLLMRun | None = None,
         **kwargs: Any,
     ) -> ChatResult:
-        retry_count = 10
-        while retry_count:
+        max_retries = 10
+        for attempt in range(1, max_retries + 1):
             try:
                 message_dicts, params = self._create_message_dicts(messages)
                 params = {**params, **kwargs}
@@ -59,9 +59,8 @@ class CustomQGenieChat(QGenieChat):
             except Exception as e:
                 logger.error(traceback.format_exc())
                 logger.error(f"for messages: {message_dicts}")
-                retry_count -= 1
-                time.sleep(get_exponential_backoff_delay(attempt=retry_count))
-                continue
+                if attempt < max_retries:
+                    time.sleep(get_exponential_backoff_delay(attempt=attempt))
 
         return self._create_chat_result({})
 
@@ -73,56 +72,56 @@ class CustomQGenieChat(QGenieChat):
         stream: bool | None = None,
         **kwargs: Any,
     ) -> ChatResult:
-        retry_count = 10
+        max_retries = 10
         message_dicts, params = self._create_message_dicts(messages)
         params = {**params, **kwargs}
         params.pop("stream", "")
 
-        while retry_count:
+        for attempt in range(1, max_retries + 1):
             try:
                 response = await self.async_client.chat(messages=message_dicts, **params)
                 return self._create_chat_result(response)
             except Exception as e:
                 logger.error(traceback.format_exc())
                 logger.error(f"for messages: {message_dicts}")
-                retry_count -= 1
-                await asyncio.sleep(get_exponential_backoff_delay(attempt=retry_count))
-                continue
+                if attempt < max_retries:
+                    await asyncio.sleep(get_exponential_backoff_delay(attempt=attempt))
         return self._create_chat_result({})
 
 
 class QgenieModels:
     gemini_2_5_pro: CustomQGenieChat = CustomQGenieChat(
-        model="vertexai::gemini-2.5-pro", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=500
+        model="vertexai::gemini-2.5-pro", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=5000
     )
     gemini_2_5_flash: CustomQGenieChat = CustomQGenieChat(
-        model="vertexai::gemini-2.5-flash", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=500
+        model="vertexai::gemini-2.5-flash", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=5000
     )
     gemini_3_flash: CustomQGenieChat = CustomQGenieChat(
-        model="vertexai::gemini-3-flash-preview", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=500
+        model="vertexai::gemini-3-flash-preview", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=5000
     )
 
     azure_o3_mini: CustomQGenieChat = CustomQGenieChat(
-        model="azure::o3-mini", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=500
+        model="azure::o3-mini", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=5000
     )
     azure_o3: CustomQGenieChat = CustomQGenieChat(
-        model="azure::o3", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=500
+        model="azure::o3", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=5000
     )
     azure_gpt_5_4_mini: CustomQGenieChat = CustomQGenieChat(
-        model="azure::gpt-5.4-mini", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=500
+        model="azure::gpt-5.4-mini", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=5000
     )
-    azure_gpt_5_4_mini: CustomQGenieChat = CustomQGenieChat(
-        model="azure::gpt-5.4", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=500
+    azure_gpt_5_4: CustomQGenieChat = CustomQGenieChat(
+        model="azure::gpt-5.4", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=5000
     )
 
     claude_4_5_haiku: CustomQGenieChat = CustomQGenieChat(
-        model="anthropic::claude-4-5-haiku", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=500
+        model="anthropic::claude-4-5-haiku", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=5000
     )
+    # NOTE: better not to use sonnet in api because it always times out and fails.
     claude_4_5_sonnet: CustomQGenieChat = CustomQGenieChat(
-        model="anthropic::claude-4-5-sonnet", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=500
+        model="anthropic::claude-4-5-sonnet", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=5000
     )
     claude_4_5_opus: CustomQGenieChat = CustomQGenieChat(
-        model="anthropic::claude-4-6-opus:1M", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=500
+        model="anthropic::claude-4-6-opus:1M", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=5000
     )
 
 
@@ -194,7 +193,7 @@ def cummilative_summary_generation(errors_list: list[str], short_final_summary=F
                 prompt_template = ChatPromptTemplate.from_messages(
                     [("system", prompts.SUMMARY_GENERATION_PROMPT), ("human", prompts.ERROR_LOGS_LIST)]
                 )
-                chain = prompt_template | QgenieModels.claude_4_5_sonnet | StrOutputParser()
+                chain = prompt_template | QgenieModels.azure_gpt_5_4 | StrOutputParser()
                 error_logs = "\n\n".join(f"Error Logs {i}:\n{error}" for i, error in enumerate(error_window, start=1))
                 summary = await chain.ainvoke({"logs": error_logs})
                 return index, summary
@@ -202,8 +201,7 @@ def cummilative_summary_generation(errors_list: list[str], short_final_summary=F
         tasks = [_process_window(i, window) for i, window in enumerate(windows, start=1)]
         results = await asyncio.gather(*tasks)
         return [summary for _, summary in sorted(results, key=lambda x: x[0])]
-
-    print(f"Total logs for cummilative summary generation: {len(errors_list)}")
+    
     error_windows = list(_chunk(errors_list, 10))
     try:
         loop = asyncio.get_event_loop()
