@@ -201,7 +201,7 @@ def cummilative_summary_generation(errors_list: list[str], short_final_summary=F
         tasks = [_process_window(i, window) for i, window in enumerate(windows, start=1)]
         results = await asyncio.gather(*tasks)
         return [summary for _, summary in sorted(results, key=lambda x: x[0])]
-    
+
     error_windows = list(_chunk(errors_list, 10))
     try:
         loop = asyncio.get_event_loop()
@@ -430,9 +430,9 @@ async def merge_duplicate_clusters(
             cluster_results[base_cluster_id]["cluster_name"] = response["merged_name"]
 
             # Move all rows from next_cluster to base_cluster
-            df.loc[df[DataFrameKeys.cluster_type_int] == next_cluster_id, DataFrameKeys.cluster_type_int] = (
-                base_cluster_id
-            )
+            df.loc[
+                df[DataFrameKeys.cluster_type_int] == next_cluster_id, DataFrameKeys.cluster_type_int
+            ] = base_cluster_id
 
             # Move outliers to cluster -1
             outlier_indices = [int(index) for index in response.get("outlier_indices")]
@@ -453,9 +453,9 @@ def give_cluster_names_and_reassign_misc_clusters(df: pd.DataFrame, cluster_resu
     for cluster_id, result in cluster_results.items():
         misclassified_ids = result.get("misclassified_ids", [])
         if misclassified_ids:
-            df.loc[df.index.isin(misclassified_ids), DataFrameKeys.cluster_type_int] = (
-                ClusterSpecificKeys.non_grouped_key
-            )
+            df.loc[
+                df.index.isin(misclassified_ids), DataFrameKeys.cluster_type_int
+            ] = ClusterSpecificKeys.non_grouped_key
 
         cluster_name = result.get("cluster_name")
         if cluster_name:
@@ -553,9 +553,9 @@ def inter_cluster_merging(df: pd.DataFrame) -> pd.DataFrame:
                 merge_response = merge_clusters(df, current_cluster_name, merge_target_name)
 
                 # Update cluster labels in df
-                df.loc[df[DataFrameKeys.cluster_name] == current_cluster_name, DataFrameKeys.cluster_name] = (
-                    merge_response["merged_name"]
-                )
+                df.loc[
+                    df[DataFrameKeys.cluster_name] == current_cluster_name, DataFrameKeys.cluster_name
+                ] = merge_response["merged_name"]
 
                 # Handle outliers
                 outlier_indices = merge_response.get("outlier_indices", [])

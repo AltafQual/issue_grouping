@@ -966,6 +966,10 @@ class CombinedRegressionAnalysis:
             self.save_regression_analysis_objects(qairt_id)
 
     def __generated_regressed_gerrits_page(self, qairt_id, gerrits_information):
+        if gerrits_information is None:
+            logger.info(f"No gerrit info found for: {qairt_id} skipping building gerrit page")
+            return None
+
         output_dir = os.path.join(CONSOLIDATED_REPORTS.path, qairt_id, "regression_htmls")
         file_name = "gerrits_regression_report.html"
         file_path = os.path.join(output_dir, file_name)
@@ -973,19 +977,30 @@ class CombinedRegressionAnalysis:
         html_content = f"<html><head><title>Gerrits Merged</title>{REPORT_CSS}</head><body><div class='container'><h2>List of Gerrits merged in {qairt_id}</h2>"
         project_wise_gerrits = OrderedDefaultDict(list)
         unique_gerrits = set()
-        for _, runtime_based_gerrit_data in gerrits_information.items():
+        for _, runtime_based_gerrit_data in (gerrits_information or {}).items():
+            if not isinstance(runtime_based_gerrit_data, dict):
+                continue
             for _, backend_gerrit_data in runtime_based_gerrit_data.items():
-                for gerrit_data in backend_gerrit_data:
-                    if gerrit_data["commit_url"] not in unique_gerrits:
-                        project_wise_gerrits[gerrit_data["repository_name"]].append(gerrit_data)
-                        unique_gerrits.add(gerrit_data["commit_url"].lower())
+                for gerrit_data in backend_gerrit_data or []:
+                    if not isinstance(gerrit_data, dict):
+                        continue
+                    commit_url = (gerrit_data.get("commit_url") or "").strip()
+                    repo_name = gerrit_data.get("repository_name") or "-"
+                    if commit_url and commit_url.lower() not in unique_gerrits:
+                        project_wise_gerrits[repo_name].append(gerrit_data)
+                        unique_gerrits.add(commit_url.lower())
 
         for repo_name, gerrits_data in project_wise_gerrits.items():
             html_content += f"<h3>Repository Name: {repo_name}</h3>"
             html_content += "<table border='1'><tr><th>Gerrit Raised By</th><th>Email</th><th>Commit Message</th><th>Gerrit Link</th></tr>"
             for data in gerrits_data:
-                commit_url = f"<a href='{data['commit_url']}' target='_blank'>Gerrit</a>"
-                html_content += f"<tr><td>{data['gerrit_raised_by'][0]['name']}</td><td>{data['gerrit_raised_by'][0]['email']}</td><td>{data['commit_message']}</td><td>{commit_url}</td></tr>"
+                commit_url_val = data.get("commit_url") or ""
+                commit_url = f"<a href='{commit_url_val}' target='_blank'>Gerrit</a>" if commit_url_val else "-"
+                raised_by = data.get("gerrit_raised_by") or []
+                raised_by_name = raised_by[0].get("name", "-") if raised_by else "-"
+                raised_by_email = raised_by[0].get("email", "-") if raised_by else "-"
+                commit_message = data.get("commit_message") or "-"
+                html_content += f"<tr><td>{raised_by_name}</td><td>{raised_by_email}</td><td>{commit_message}</td><td>{commit_url}</td></tr>"
             html_content += "</table>"
 
         html_content += "</body></html>"
@@ -1018,6 +1033,9 @@ class CombinedRegressionAnalysis:
         return f"<ul>{li_html}</ul>"
 
     def get_runtime_based_gerrit_row(self, runtime, gerrit_data, rows_span=0):
+        base_html = f'<td rowspan="{rows_span}" class="gerrit-cell"><div class="cell-content">'
+        if not gerrit_data:
+            return base_html + "-</div></td>"
         logger.info(f"All types of gerrits merged: {gerrit_data.keys()}, runtime: {runtime}")
         if runtime == "tools":
             runtime_gerrits = list(gerrit_data.get("quantizer") or []) + list(gerrit_data.get("converter") or [])
@@ -1194,11 +1212,11 @@ class CombinedRegressionAnalysis:
         return qairt_regression_report_path
 
     def add_gerrit_details_to_report(self, qairt_html_report):
-        gerrits_merged_html_path, gerrits_count = self.generate_gerrits_merged_report()
-        if gerrits_count:
+        gerrits_merged_html_path = self.generate_gerrits_merged_report()
+        if gerrits_merged_html_path:
             qairt_html_report += "<h3> Lists of Gerrits Merged </h3>"
             qairt_html_report += self.list_to_html_ul(
-                [f"<a href='{gerrits_merged_html_path}'>{gerrits_count} Gerrits Merged</a>"]
+                [f"<a href='{gerrits_merged_html_path}'>{self.unique_gerrits_count} Gerrits Merged</a>"]
             )
         else:
             qairt_html_report += "<h3> No Gerrits Merged !! </h3>"
@@ -1833,7 +1851,10 @@ class CombinedRegressionAnalysis:
                     summary = cpu_summaries_list[idx]
                     qairt_regression_report += f"<tr>" f"<td>{runtime}</td>" f"<td><ul>{summary}</ul></td>" f"</tr>"
 
-        all_merged_gerrits_report_url = f"<a href='{all_merged_gerrits_report}'>All Merged Gerrits</a>"
+        if all_merged_gerrits_report:
+            all_merged_gerrits_report_url = f"<a href='{all_merged_gerrits_report}'>All Merged Gerrits</a>"
+        else:
+            all_merged_gerrits_report_url = "-"
         if core_data:
             rowspan = len(core_data)
             if rowspan:
@@ -1911,7 +1932,7 @@ def _months_back(d: date, months: int) -> date:
     return d - relativedelta(months=months)
 
 
-def should_process_id(qaisw_id: str, reference_date: date = date.today(), months_window: int = 1) -> bool:
+def should_process_id(qaisw_id: str, reference_date: date = date.today(), months_window: int = 3) -> bool:
     """
     Return True if this id's date is within [reference_date - months_window, reference_date] inclusive.
     Only compares dates (ignores time).
@@ -1930,15 +1951,13 @@ def run_report_generation_for_all_qairt_ids():
     logger.info(f"Processing: {len(qairt_ids)} Qairt Ids")
 
     for qairt_id in qairt_ids:
-        if qairt_id.startswith("qaisw"):
-            try:
-                report_analysis = CombinedRegressionAnalysis(ConsolidatedReportAnalysis())
-                report_analysis.generate_final_summary_report(qairt_id)
-                logger.info(f"{qairt_id} Successfully processed !!")
-            except Exception:
-                continue
-        else:
-            logger.info(f"Non Qaisw folder found: {qairt_id}... Skipping !!!")
+        try:
+            report_analysis = CombinedRegressionAnalysis(ConsolidatedReportAnalysis())
+            report_analysis.generate_final_summary_report(qairt_id)
+            logger.info(f"{qairt_id} Successfully processed !!")
+        except Exception as e:
+            logger.info(f"Exception while processing: {qairt_id}: {e}")
+            continue
 
 
 if __name__ == "__main__":
