@@ -13,7 +13,7 @@ from langchain_core.messages import BaseMessage
 from langchain_core.output_parsers import JsonOutputParser, StrOutputParser
 from langchain_core.outputs import ChatResult
 from langchain_core.prompts import ChatPromptTemplate
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from qgenie.integrations.langchain import QGenieChat
 
 from src import prompts
@@ -56,6 +56,14 @@ class CustomQGenieChat(QGenieChat):
                 params.pop("stream", "")
                 response = self.client.chat(messages=message_dicts, **params)
                 return self._create_chat_result(response)
+            except ValidationError as e:
+                if "content_filter" in str(e):
+                    logger.warning("Content filtered by model (content_filter finish_reason), skipping retries.")
+                    break
+                logger.error(traceback.format_exc())
+                logger.error(f"for messages: {message_dicts}")
+                if attempt < max_retries:
+                    time.sleep(get_exponential_backoff_delay(attempt=attempt))
             except Exception as e:
                 logger.error(traceback.format_exc())
                 logger.error(f"for messages: {message_dicts}")
@@ -81,6 +89,14 @@ class CustomQGenieChat(QGenieChat):
             try:
                 response = await self.async_client.chat(messages=message_dicts, **params)
                 return self._create_chat_result(response)
+            except ValidationError as e:
+                if "content_filter" in str(e):
+                    logger.warning("Content filtered by model (content_filter finish_reason), skipping retries.")
+                    break
+                logger.error(traceback.format_exc())
+                logger.error(f"for messages: {message_dicts}")
+                if attempt < max_retries:
+                    await asyncio.sleep(get_exponential_backoff_delay(attempt=attempt))
             except Exception as e:
                 logger.error(traceback.format_exc())
                 logger.error(f"for messages: {message_dicts}")

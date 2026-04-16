@@ -1932,7 +1932,7 @@ def _months_back(d: date, months: int) -> date:
     return d - relativedelta(months=months)
 
 
-def should_process_id(qaisw_id: str, reference_date: date = date.today(), months_window: int = 3) -> bool:
+def should_process_id(qaisw_id: str, reference_date: date = date.today(), months_window: int = 1) -> bool:
     """
     Return True if this id's date is within [reference_date - months_window, reference_date] inclusive.
     Only compares dates (ignores time).
