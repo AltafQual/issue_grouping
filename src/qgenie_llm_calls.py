@@ -249,7 +249,7 @@ async def classify_cluster_based_of_type(cluster_logs: list[str], cluster_name: 
     prompt_template = ChatPromptTemplate.from_messages(
         [("system", prompts.CLASSIFY_CLUSTER_TYPE_SYS_MESSAGE), ("human", prompts.CLASSIFY_CLUSTER_TYPE_LOG_MESSAGE)]
     )
-    chain = prompt_template | QgenieModels.azure_o3 | classify_cluster_based_on_type
+    chain = prompt_template | QgenieModels.azure_gpt_5_4_mini | classify_cluster_based_on_type
     result = await chain.ainvoke({"logs": cluster_logs, "cluster_name": cluster_name})
     return result
 
