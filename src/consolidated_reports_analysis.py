@@ -1654,8 +1654,17 @@ class CombinedRegressionAnalysis:
             f"{qairt_id}.html",
         )
 
+        # In case of atleast on html genrated, then also generate the qairt report
+        has_atleast_one_html = force_generate_qairt_report = False
+        for run_id in self._regression_analysis_object:
+            if self._regression_html_paths[run_id]:
+                has_atleast_one_html = True
+                break
+        if has_atleast_one_html and not os.path.exists(qairt_regression_report_path):
+            force_generate_qairt_report = True
+        
         # if no run id is processed return the previous path with any processing
-        if not self.__processed_run_id:
+        if not force_generate_qairt_report and not self.__processed_run_id:
             return qairt_regression_report_path
 
         gerrits_data = self._get_gerrits_data(runtime_first=True)
@@ -1944,10 +1953,10 @@ def should_process_id(qaisw_id: str, reference_date: date = date.today(), months
     return start <= id_d <= reference_date
 
 
-def run_report_generation_for_all_qairt_ids():
+def run_report_generation_for_all_qairt_ids(reference_date: date = date.today(), months_window: int = 1):
     qairt_ids = sorted(os.listdir(CONSOLIDATED_REPORTS.path), reverse=True)
     qairt_ids = [q for q in qairt_ids if q.startswith("qaisw")]
-    qairt_ids = [q for q in qairt_ids if should_process_id(q)]
+    qairt_ids = [q for q in qairt_ids if should_process_id(q, reference_date, months_window)]
     logger.info(f"Processing: {len(qairt_ids)} Qairt Ids")
 
     for qairt_id in qairt_ids:

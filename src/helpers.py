@@ -42,10 +42,9 @@ sql_connection = ConnectToMySql()
 faiss_runner = FaissIVFFlatIndex()
 faiss_update_queue = Queue()
 scheduler = BackgroundScheduler()
-
-# in-memory tc id data cache for 10 hours at max 500 items
-_tc_id_cache = TTLCache(ttl=36000, maxsize=500)
 parquet_file = "run_ids.parquet"
+_ERROR_PATTERN = re.compile(r"<[eE]>|\[ ?[Ee][Rr][Rr][Oo][Rr] ?\]", re.IGNORECASE)
+_TIMESTAMP_PREFIX = re.compile(r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?\s*")
 
 
 def get_cluster_class(cluster_dict):
@@ -278,8 +277,7 @@ def get_log_tail(log_path):
     except Exception as e:
         return f"Error reading log: {e}"
 
-
-def extract_error_lines(self, error_msg):
+def extract_error_lines(error_msg):
     """
     Given the raw error_msg string from execution_results.json (which is a Python
     list repr embedded in a larger string), extracts only the lines that contain
@@ -297,7 +295,7 @@ def extract_error_lines(self, error_msg):
         # Not a list repr — treat the whole string as one block
         lines = error_msg.splitlines()
 
-    error_lines = [l for l in lines if self._ERROR_PATTERN.search(l)]
+    error_lines = [l for l in lines if _ERROR_PATTERN.search(l)]
 
     if not error_lines:
         # No recognised error markers — return the original so caller can still use it
@@ -307,7 +305,7 @@ def extract_error_lines(self, error_msg):
     seen = set()
     unique = []
     for line in error_lines:
-        key = self._TIMESTAMP_PREFIX.sub("", line).strip()
+        key = _TIMESTAMP_PREFIX.sub("", line).strip()
         if key not in seen:
             seen.add(key)
             unique.append(key)
