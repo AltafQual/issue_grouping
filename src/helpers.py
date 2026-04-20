@@ -393,10 +393,12 @@ def remove_empty_and_misc_rows(df: pd.DataFrame, errors: list, error_column_name
     partial_error_reasons.loc[:, DataFrameKeys.extracted_error_log] = partial_error_reasons[
         DataFrameKeys.preprocessed_text_key
     ]
+
     df = pd.concat([df_with_error_reason, partial_error_reasons], axis=0).reset_index(drop=True)
-    df.loc[:, DataFrameKeys.cluster_name] = df[error_column_name].apply(is_empty_error_log)
     df.loc[:, DataFrameKeys.cluster_name] = df.apply(is_t2t_garbage_output, axis=1)
     df.loc[:, DataFrameKeys.cluster_class] = df.apply(t2t_garbage_output_class_assign, axis=1)
+    df.loc[:, DataFrameKeys.cluster_name] = df[error_column_name].apply(is_empty_error_log)
+    
     # Save unmasked text for embeddings before applying number masking for fuzzy matching
     df.loc[:, DataFrameKeys.preprocessed_text_key] = df[error_column_name]
     df.loc[:, error_column_name] = df[error_column_name].apply(mask_numbers)

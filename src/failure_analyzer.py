@@ -66,7 +66,6 @@ class FailureAnalyzer:
         self, file_path: str = None, st_object=None, dataframe=None, failure_column: str = "reason"
     ) -> pd.DataFrame:
         """Perform the complete analysis workflow."""
-        # TODO: convert everything ot self variables and use OOP properly, try extracting run id from dataframe if not provided
         if file_path:
             dataframe = self.load_data(file_path)
         elif st_object:
