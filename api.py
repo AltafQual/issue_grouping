@@ -20,6 +20,7 @@ from src.constants import CONSOLIDATED_REPORTS, DataFrameKeys
 from src.custom_clustering import CustomEmbeddingCluster
 from src.failure_analyzer import FailureAnalyzer
 from src.gerrit_data_fetching_helpers import get_gerrit_info_between_2_runids, get_regression_gerrits_based_of_type
+from src.get_prev_testplan_id import iterate_db_get_testplan
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("memlog")
@@ -57,6 +58,21 @@ class ClusterInfo(BaseModel):
 class OneClusterInfo(BaseModel):
     run_id: str = Field(description="valid test case Run ID")
     force: bool = Field(description="Skip cache and regenrate the regression", default=False)
+
+
+class PreviousRunIdRequest(BaseModel):
+    run_id: str = Field(description="valid test case Run ID to find previous runs for")
+
+
+class PreviousRunIdResponse(BaseModel):
+    status: int = 200
+    error_message: str = ""
+    run_id: str = ""
+    previous_run_id: str | None = None
+    previous_release_run_id: str | None = None
+
+    def to_dict(self) -> Dict:
+        return self.model_dump()
 
 
 class RegressionResponse(BaseModel):
@@ -413,12 +429,36 @@ async def get_run_id_cluster_info(cluster_info_object: OneClusterInfo) -> Dict:
     column_names_to_rename = {"model_name": "name", "log": "log_path"}
 
     try:
-        clustered_response = await helpers.async_sequential_process_by_type(dataframe)
+        # Run clustering and previous run lookup concurrently
+        loop = asyncio.get_event_loop()
+        clustering_task = helpers.async_sequential_process_by_type(dataframe)
+        prev_run_task = loop.run_in_executor(None, iterate_db_get_testplan, cluster_info_object.run_id)
+
+        clustered_response, prev_run_data = await asyncio.gather(clustering_task, prev_run_task, return_exceptions=True)
+
+        # Extract failed tc_uuids from previous run
+        prev_failed_uuids = set()
+        if not isinstance(prev_run_data, Exception) and prev_run_data is not None:
+            p_n_df = prev_run_data[0]
+            if p_n_df is not None and not p_n_df.empty and "result" in p_n_df.columns:
+                prev_failed_uuids = set(p_n_df[p_n_df["result"] != "PASS"]["tc_uuid"].tolist())
+                logger.info(
+                    f"{cluster_info_object.run_id}: Found {len(prev_failed_uuids)} failed tc_uuids in previous run"
+                )
+        elif isinstance(prev_run_data, Exception):
+            logger.warning(f"{cluster_info_object.run_id}: Could not fetch previous run data: {prev_run_data}")
+
+        if isinstance(clustered_response, Exception):
+            raise clustered_response
+
         for test_type, df in clustered_response.items():
             df = df[df.columns.intersection(cols_to_keep)]
             for col_name in column_names_to_rename:
                 if col_name in df.columns:
                     df.rename(columns={col_name: column_names_to_rename[col_name]}, inplace=True)
+
+            if "tc_uuid" in df.columns:
+                df["previous_regression"] = df["tc_uuid"].isin(prev_failed_uuids)
 
             response.type[test_type] = {}
             for runtime, runtime_df in df.groupby("runtime"):
@@ -447,8 +487,22 @@ async def get_run_id_cluster_info(cluster_info_object: OneClusterInfo) -> Dict:
     return response.to_dict()
 
 
-# @app.post("/api/model_ops/", status_code=200)
-# async def fetch_model_ops(
-#     model_ops_object: ModelOps,
-# ):
-#     return helpers.fetch_model_ops(model_ops_object.model_names)
+@app.post(
+    "/api/get_previous_run_ids/",
+    response_model=PreviousRunIdResponse,
+    status_code=200,
+)
+async def get_previous_run_ids(request: PreviousRunIdRequest) -> Dict:
+    response = PreviousRunIdResponse(run_id=request.run_id)
+    try:
+        loop = asyncio.get_event_loop()
+        p_n_df, p_r_df, previous_run_id, previous_release_run_id = await loop.run_in_executor(
+            None, iterate_db_get_testplan, request.run_id
+        )
+        response.previous_run_id = previous_run_id
+        response.previous_release_run_id = previous_release_run_id
+    except Exception as e:
+        logger.exception(f"{request.run_id}: Exception while fetching previous run IDs: {e}")
+        response.status = 500
+        response.error_message = str(e)
+    return response.to_dict()
