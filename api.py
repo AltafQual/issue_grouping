@@ -26,7 +26,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger("memlog")
 proc = psutil.Process()
 analyzer = FailureAnalyzer()
-TTL_CACHE = TTLCache(maxsize=1000, ttl=(604800 * 604800))
+TTL_CACHE = TTLCache(maxsize=9000, ttl=(604800 * 604800))
 LOCK = threading.Lock()
 
 
@@ -493,10 +493,17 @@ async def get_run_id_cluster_info(cluster_info_object: OneClusterInfo) -> Dict:
     status_code=200,
 )
 async def get_previous_run_ids(request: PreviousRunIdRequest) -> Dict:
+    def _get_cache_key(run_id):
+        return f"prev_run_id_{run_id}"
+
+    cache_key = _get_cache_key(request.run_id)
+    if cache_key in TTL_CACHE:
+        return TTL_CACHE[cache_key].to_dict()
+
     response = PreviousRunIdResponse(run_id=request.run_id)
     try:
         loop = asyncio.get_event_loop()
-        p_n_df, p_r_df, previous_run_id, previous_release_run_id = await loop.run_in_executor(
+        _, _, previous_run_id, previous_release_run_id = await loop.run_in_executor(
             None, iterate_db_get_testplan, request.run_id
         )
         response.previous_run_id = previous_run_id
@@ -505,4 +512,7 @@ async def get_previous_run_ids(request: PreviousRunIdRequest) -> Dict:
         logger.exception(f"{request.run_id}: Exception while fetching previous run IDs: {e}")
         response.status = 500
         response.error_message = str(e)
+
+    if response.status == 200:
+        TTL_CACHE[cache_key] = response
     return response.to_dict()
