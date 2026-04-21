@@ -1662,7 +1662,7 @@ class CombinedRegressionAnalysis:
                 break
         if has_atleast_one_html and not os.path.exists(qairt_regression_report_path):
             force_generate_qairt_report = True
-        
+
         # if no run id is processed return the previous path with any processing
         if not force_generate_qairt_report and not self.__processed_run_id:
             return qairt_regression_report_path

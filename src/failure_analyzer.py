@@ -181,7 +181,7 @@ class FailureAnalyzer:
                 failure_df.loc[mask, DataFrameKeys.cluster_name] = cluster_names
 
             failure_df = await helpers.assign_cluster_class(failure_df)
-            # failure_df = await detect_and_merge_near_duplicate_clusters(failure_df)
+            failure_df = await detect_and_merge_near_duplicate_clusters(failure_df)
             self.logger.info(f"Finished processing: {current_type}")
             return failure_df
 
@@ -259,7 +259,7 @@ class FailureAnalyzer:
             final_df.loc[mask, DataFrameKeys.cluster_name] = cluster_names
 
         final_df = await helpers.assign_cluster_class(final_df)
-        # final_df = await detect_and_merge_near_duplicate_clusters(final_df)
+        final_df = await detect_and_merge_near_duplicate_clusters(final_df)
         self.logger.info(f"Finished processing: {current_type}")
         return final_df
 

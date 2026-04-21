@@ -116,6 +116,9 @@ class QgenieModels:
         model="vertexai::gemini-3-flash-preview", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=5000
     )
 
+    azure_gpt_5_2: CustomQGenieChat = CustomQGenieChat(
+        model="azure::gpt-5.2", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=5000
+    )
     azure_o3_mini: CustomQGenieChat = CustomQGenieChat(
         model="azure::o3-mini", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=5000
     )
@@ -171,12 +174,25 @@ class SubClusterVerifierFailed(BaseModel):
     previous_clusters: dict = Field(description="json of existing verifier failed clusters for regrouping")
 
 
+class NearDuplicateResult(BaseModel):
+    cluster_a: str = Field(description="Name of the first cluster")
+    cluster_b: str = Field(description="Name of the second cluster")
+    is_duplicate: bool = Field(description="Whether the two clusters are near-duplicates")
+    reason: str = Field(description="One sentence technical explanation")
+    keep_name: str | None = Field(description="Which cluster name to keep if duplicate, else null")
+
+
+class NearDuplicateResultList(BaseModel):
+    results: list = list[NearDuplicateResult]
+
+
 parser = JsonOutputParser(pydantic_object=ClusteringResult)
 merge_parser = JsonOutputParser(pydantic_object=MergeResult)
 recluster_parser = JsonOutputParser(pydantic_object=ReclusterResult)
 nameparser = JsonOutputParser(pydantic_object=NameClusteringResult)
 classify_cluster_based_on_type = JsonOutputParser(pydantic_object=ClassifyClusterGroup)
 subcluster_verifer_failed = JsonOutputParser(pydantic_object=SubClusterVerifierFailed)
+near_duplicate_parser = JsonOutputParser(pydantic_object=NearDuplicateResultList)
 
 
 @execution_timer
@@ -446,9 +462,9 @@ async def merge_duplicate_clusters(
             cluster_results[base_cluster_id]["cluster_name"] = response["merged_name"]
 
             # Move all rows from next_cluster to base_cluster
-            df.loc[
-                df[DataFrameKeys.cluster_type_int] == next_cluster_id, DataFrameKeys.cluster_type_int
-            ] = base_cluster_id
+            df.loc[df[DataFrameKeys.cluster_type_int] == next_cluster_id, DataFrameKeys.cluster_type_int] = (
+                base_cluster_id
+            )
 
             # Move outliers to cluster -1
             outlier_indices = [int(index) for index in response.get("outlier_indices")]
@@ -469,9 +485,9 @@ def give_cluster_names_and_reassign_misc_clusters(df: pd.DataFrame, cluster_resu
     for cluster_id, result in cluster_results.items():
         misclassified_ids = result.get("misclassified_ids", [])
         if misclassified_ids:
-            df.loc[
-                df.index.isin(misclassified_ids), DataFrameKeys.cluster_type_int
-            ] = ClusterSpecificKeys.non_grouped_key
+            df.loc[df.index.isin(misclassified_ids), DataFrameKeys.cluster_type_int] = (
+                ClusterSpecificKeys.non_grouped_key
+            )
 
         cluster_name = result.get("cluster_name")
         if cluster_name:
@@ -569,9 +585,9 @@ def inter_cluster_merging(df: pd.DataFrame) -> pd.DataFrame:
                 merge_response = merge_clusters(df, current_cluster_name, merge_target_name)
 
                 # Update cluster labels in df
-                df.loc[
-                    df[DataFrameKeys.cluster_name] == current_cluster_name, DataFrameKeys.cluster_name
-                ] = merge_response["merged_name"]
+                df.loc[df[DataFrameKeys.cluster_name] == current_cluster_name, DataFrameKeys.cluster_name] = (
+                    merge_response["merged_name"]
+                )
 
                 # Handle outliers
                 outlier_indices = merge_response.get("outlier_indices", [])
@@ -753,17 +769,6 @@ def subcluster_verifier_failed(df: pd.DataFrame):
     return df
 
 
-class NearDuplicateResult(BaseModel):
-    cluster_a: str = Field(description="Name of the first cluster")
-    cluster_b: str = Field(description="Name of the second cluster")
-    is_duplicate: bool = Field(description="Whether the two clusters are near-duplicates")
-    reason: str = Field(description="One sentence technical explanation")
-    keep_name: str | None = Field(description="Which cluster name to keep if duplicate, else null")
-
-
-near_duplicate_parser = JsonOutputParser()
-
-
 @execution_timer
 async def detect_and_merge_near_duplicate_clusters(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -771,29 +776,52 @@ async def detect_and_merge_near_duplicate_clusters(df: pd.DataFrame) -> pd.DataF
     then confirm duplicates via LLM with full logs (batched 5 pairs per call).
     Prints confirmed duplicates with reason to terminal, then merges them in the df.
     """
-    COSINE_THRESHOLD = 0.90
-    BATCH_SIZE = 5  # pairs per LLM call — small batch = full logs = high accuracy
 
-    # Exclude noise/default clusters
+    def build_pairs_block(pairs: list[tuple[str, str, float]]) -> str:
+        blocks = []
+        for idx, (name_a, name_b, sim) in enumerate(pairs, start=1):
+            logs_a = cluster_logs.get(name_a, [])
+            logs_b = cluster_logs.get(name_b, [])
+            logs_a_str = "\n".join(f"  [{i+1}] {log}" for i, log in enumerate(logs_a))
+            logs_b_str = "\n".join(f"  [{i+1}] {log}" for i, log in enumerate(logs_b))
+            blocks.append(
+                f"Pair {idx} (cosine similarity: {sim:.3f}):\n"
+                f'  Cluster A: "{name_a}"\n'
+                f"  Cluster A logs:\n{logs_a_str}\n\n"
+                f'  Cluster B: "{name_b}"\n'
+                f"  Cluster B logs:\n{logs_b_str}"
+            )
+        return "\n\n" + ("-" * 60 + "\n\n").join(blocks)
+
+    def chunk_pairs(pairs, size):
+        for i in range(0, len(pairs), size):
+            yield pairs[i : i + size]
+
+    def resolve(name: str) -> str:
+        while name in rename_map:
+            name = rename_map[name]
+        return name
+
+    COSINE_THRESHOLD = 0.90
+    BATCH_SIZE = 5
+
     excluded = {ClusterSpecificKeys.non_grouped_key, str(ClusterSpecificKeys.non_grouped_key)}
     valid_df = df[~df[DataFrameKeys.cluster_name].isin(excluded)].copy()
 
     unique_clusters = [c for c in valid_df[DataFrameKeys.cluster_name].unique() if c and str(c).strip()]
 
-    if len(unique_clusters) < 2:
+    if len(unique_clusters) <= 2:
         logger.info("Near-duplicate check: fewer than 2 clusters, skipping.")
         return df
 
-    # --- Step 1: compute per-cluster centroid embeddings ---
     cluster_centroids: dict[str, np.ndarray] = {}
     cluster_logs: dict[str, list[str]] = {}
 
     for cluster_name in unique_clusters:
         cluster_rows = valid_df[valid_df[DataFrameKeys.cluster_name] == cluster_name]
         logs = cluster_rows[DataFrameKeys.preprocessed_text_key].dropna().tolist()
-        cluster_logs[cluster_name] = logs
+        cluster_logs[cluster_name] = logs[:5] if len(logs) > 5 else logs
 
-        # Use stored embeddings if available, otherwise skip centroid computation for this cluster
         emb_col = cluster_rows[DataFrameKeys.embeddings_key].dropna()
         if emb_col.empty:
             continue
@@ -802,11 +830,10 @@ async def detect_and_merge_near_duplicate_clusters(df: pd.DataFrame) -> pd.DataF
             cluster_centroids[cluster_name] = embeddings.mean(axis=0)
 
     clusters_with_centroids = list(cluster_centroids.keys())
-    if len(clusters_with_centroids) < 2:
+    if len(clusters_with_centroids) <= 2:
         logger.info("Near-duplicate check: not enough clusters with embeddings, skipping.")
         return df
 
-    # --- Step 2: pairwise cosine similarity to find candidate pairs ---
     names = clusters_with_centroids
     matrix = np.array([cluster_centroids[n] for n in names])
 
@@ -828,54 +855,24 @@ async def detect_and_merge_near_duplicate_clusters(df: pd.DataFrame) -> pd.DataF
         logger.info("Near-duplicate check: no candidate pairs above threshold 0.90.")
         return df
 
-    logger.info(f"Near-duplicate check: {len(candidate_pairs)} candidate pairs found above 0.90 cosine similarity.")
-
-    # --- Step 3: batch LLM calls (BATCH_SIZE pairs per call) ---
-    def build_pairs_block(pairs: list[tuple[str, str, float]]) -> str:
-        blocks = []
-        for idx, (name_a, name_b, sim) in enumerate(pairs, start=1):
-            logs_a = cluster_logs.get(name_a, [])
-            logs_b = cluster_logs.get(name_b, [])
-            logs_a_str = "\n".join(f"  [{i+1}] {log}" for i, log in enumerate(logs_a))
-            logs_b_str = "\n".join(f"  [{i+1}] {log}" for i, log in enumerate(logs_b))
-            blocks.append(
-                f"Pair {idx} (cosine similarity: {sim:.3f}):\n"
-                f'  Cluster A: "{name_a}"\n'
-                f"  Cluster A logs:\n{logs_a_str}\n\n"
-                f'  Cluster B: "{name_b}"\n'
-                f"  Cluster B logs:\n{logs_b_str}"
-            )
-        return "\n\n" + ("-" * 60 + "\n\n").join(blocks)
-
+    logger.info(
+        f"Near-duplicate check: {len(candidate_pairs)} candidate pairs found above {COSINE_THRESHOLD} cosine similarity."
+    )
     prompt_template = ChatPromptTemplate.from_messages(
         [
             ("system", prompts.NEAR_DUPLICATE_CLUSTER_SYS_MESSAGE),
             ("human", prompts.NEAR_DUPLICATE_CLUSTER_LOG_MESSAGE),
         ]
     )
-    chain = prompt_template | QgenieModels.gemini_3_flash | near_duplicate_parser
-
-    # Chunk candidate pairs into batches
-    def chunk_pairs(pairs, size):
-        for i in range(0, len(pairs), size):
-            yield pairs[i : i + size]
-
+    chain = prompt_template | QgenieModels.azure_gpt_5_2 | near_duplicate_parser
     confirmed_merges: list[tuple[str, str, str, str]] = []  # (name_a, name_b, keep_name, reason)
 
     for batch_idx, batch in enumerate(chunk_pairs(candidate_pairs, BATCH_SIZE), start=1):
         pairs_block = build_pairs_block(batch)
         try:
             response = await chain.ainvoke({"pairs_block": pairs_block})
-            # response is a list of dicts from JsonOutputParser
-            if isinstance(response, list):
-                results = response
-            elif isinstance(response, dict) and isinstance(response.get("root"), list):
-                results = response["root"]
-            else:
-                logger.warning(f"Near-duplicate batch {batch_idx}: unexpected response format: {response}")
-                continue
-
-            for item in results:
+            print(f"merge clusters reponse: {response}")
+            for item in response:
                 if not isinstance(item, dict):
                     continue
                 if item.get("is_duplicate"):
@@ -893,7 +890,6 @@ async def detect_and_merge_near_duplicate_clusters(df: pd.DataFrame) -> pd.DataF
         print("\n[Near-Duplicate Check] No duplicate clusters found.\n")
         return df
 
-    # --- Step 4: print confirmed duplicates and merge ---
     print("\n" + "=" * 70)
     print("[Near-Duplicate Cluster Detection] Confirmed duplicates to merge:")
     print("=" * 70)
@@ -907,12 +903,6 @@ async def detect_and_merge_near_duplicate_clusters(df: pd.DataFrame) -> pd.DataF
 
     # Apply merges — track renames so chained merges resolve correctly
     rename_map: dict[str, str] = {}  # old_name -> canonical keep_name
-
-    def resolve(name: str) -> str:
-        while name in rename_map:
-            name = rename_map[name]
-        return name
-
     for name_a, name_b, keep, reason in confirmed_merges:
         resolved_a = resolve(name_a)
         resolved_b = resolve(name_b)

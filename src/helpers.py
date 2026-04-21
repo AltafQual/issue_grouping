@@ -277,6 +277,7 @@ def get_log_tail(log_path):
     except Exception as e:
         return f"Error reading log: {e}"
 
+
 def extract_error_lines(error_msg):
     """
     Given the raw error_msg string from execution_results.json (which is a Python
@@ -398,7 +399,7 @@ def remove_empty_and_misc_rows(df: pd.DataFrame, errors: list, error_column_name
     df.loc[:, DataFrameKeys.cluster_name] = df.apply(is_t2t_garbage_output, axis=1)
     df.loc[:, DataFrameKeys.cluster_class] = df.apply(t2t_garbage_output_class_assign, axis=1)
     df.loc[:, DataFrameKeys.cluster_name] = df[error_column_name].apply(is_empty_error_log)
-    
+
     # Save unmasked text for embeddings before applying number masking for fuzzy matching
     df.loc[:, DataFrameKeys.preprocessed_text_key] = df[error_column_name]
     df.loc[:, error_column_name] = df[error_column_name].apply(mask_numbers)
@@ -683,14 +684,14 @@ async def check_if_issue_alread_grouped(df: pd.DataFrame) -> pd.DataFrame:
 
     if not ungrouped_df.empty:
         # Get cluster names using FAISS — use unmasked embedding text for better similarity
-        new_cluster_names, class_names = await CustomEmbeddingCluster().batch_search(
+        new_cluster_names, class_names, embeddings = await CustomEmbeddingCluster().batch_search(
             type_=ungrouped_df.iloc[0]["type"],  # assuming same type for batch
             queries=ungrouped_df[DataFrameKeys.preprocessed_text_key].tolist(),
         )
-
         # Update the original DataFrame
         df.loc[mask, DataFrameKeys.cluster_name] = new_cluster_names
         df.loc[mask, DataFrameKeys.cluster_class] = class_names
+        df.loc[mask, DataFrameKeys.embeddings_key] = pd.Series(embeddings.tolist(), index=df.index[mask])
 
         # Create a boolean mask for rows that were successfully grouped (not non_grouped_key)
         successfully_grouped_mask = mask & df[DataFrameKeys.cluster_name].ne(ClusterSpecificKeys.non_grouped_key)

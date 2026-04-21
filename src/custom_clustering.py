@@ -586,7 +586,7 @@ class CustomEmbeddingCluster:
         cluster_names.extend(cluster_name)
         class_names.extend(class_name)
 
-        return cluster_names, class_names
+        return cluster_names, class_names, embeddings
 
     def add_jira_id(self, type_: str, cluster_name: str, jira_id: str) -> bool:
         """
