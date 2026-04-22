@@ -222,8 +222,11 @@ class FallbackEmbeddings(Embeddings):
         return results
 
     async def _try_aembed_sub_batch(self, sub_batch):
-        """Async embed a single sub-batch. Returns result or raises."""
-        return await self.qgenie_embeddings.aembed_without_retry(sub_batch)
+        """Async embed a single sub-batch. Raises asyncio.TimeoutError after 120 s if QGenie hangs."""
+        return await asyncio.wait_for(
+            self.qgenie_embeddings.aembed_without_retry(sub_batch),
+            timeout=120,
+        )
 
     async def _aembed_batch_with_size_reduction(self, batch, batch_start):
         """Try async embedding a batch, reducing batch size by 5 on 500 errors until size reaches 1."""
@@ -255,27 +258,34 @@ class FallbackEmbeddings(Embeddings):
     async def aembed(self, data: list):
         if not data:
             return []
-        logger.info(f"Attempting to generate embeddings with QGenie: lenght of data: {len(data)}")
-        batch_size = 500
+        try:
+            logger.info(f"Attempting to generate embeddings with QGenie: lenght of data: {len(data)}")
+            batch_size = 500
 
-        batches = [data[i : i + batch_size] for i in range(0, len(data), batch_size)]
+            batches = [data[i : i + batch_size] for i in range(0, len(data), batch_size)]
 
-        async def process_batch(batch, index):
-            batch_start = index * batch_size
-            batch_end = min(batch_start + batch_size, len(data))
-            logger.info(f"Processing batch: documents {batch_start} to {batch_end-1}")
-            result = await self._aembed_batch_with_size_reduction(batch, batch_start)
-            logger.info(f"Completed batch with {len(batch)} documents")
-            return result
+            async def process_batch(batch, index):
+                batch_start = index * batch_size
+                batch_end = min(batch_start + batch_size, len(data))
+                logger.info(f"Processing batch: documents {batch_start} to {batch_end-1}")
+                result = await self._aembed_batch_with_size_reduction(batch, batch_start)
+                logger.info(f"Completed batch with {len(batch)} documents")
+                return result
 
-        batch_tasks = [process_batch(batch, i) for i, batch in enumerate(batches)]
-        batch_results = await asyncio.gather(*batch_tasks)
+            batch_tasks = [process_batch(batch, i) for i, batch in enumerate(batches)]
+            batch_results = await asyncio.gather(*batch_tasks)
 
-        results = []
-        for batch_result in batch_results:
-            results.extend(batch_result)
+            results = []
+            for batch_result in batch_results:
+                results.extend(batch_result)
 
-        return results
+            return results
+        except Exception as e:
+            logger.error(
+                f"QGenie aembed failed ({type(e).__name__}: {e}). Falling back to local BGEM3."
+            )
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(None, BGEM3Embeddings().embed, data)
 
     def embed_documents(self, data: list[str]) -> list[list[float]]:
         return self.embed(data)

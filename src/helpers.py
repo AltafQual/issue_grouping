@@ -28,6 +28,7 @@ from src.constants import (
     ErrorLogConfigurations,
     FaissConfigurations,
     FaissDBPath,
+    SPLADEConfigurations,
     regex_based_filteration_patterns
 )
 from src.custom_clustering import CustomEmbeddingCluster
@@ -41,6 +42,7 @@ logger = AppLogger().get_logger(__name__)
 sql_connection = ConnectToMySql()
 faiss_runner = FaissIVFFlatIndex()
 faiss_update_queue = Queue()
+splade_update_queue = Queue()
 scheduler = BackgroundScheduler()
 parquet_file = "run_ids.parquet"
 _ERROR_PATTERN = re.compile(r"<[eE]>|\[ ?[Ee][Rr][Rr][Oo][Rr] ?\]", re.IGNORECASE)
@@ -167,16 +169,22 @@ def load_cached_model(model_name="BAAI/bge-m3", models_dir="models"):
             raise FileNotFoundError(f"No snapshot folders found in {model_base_path}")
 
         model_path = os.path.join(model_base_path, snapshots[0])
-        print(f"Loading model from: {model_path}")
+        logger.info(f"Loading model from: {model_path}")
 
         return SentenceTransformer(model_path)
     except Exception as e:
-        print(f"Exception occured while loading cached model: {e}")
+        logger.error(f"Exception occured while loading cached model: {e}")
         return None
 
 
 @execution_timer
 def preprocess_error_log(log: str) -> str:
+    # Truncate early to avoid O(n) regex cost on multi-MB raw logs.
+    # trim_error_logs() later caps the final preprocessed output to 5000 chars;
+    # 20000 chars here is a safe upper bound that preserves head+tail context.
+    if len(log) > 20000:
+        log = log[:6000] + " ... " + log[-14000:]
+
     # Step 1: Remove timestamps like "1077.9ms"
     log = re.sub(r"\b\d{1,4}(\.\d+)?ms\b", "", log)
 
@@ -354,7 +362,7 @@ def replace_limiting_reason_with_actual_reason_concurrently(df, error_reason_col
                         parsed = extract_error_lines(str(raw))
                         preprocessed = preprocess_error_log(parsed)
                 except Exception as e:
-                    print(f"Exception while fetching failure logs from execution_results.json: {e}")
+                    logger.warning(f"Exception while fetching failure logs from execution_results.json: {e}")
                     pass
 
             if not parsed:
@@ -363,7 +371,7 @@ def replace_limiting_reason_with_actual_reason_concurrently(df, error_reason_col
                 preprocessed = preprocess_error_log(parsed)
             return i, (preprocessed, parsed)
         except Exception as e:
-            print(f"[WARN] Failed for row {i} ({path}): {e}")
+            logger.warning(f"Failed for row {i} ({path}): {e}")
             return i, ("", "")
 
     # Collect results in the same order as input
@@ -385,10 +393,10 @@ def remove_empty_and_misc_rows(df: pd.DataFrame, errors: list, error_column_name
     df[DataFrameKeys.extracted_error_log] = None
     df[error_column_name] = errors
     df_with_error_reason = df[
-        ~df[error_column_name].str.startswith("limiting reason")
+        ~df[error_column_name].str.contains("limiting reason", na=False)
     ]  # instead of starts with check if the string has this !! sometime appears in middle
     partial_error_reasons = replace_limiting_reason_with_actual_reason_concurrently(
-        df[df[error_column_name].str.startswith("limiting reason")],
+        df[df[error_column_name].str.contains("limiting reason", na=False)],
         error_column_name,
     )
     partial_error_reasons.loc[:, DataFrameKeys.extracted_error_log] = partial_error_reasons[
@@ -412,7 +420,7 @@ async def update_rows_by_regex_patterns(df: pd.DataFrame) -> pd.DataFrame:
         matched_df = df[
             df[DataFrameKeys.preprocessed_text_key].astype(str).str.contains(pattern, flags=re.IGNORECASE, regex=True)
         ]
-        print(f"Found occurence of match: {name}: {matched_df.shape[0]}")
+        logger.debug(f"Found occurence of match: {name}: {matched_df.shape[0]}")
         if not matched_df.empty:
             if "verifier failed" in pattern:
                 cluster_name = {"cluster_name": "VerifierFailed"}
@@ -499,7 +507,7 @@ def trim(log, head_ratio=0.3, max_length=5000):
         else:
             return log_str
     except Exception as e:
-        print(f"Error processing log: {log}, Error: {e}")
+        logger.error(f"Error processing log: {log}, Error: {e}")
         return ""
 
 
@@ -628,7 +636,7 @@ def create_excel_with_clusters(df: pd.DataFrame, cluster_column: str, columns_to
                 sheet_created = True
 
             else:
-                print(f"Skipping invalid cluster value: {repr(cluster)}")
+                logger.warning(f"Skipping invalid cluster value: {repr(cluster)}")
 
         if not sheet_created:
             pd.DataFrame({"Message": ["No valid clusters available to export"]}).to_excel(
@@ -717,7 +725,7 @@ def update_error_map_qgenie_table(df):
     try:
         sql_connection.update_qgenie_error_map_table(df)
     except Exception as e:
-        print(f"Failed to update SQL Table: {e}")
+        logger.error(f"Failed to update SQL Table: {e}")
 
 
 @execution_timer
@@ -806,7 +814,7 @@ async def process_tc_ids_async_bg_job(run_ids):
 
                 continue
         else:
-            print(f"Skipping processing: {run_id} doesn't start with QNN/SNPE")
+            logger.info(f"Skipping processing: {run_id} doesn't start with QNN/SNPE")
 
     requeue_failed_run_ids()
     swap_issue_grouping_db_to_prod()
@@ -962,9 +970,50 @@ def faissdb_update_worker():
             faiss_update_queue.task_done()
 
 
+def splade_update_worker():
+    """
+    Daemon: consumes splade_update_queue, encodes cluster representative logs,
+    and EMA-updates the SPLADE index for each type.
+
+    The SPLADE encoder is loaded once at thread start to amortise model load time.
+    An in-process cache keeps each SPLADEClusterIndex loaded across tasks for the
+    same type to avoid repeated disk reads.
+    """
+    logger.info("Starting SPLADE update background job")
+    import queue as _queue
+
+    from src.splade_clustering import SPLADEClusterIndex, SPLADEEncoder
+
+    encoder = SPLADEEncoder()  # loads model once — expensive, do it at thread start
+    idx_cache: dict = {}  # type_ → SPLADEClusterIndex
+
+    while True:
+        try:
+            task = splade_update_queue.get(timeout=5)
+        except _queue.Empty:
+            continue
+
+        try:
+            type_ = task["type_"]
+            updates = task["updates"]  # {cluster_name: representative_log}
+
+            if type_ not in idx_cache:
+                idx = SPLADEClusterIndex(FaissConfigurations.base_path)
+                idx.load(type_)
+                idx_cache[type_] = idx
+
+            idx_cache[type_].batch_update(type_, updates, encoder)
+            idx_cache[type_].save(type_)
+            logger.info(f"[SPLADE worker] Processed type={type_}: {len(updates)} cluster(s) updated")
+        except Exception as e:
+            logger.error(f"[SPLADE worker] Error processing task: {e}")
+            logger.error(traceback.format_exc())
+        finally:
+            splade_update_queue.task_done()
+
+
 def get_bu_name(soc_name: str) -> str:
     auto = {
-        "Lemans8775IVI",
         "Lemans_QOS224Q",
         "LemansIVI",
         "LemansQ",
@@ -1172,3 +1221,117 @@ def requeue_failed_run_ids():
 
     logger.info(f"Removed {removed_count} run IDs from processed_runids.json.")
     logger.info("Cleared failed_processing_runids_log.txt.")
+
+
+@execution_timer
+async def splade_pregroup(df: pd.DataFrame, type_: str = None) -> pd.DataFrame:
+    """
+    SPLADE-based pre-grouping pass.
+    Groups errors with high SPLADE sparse-vector similarity before HDBSCAN clustering.
+    Only processes rows with cluster_name == non_grouped_key.
+    Returns df with cluster_name updated for discovered groups.
+    """
+    from src.splade_clustering import SPLADEEncoder
+
+    SPLADE_THRESHOLD = SPLADEConfigurations.pregroup_threshold
+    MIN_GROUP_SIZE = 2
+
+    cluster_col = DataFrameKeys.cluster_name
+    text_col = DataFrameKeys.preprocessed_text_key
+
+    mask = df[cluster_col] == ClusterSpecificKeys.non_grouped_key
+    unclustered_count = mask.sum()
+
+    if unclustered_count < MIN_GROUP_SIZE:
+        logger.info(
+            f"[SPLADEPregroup] type={type_}: only {unclustered_count} unclustered rows "
+            f"(< min_group_size={MIN_GROUP_SIZE}), skipping"
+        )
+        return df
+
+    logger.info(
+        f"[SPLADEPregroup] type={type_}: starting SPLADE pre-grouping on "
+        f"{unclustered_count} unclustered rows (threshold={SPLADE_THRESHOLD})"
+    )
+
+    work_df = df[mask].copy()
+    indices = list(work_df.index)
+    texts = work_df[text_col].astype(str).tolist()
+
+    encoder = SPLADEEncoder()
+    if not encoder.is_available:
+        logger.warning(f"[SPLADEPregroup] type={type_}: SPLADE encoder unavailable, skipping pre-grouping")
+        return df
+
+    # Run CPU-bound SPLADE inference in a thread executor so the event loop stays responsive.
+    # Without this, the ~6s torch forward pass blocks all pending network I/O (QGenie, etc.).
+    loop = asyncio.get_running_loop()
+    sparse_vecs = await loop.run_in_executor(None, encoder.encode, texts)
+    if sparse_vecs is None:
+        logger.warning(f"[SPLADEPregroup] type={type_}: encoding returned None, skipping pre-grouping")
+        return df
+
+    # Pairwise SPLADE dot products → (N, N) dense matrix
+    sim_matrix = (sparse_vecs @ sparse_vecs.T).toarray()
+
+    assigned = [False] * len(indices)
+    groups = []
+
+    for i in range(len(indices)):
+        if assigned[i]:
+            continue
+
+        row = sim_matrix[i].copy()
+        min_s, max_s = row.min(), row.max()
+        if max_s - min_s > 1e-9:
+            norm_row = (row - min_s) / (max_s - min_s)
+        else:
+            norm_row = np.zeros(len(indices))
+
+        group = [i]
+        for j in range(len(indices)):
+            if j != i and not assigned[j] and norm_row[j] >= SPLADE_THRESHOLD:
+                group.append(j)
+
+        if len(group) >= MIN_GROUP_SIZE:
+            groups.append(group)
+            for g in group:
+                assigned[g] = True
+
+    if not groups:
+        logger.info(
+            f"[SPLADEPregroup] type={type_}: no groups found above threshold={SPLADE_THRESHOLD}, "
+            f"all {unclustered_count} rows remain unclustered"
+        )
+        return df
+
+    group_sizes = [len(g) for g in groups]
+    logger.info(
+        f"[SPLADEPregroup] type={type_}: found {len(groups)} candidate groups "
+        f"(sizes: min={min(group_sizes)}, max={max(group_sizes)}, "
+        f"total grouped={sum(group_sizes)}/{unclustered_count}); "
+        f"calling LLM to name groups"
+    )
+
+    tasks = [generate_cluster_name(work_df.iloc[group]) for group in groups]
+    results = await asyncio.gather(*tasks)
+
+    named_count = 0
+    for group, result in zip(groups, results):
+        if result and "cluster_name" in result:
+            group_df_indices = [indices[g] for g in group]
+            cluster_name = result["cluster_name"]
+            df.loc[group_df_indices, cluster_col] = cluster_name
+            named_count += len(group)
+            logger.debug(f"[SPLADEPregroup] type={type_}: group of {len(group)} rows → '{cluster_name}'")
+        else:
+            logger.warning(
+                f"[SPLADEPregroup] type={type_}: LLM returned no cluster name for "
+                f"group of size {len(group)}, rows remain unclustered"
+            )
+
+    logger.info(
+        f"[SPLADEPregroup] type={type_}: complete — "
+        f"{named_count}/{unclustered_count} rows grouped into {len(groups)} clusters"
+    )
+    return df
