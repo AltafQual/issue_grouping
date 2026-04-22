@@ -136,6 +136,9 @@ class CustomEmbeddingCluster:
                             data, typed_dataframe
                         )
 
+                # Queue SPLADE update for background processing
+                self._queue_splade_update(type_, typed_dataframe, metadata)
+                
                 assert len(centroids) == len(metadata), (
                     f"CRITICAL ERROR: Number of centroids ({len(centroids)}) "
                     f"does not match number of metadata entries ({len(metadata)})"
@@ -152,8 +155,6 @@ class CustomEmbeddingCluster:
                 with open(os.path.join(type_dir, "metadata.json"), "w") as f:
                     json.dump(metadata, f, indent=3)
 
-                # Queue SPLADE update for background processing
-                self._queue_splade_update(type_, typed_dataframe, metadata)
 
                 return f"Saved {len(centroids)} clusters for type: {type_}"
             except Exception as e:

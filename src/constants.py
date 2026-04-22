@@ -54,7 +54,10 @@ class FaissDBPath:
 
 @dataclass
 class SPLADEConfigurations:
+    enabled: bool = True
+    use_quantized: bool = True  # use rasyosef/splade-small (~17 MB) instead of the 440 MB model
     model_name: str = "naver/splade-cocondenser-ensembledistil"
+    quantized_model_name: str = "rasyosef/splade-small"
     splade_vectors_file: str = "splade_vectors.npz"
     splade_cluster_names_file: str = "splade_cluster_names.json"
     hybrid_alpha: float = 0.55  # dense cosine weight

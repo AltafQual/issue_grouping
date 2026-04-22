@@ -29,7 +29,7 @@ from src.constants import (
     FaissConfigurations,
     FaissDBPath,
     SPLADEConfigurations,
-    regex_based_filteration_patterns,
+    regex_based_filteration_patterns
 )
 from src.custom_clustering import CustomEmbeddingCluster
 from src.db_connections import ConnectToMySql
@@ -975,7 +975,8 @@ def splade_update_worker():
     Daemon: consumes splade_update_queue, encodes cluster representative logs,
     and EMA-updates the SPLADE index for each type.
 
-    The SPLADE encoder is loaded once at thread start to amortise model load time.
+    The SPLADE encoder is loaded lazily on the first task (not at thread start)
+    to avoid competing with the main thread's data loading and causing OOM.
     An in-process cache keeps each SPLADEClusterIndex loaded across tasks for the
     same type to avoid repeated disk reads.
     """
@@ -984,7 +985,7 @@ def splade_update_worker():
 
     from src.splade_clustering import SPLADEClusterIndex, SPLADEEncoder
 
-    encoder = SPLADEEncoder()  # loads model once — expensive, do it at thread start
+    encoder = None  # loaded lazily on first task — avoids OOM race at startup
     idx_cache: dict = {}  # type_ → SPLADEClusterIndex
 
     while True:
@@ -996,6 +997,14 @@ def splade_update_worker():
         try:
             type_ = task["type_"]
             updates = task["updates"]  # {cluster_name: representative_log}
+
+            # Load encoder lazily — deferred until first real task so the
+            # 440 MB model load doesn't race with the main thread at startup.
+            if encoder is None:
+                if not SPLADEConfigurations.enabled:
+                    logger.debug("[SPLADE worker] SPLADE disabled, draining queue without processing")
+                    continue
+                encoder = SPLADEEncoder()
 
             if type_ not in idx_cache:
                 idx = SPLADEClusterIndex(FaissConfigurations.base_path)
@@ -1231,6 +1240,10 @@ async def splade_pregroup(df: pd.DataFrame, type_: str = None) -> pd.DataFrame:
     Only processes rows with cluster_name == non_grouped_key.
     Returns df with cluster_name updated for discovered groups.
     """
+    if not SPLADEConfigurations.enabled:
+        logger.debug(f"[SPLADEPregroup] type={type_}: SPLADE disabled, skipping pre-grouping")
+        return df
+
     from src.splade_clustering import SPLADEEncoder
 
     SPLADE_THRESHOLD = SPLADEConfigurations.pregroup_threshold

@@ -201,30 +201,30 @@ class FailureAnalyzer:
             f"{already_clustered_df.shape[0]} already clustered logs and {non_clustered_df.shape[0]} non-clustered logs"
         )
 
-        bm25_grouped_df = pd.DataFrame()
+        splade_grouped_df = pd.DataFrame()
         if not non_clustered_df.empty:
             # SPLADE pre-grouping pass: catches same-root-cause errors before HDBSCAN
             non_clustered_df = await helpers.splade_pregroup(non_clustered_df, type_=current_type)
 
             # Split SPLADE-grouped rows (have names already) from still-unclustered
-            bm25_grouped_mask = non_clustered_df[DataFrameKeys.cluster_name] != ClusterSpecificKeys.non_grouped_key
-            bm25_grouped_df = non_clustered_df[bm25_grouped_mask].copy()
-            non_clustered_df = non_clustered_df[~bm25_grouped_mask].reset_index(drop=True)
+            splade_grouped_mask = non_clustered_df[DataFrameKeys.cluster_name] != ClusterSpecificKeys.non_grouped_key
+            splade_grouped_df = non_clustered_df[splade_grouped_mask].copy()
+            non_clustered_df = non_clustered_df[~splade_grouped_mask].reset_index(drop=True)
 
             self.logger.info(
                 f"[SPLADESplit] type={current_type}: "
-                f"{len(bm25_grouped_df)} rows pre-grouped by SPLADE, "
+                f"{len(splade_grouped_df)} rows pre-grouped by SPLADE, "
                 f"{len(non_clustered_df)} rows remain for HDBSCAN"
             )
 
             # Generate embeddings for SPLADE-grouped rows (needed for FAISS DB persistence)
-            if not bm25_grouped_df.empty:
+            if not splade_grouped_df.empty:
                 self.logger.info(
                     f"[SPLADESplit] type={current_type}: generating embeddings for "
-                    f"{len(bm25_grouped_df)} SPLADE-grouped rows"
+                    f"{len(splade_grouped_df)} SPLADE-grouped rows"
                 )
-                bm25_embs = self.generate_embeddings(bm25_grouped_df[DataFrameKeys.preprocessed_text_key].tolist())
-                bm25_grouped_df.loc[:, DataFrameKeys.embeddings_key] = pd.Series(bm25_embs, index=bm25_grouped_df.index)
+                splade_embs = self.generate_embeddings(splade_grouped_df[DataFrameKeys.preprocessed_text_key].tolist())
+                splade_grouped_df.loc[:, DataFrameKeys.embeddings_key] = pd.Series(splade_embs, index=splade_grouped_df.index)
 
             embeddings = (
                 self.generate_embeddings(non_clustered_df[DataFrameKeys.preprocessed_text_key].tolist())
@@ -274,7 +274,7 @@ class FailureAnalyzer:
             # Combine results and reset index
             dfs_to_concat = [
                 non_clustered_df,
-                bm25_grouped_df,
+                splade_grouped_df,
                 already_clustered_df[already_clustered_df[DataFrameKeys.cluster_name] != "VerifierFailed"],
             ]
             if verifier_failed_df is not None and not verifier_failed_df.empty:

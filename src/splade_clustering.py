@@ -16,7 +16,10 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 import scipy.sparse
+import torch
+from sentence_transformers import SparseEncoder
 from sklearn.metrics.pairwise import cosine_similarity
+from transformers import AutoModelForMaskedLM, AutoTokenizer
 
 from src.constants import DataFrameKeys, FaissConfigurations, SPLADEConfigurations
 from src.logger import AppLogger
@@ -77,11 +80,13 @@ class ErrorNormalizer:
 
 class SPLADEEncoder:
     """
-    Singleton SPLADE encoder using naver/splade-cocondenser-ensembledistil.
+    Singleton SPLADE encoder.
 
-    Encodes text to sparse vectors via:
-        logits = model(**tokenized).logits  # (batch, seq_len, vocab_size)
-        sparse_vec = log(1 + relu(logits)).max(dim=1)  # SPLADE pooling
+    When SPLADEConfigurations.use_quantized=True (default):
+        Uses rasyosef/splade-tiny via sentence-transformers SparseEncoder (~17 MB).
+
+    When use_quantized=False:
+        Uses naver/splade-cocondenser-ensembledistil via transformers (~440 MB).
 
     Returns scipy.sparse.csr_matrix (batch_size, vocab_size).
     Falls back gracefully if model is unavailable (is_available returns False).
@@ -101,17 +106,39 @@ class SPLADEEncoder:
         self._model = None
         self._tokenizer = None
         self._available = False
+        self._is_sparse_encoder = False  # True when using sentence-transformers SparseEncoder
         self._model_name = model_name
         self._cache_dir = cache_dir
         self._load_model()
         self._initialized = True
 
     def _load_model(self) -> None:
-        try:
-            import torch
-            from transformers import AutoModelForMaskedLM, AutoTokenizer
+        if not SPLADEConfigurations.enabled:
+            logger.info("[SPLADE] Disabled via SPLADEConfigurations.enabled=False. Using pure cosine.")
+            self._available = False
+            return
 
-            # Try local cache first (same pattern as BGE-M3 in helpers.py)
+        if SPLADEConfigurations.use_quantized:
+            self._load_quantized_model()
+        else:
+            self._load_full_model()
+
+    def _load_quantized_model(self) -> None:
+        """Load rasyosef/splade-tiny via sentence-transformers SparseEncoder (~17 MB)."""
+        model_id = SPLADEConfigurations.quantized_model_name
+        try:
+            logger.info(f"[SPLADE] Loading quantized model: {model_id}")
+            self._model = SparseEncoder(model_id, cache_folder=self._cache_dir)
+            self._is_sparse_encoder = True
+            self._available = True
+            logger.info(f"[SPLADE] Quantized model loaded: {model_id}")
+        except Exception as e:
+            logger.warning(f"[SPLADE] Quantized model unavailable ({e}). Falling back to pure cosine.")
+            self._available = False
+
+    def _load_full_model(self) -> None:
+        """Load naver/splade-cocondenser-ensembledistil via transformers (~440 MB)."""
+        try:
             model_folder = f"models--{self._model_name.replace('/', '--')}"
             snapshots_path = os.path.join(self._cache_dir, model_folder, "snapshots")
             if os.path.exists(snapshots_path):
@@ -120,16 +147,19 @@ class SPLADEEncoder:
                     local_path = os.path.join(snapshots_path, snapshots[0])
                     logger.info(f"[SPLADE] Loading model from local cache: {local_path}")
                     self._tokenizer = AutoTokenizer.from_pretrained(local_path)
-                    self._model = AutoModelForMaskedLM.from_pretrained(local_path)
+                    self._model = AutoModelForMaskedLM.from_pretrained(
+                        local_path, low_cpu_mem_usage=True, dtype=torch.float32
+                    )
                     self._model.eval()
                     self._available = True
                     logger.info(f"[SPLADE] Model loaded successfully from {local_path}")
                     return
 
-            # Fallback: download from HuggingFace
             logger.info(f"[SPLADE] Loading model from HuggingFace: {self._model_name}")
             self._tokenizer = AutoTokenizer.from_pretrained(self._model_name, cache_dir=self._cache_dir)
-            self._model = AutoModelForMaskedLM.from_pretrained(self._model_name, cache_dir=self._cache_dir)
+            self._model = AutoModelForMaskedLM.from_pretrained(
+                self._model_name, cache_dir=self._cache_dir, low_cpu_mem_usage=True, dtype=torch.float32
+            )
             self._model.eval()
             self._available = True
             logger.info(f"[SPLADE] Model loaded successfully: {self._model_name}")
@@ -151,21 +181,30 @@ class SPLADEEncoder:
         if not self._available or not texts:
             return None
         try:
-            import torch
-
-            with torch.no_grad():
-                inputs = self._tokenizer(
-                    texts,
-                    padding=True,
-                    truncation=True,
-                    max_length=512,
-                    return_tensors="pt",
-                )
-                logits = self._model(**inputs).logits  # (batch, seq_len, vocab_size)
-                # SPLADE pooling: log(1 + relu(logits)).max(dim=1)
-                sparse_vecs = torch.log(1 + torch.relu(logits)).max(dim=1).values  # (batch, vocab_size)
-                sparse_np = sparse_vecs.numpy()
-            return scipy.sparse.csr_matrix(sparse_np)
+            if self._is_sparse_encoder:
+                # SparseEncoder returns torch.sparse_coo_tensor objects.
+                # Convert to dense numpy then to scipy CSR.
+                vecs = self._model.encode(texts, show_progress_bar=False)
+                if isinstance(vecs, list):
+                    dense = np.vstack([v.to_dense().numpy() for v in vecs])
+                elif hasattr(vecs, "to_dense"):
+                    dense = vecs.to_dense().numpy()
+                else:
+                    dense = np.array(vecs)
+                return scipy.sparse.csr_matrix(dense)
+            else:
+                with torch.no_grad():
+                    inputs = self._tokenizer(
+                        texts,
+                        padding=True,
+                        truncation=True,
+                        max_length=512,
+                        return_tensors="pt",
+                    )
+                    logits = self._model(**inputs).logits  # (batch, seq_len, vocab_size)
+                    sparse_vecs = torch.log(1 + torch.relu(logits)).max(dim=1).values  # (batch, vocab_size)
+                    sparse_np = sparse_vecs.numpy()
+                return scipy.sparse.csr_matrix(sparse_np)
         except Exception as e:
             logger.error(f"[SPLADE] Encoding failed: {e}")
             return None
@@ -182,6 +221,9 @@ class SPLADEClusterIndex:
     Storage per type directory:
       - splade_vectors.npz: scipy CSR matrix (N_clusters, vocab_size)
       - splade_cluster_names.json: ordered list of cluster names (row alignment)
+      - splade_model_info.json: {"model": "<model_name>"} — guards against mixing vectors
+        from different models. On load, if the stored model name differs from the current
+        SPLADEConfigurations model, the old index is discarded and rebuilt from scratch.
 
     EMA update: new_vec = EMA_DECAY * old_vec + (1 - EMA_DECAY) * encode(new_log)
     This lets the index improve over time as more runs are processed.
@@ -189,6 +231,7 @@ class SPLADEClusterIndex:
 
     _VECTORS_FILE = SPLADEConfigurations.splade_vectors_file
     _NAMES_FILE = SPLADEConfigurations.splade_cluster_names_file
+    _MODEL_INFO_FILE = "splade_model_info.json"
 
     def __init__(self, base_path: str = FaissConfigurations.base_path):
         self.base_path = base_path
@@ -198,16 +241,48 @@ class SPLADEClusterIndex:
     def _type_dir(self, type_: str) -> str:
         return os.path.join(self.base_path, f"{type_}_custom")
 
+    def _active_model_name(self) -> str:
+        """Return the model name that will produce the current vectors."""
+        return (
+            SPLADEConfigurations.quantized_model_name
+            if SPLADEConfigurations.use_quantized
+            else SPLADEConfigurations.model_name
+        )
+
     def load(self, type_: str) -> bool:
-        """Load index from disk. Returns True if successful, False if not found."""
+        """Load index from disk. Returns True if successful, False if not found or model mismatch."""
         type_dir = self._type_dir(type_)
         vectors_path = os.path.join(type_dir, self._VECTORS_FILE)
         names_path = os.path.join(type_dir, self._NAMES_FILE)
+        model_info_path = os.path.join(type_dir, self._MODEL_INFO_FILE)
 
         if not os.path.exists(vectors_path) or not os.path.exists(names_path):
             logger.debug(f"[SPLADE] No index found for type={type_}, starting fresh")
             self._vectors = None
             self._cluster_names = []
+            return False
+
+        # Guard: discard index if it was built with a different model
+        active_model = self._active_model_name()
+        if os.path.exists(model_info_path):
+            with open(model_info_path) as f:
+                stored_model = json.load(f).get("model", "")
+            if stored_model != active_model:
+                logger.warning(
+                    f"[SPLADE] Model mismatch for type={type_}: "
+                    f"stored='{stored_model}' vs active='{active_model}'. "
+                    f"Discarding old index — will rebuild from next run."
+                )
+                self._discard(type_dir)
+                return False
+        else:
+            # No model info file → legacy index built before this guard was added.
+            # Discard to avoid mixing vector spaces silently.
+            logger.warning(
+                f"[SPLADE] No model info for type={type_} (legacy index). "
+                f"Discarding — will rebuild with '{active_model}'."
+            )
+            self._discard(type_dir)
             return False
 
         try:
@@ -225,8 +300,20 @@ class SPLADEClusterIndex:
             self._cluster_names = []
             return False
 
+    def _discard(self, type_dir: str) -> None:
+        """Remove stale SPLADE artifacts so the index rebuilds cleanly."""
+        for fname in (self._VECTORS_FILE, self._NAMES_FILE, self._MODEL_INFO_FILE):
+            path = os.path.join(type_dir, fname)
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+            except OSError as e:
+                logger.debug(f"[SPLADE] Could not remove {path}: {e}")
+        self._vectors = None
+        self._cluster_names = []
+
     def save(self, type_: str) -> None:
-        """Persist index to disk."""
+        """Persist index to disk, recording which model produced the vectors."""
         if self._vectors is None or not self._cluster_names:
             logger.debug(f"[SPLADE] Nothing to save for type={type_}")
             return
@@ -236,12 +323,15 @@ class SPLADEClusterIndex:
 
         vectors_path = os.path.join(type_dir, self._VECTORS_FILE)
         names_path = os.path.join(type_dir, self._NAMES_FILE)
+        model_info_path = os.path.join(type_dir, self._MODEL_INFO_FILE)
 
         try:
             scipy.sparse.save_npz(vectors_path, self._vectors.tocsr())
             with open(names_path, "w") as f:
                 json.dump(self._cluster_names, f)
-            logger.info(f"[SPLADE] Saved index for type={type_}: " f"{len(self._cluster_names)} clusters → {type_dir}")
+            with open(model_info_path, "w") as f:
+                json.dump({"model": self._active_model_name()}, f)
+            logger.info(f"[SPLADE] Saved index for type={type_}: {len(self._cluster_names)} clusters → {type_dir}")
         except Exception as e:
             logger.error(f"[SPLADE] Failed to save index for type={type_}: {e}")
 
@@ -334,9 +424,21 @@ class HybridSPLADEMatcher:
         self._encoder: Optional[SPLADEEncoder] = None
 
     def _get_encoder(self) -> "SPLADEEncoder":
+        """Load (or return cached) encoder. Only call this from update/pregroup paths."""
         if self._encoder is None:
             self._encoder = SPLADEEncoder()
         return self._encoder
+
+    def _get_encoder_if_loaded(self) -> Optional["SPLADEEncoder"]:
+        """
+        Return the encoder only if it is already initialised as a singleton.
+        Used in the search hot-path to avoid loading the ~440 MB transformer
+        model on top of already-loaded BGE-M3 and causing an OOM kill.
+        """
+        inst = SPLADEEncoder._instance
+        if inst is not None and getattr(inst, "_available", False):
+            return inst
+        return None
 
     def _get_splade_index(self, type_: str) -> Optional[SPLADEClusterIndex]:
         """Load SPLADE index for type, with in-memory cache."""
@@ -367,8 +469,8 @@ class HybridSPLADEMatcher:
 
         splade_idx = self._get_splade_index(type_)
         if splade_idx is not None:
-            enc = self._get_encoder()
-            query_vec = enc.encode_single(query) if enc.is_available else None
+            enc = self._get_encoder_if_loaded()
+            query_vec = enc.encode_single(query) if enc is not None else None
             if query_vec is not None:
                 splade_scores_arr, splade_names = splade_idx.get_scores_array(query_vec)
                 if splade_names == cluster_names:
@@ -419,8 +521,8 @@ class HybridSPLADEMatcher:
         splade_idx = self._get_splade_index(type_)
         splade_matrix = None
         if splade_idx is not None:
-            enc = self._get_encoder()
-            if enc.is_available:
+            enc = self._get_encoder_if_loaded()
+            if enc is not None:
                 query_vecs = enc.encode(queries)
                 if query_vecs is not None:
                     rows = []
