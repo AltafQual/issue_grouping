@@ -281,9 +281,7 @@ class FallbackEmbeddings(Embeddings):
 
             return results
         except Exception as e:
-            logger.error(
-                f"QGenie aembed failed ({type(e).__name__}: {e}). Falling back to local BGEM3."
-            )
+            logger.error(f"QGenie aembed failed ({type(e).__name__}: {e}). Falling back to local BGEM3.")
             loop = asyncio.get_running_loop()
             return await loop.run_in_executor(None, BGEM3Embeddings().embed, data)
 

@@ -221,7 +221,7 @@ def cummilative_summary_generation(errors_list: list[str], short_final_summary=F
 
         async def _process_window(index: int, error_window: list) -> tuple[int, str]:
             async with semaphore:
-                print(f"Processing window: {index} with lenght: {len(error_window)}")
+                logger.info(f"Processing window: {index} with length: {len(error_window)}")
                 prompt_template = ChatPromptTemplate.from_messages(
                     [("system", prompts.SUMMARY_GENERATION_PROMPT), ("human", prompts.ERROR_LOGS_LIST)]
                 )
@@ -245,7 +245,7 @@ def cummilative_summary_generation(errors_list: list[str], short_final_summary=F
         asyncio.set_event_loop(loop)
     summaries_list = loop.run_until_complete(_process_windows_concurrently(error_windows))
 
-    print(f"Total summaries generated: {len(summaries_list)}. Generating final summary")
+    logger.info(f"Total summaries generated: {len(summaries_list)}. Generating final summary")
     prompt_template = ChatPromptTemplate.from_messages(
         [("system", prompts.PARENT_SUMMARY_GENERATION_PROMPT), ("human", prompts.ERROR_LOGS_LIST)]
     )
@@ -454,7 +454,7 @@ async def merge_duplicate_clusters(
         base_cluster_id = cluster_ids[0]
 
         for next_cluster_id in cluster_ids[1:]:
-            print(f"Merging {base_cluster_id} and {next_cluster_id} for name '{duplicate_name}'")
+            logger.info(f"Merging {base_cluster_id} and {next_cluster_id} for name '{duplicate_name}'")
 
             response = await async_merge_clusters(df, cluster_id_a=base_cluster_id, cluster_id_b=next_cluster_id)
 
@@ -462,9 +462,9 @@ async def merge_duplicate_clusters(
             cluster_results[base_cluster_id]["cluster_name"] = response["merged_name"]
 
             # Move all rows from next_cluster to base_cluster
-            df.loc[df[DataFrameKeys.cluster_type_int] == next_cluster_id, DataFrameKeys.cluster_type_int] = (
-                base_cluster_id
-            )
+            df.loc[
+                df[DataFrameKeys.cluster_type_int] == next_cluster_id, DataFrameKeys.cluster_type_int
+            ] = base_cluster_id
 
             # Move outliers to cluster -1
             outlier_indices = [int(index) for index in response.get("outlier_indices")]
@@ -485,9 +485,9 @@ def give_cluster_names_and_reassign_misc_clusters(df: pd.DataFrame, cluster_resu
     for cluster_id, result in cluster_results.items():
         misclassified_ids = result.get("misclassified_ids", [])
         if misclassified_ids:
-            df.loc[df.index.isin(misclassified_ids), DataFrameKeys.cluster_type_int] = (
-                ClusterSpecificKeys.non_grouped_key
-            )
+            df.loc[
+                df.index.isin(misclassified_ids), DataFrameKeys.cluster_type_int
+            ] = ClusterSpecificKeys.non_grouped_key
 
         cluster_name = result.get("cluster_name")
         if cluster_name:
@@ -579,15 +579,15 @@ def inter_cluster_merging(df: pd.DataFrame) -> pd.DataFrame:
             merge_target_name = response.get("cluster_name")
 
             if merge_target_name and merge_target_name != current_cluster_name:
-                print(f"Merging '{current_cluster_name}' into '{merge_target_name}'")
+                logger.info(f"Merging '{current_cluster_name}' into '{merge_target_name}'")
 
                 # Perform the merge
                 merge_response = merge_clusters(df, current_cluster_name, merge_target_name)
 
                 # Update cluster labels in df
-                df.loc[df[DataFrameKeys.cluster_name] == current_cluster_name, DataFrameKeys.cluster_name] = (
-                    merge_response["merged_name"]
-                )
+                df.loc[
+                    df[DataFrameKeys.cluster_name] == current_cluster_name, DataFrameKeys.cluster_name
+                ] = merge_response["merged_name"]
 
                 # Handle outliers
                 outlier_indices = merge_response.get("outlier_indices", [])
@@ -871,7 +871,7 @@ async def detect_and_merge_near_duplicate_clusters(df: pd.DataFrame) -> pd.DataF
         pairs_block = build_pairs_block(batch)
         try:
             response = await chain.ainvoke({"pairs_block": pairs_block})
-            print(f"merge clusters reponse: {response}")
+            logger.debug(f"merge clusters response: {response}")
             for item in response:
                 if not isinstance(item, dict):
                     continue
@@ -887,19 +887,19 @@ async def detect_and_merge_near_duplicate_clusters(df: pd.DataFrame) -> pd.DataF
             traceback.print_exc()
 
     if not confirmed_merges:
-        print("\n[Near-Duplicate Check] No duplicate clusters found.\n")
+        logger.info("[Near-Duplicate Check] No duplicate clusters found.")
         return df
 
-    print("\n" + "=" * 70)
-    print("[Near-Duplicate Cluster Detection] Confirmed duplicates to merge:")
-    print("=" * 70)
+    sep = "=" * 70
+    lines = [f"\n{sep}", "[Near-Duplicate Cluster Detection] Confirmed duplicates to merge:", sep]
     for i, (name_a, name_b, keep, reason) in enumerate(confirmed_merges, start=1):
         discard = name_b if keep == name_a else name_a
-        print(f'\n  [{i}] MERGE: "{name_a}" + "{name_b}"')
-        print(f'       Keep name : "{keep}"')
-        print(f'       Discard   : "{discard}"')
-        print(f"       Reason    : {reason}")
-    print("\n" + "=" * 70 + "\n")
+        lines.append(f'  [{i}] MERGE: "{name_a}" + "{name_b}"')
+        lines.append(f'       Keep name : "{keep}"')
+        lines.append(f'       Discard   : "{discard}"')
+        lines.append(f"       Reason    : {reason}")
+    lines.append(sep)
+    logger.info("\n".join(lines))
 
     # Apply merges — track renames so chained merges resolve correctly
     rename_map: dict[str, str] = {}  # old_name -> canonical keep_name

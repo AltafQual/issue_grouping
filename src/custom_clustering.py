@@ -10,9 +10,17 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics.pairwise import cosine_similarity
 
-from src.constants import ClusterSpecificKeys, DataFrameKeys, FaissConfigurations
+from src.constants import ClusterSpecificKeys, DataFrameKeys, FaissConfigurations, SPLADEConfigurations
 from src.embeddings import FallbackEmbeddings
 from src.logger import AppLogger
+
+
+# Lazy import to avoid circular dependency at module load time
+def _get_hybrid_matcher():
+    from src.splade_clustering import HybridSPLADEMatcher
+
+    return HybridSPLADEMatcher()
+
 
 logger = AppLogger().get_logger()
 
@@ -67,7 +75,7 @@ class CustomEmbeddingCluster:
             if os.path.isfile(os.path.join(type_based_path, "centroids.npy")):
                 return True
 
-        print(f"Existing FAISS index not found for type: {type}. Creating a new one.")
+        logger.info(f"Existing FAISS index not found for type: {type}. Creating a new one.")
         return False
 
     def _get_run_ids_metadata_dict(self, data, df):
@@ -144,13 +152,16 @@ class CustomEmbeddingCluster:
                 with open(os.path.join(type_dir, "metadata.json"), "w") as f:
                     json.dump(metadata, f, indent=3)
 
+                # Queue SPLADE update for background processing
+                self._queue_splade_update(type_, typed_dataframe, metadata)
+
                 return f"Saved {len(centroids)} clusters for type: {type_}"
             except Exception as e:
                 return f"Error processing type {type_}: {str(e)}\n{traceback.format_exc()}"
 
         def _update_metadata(already_grouped):
             type_, grouped_df = already_grouped
-            print(f"Updating metadata for type: {type_}")
+            logger.info(f"Updating metadata for type: {type_}")
             type_dir = os.path.join(self.base_path, f"{type_}_custom")
 
             try:
@@ -160,18 +171,20 @@ class CustomEmbeddingCluster:
                 existing_cluster_names = [name.lower() for name in existing_metadata]
                 for cluster_name, group in grouped_df.groupby(DataFrameKeys.cluster_name):
                     if cluster_name.lower() not in existing_cluster_names:
-                        print(
+                        logger.warning(
                             f"Cluster name: {cluster_name} didn't exists in metadata, but marked as already grouped for run_id {run_id} !!!!"
                         )
                         continue
 
-                    print(f"updating metadata for {type_} in cluster name: {cluster_name}")
+                    logger.info(f"updating metadata for {type_} in cluster name: {cluster_name}")
                     new_cluster_meta = self._get_run_ids_metadata_dict({"tc_uuids": group["tc_uuid"].tolist()}, group)
 
                     if run_id not in existing_metadata[cluster_name]["run_ids"]:
                         existing_metadata[cluster_name]["run_ids"].update({run_id: new_cluster_meta})
                     else:
-                        print(f"Run id: {run_id} already processed exists in metadata, avoiding updating metadata")
+                        logger.debug(
+                            f"Run id: {run_id} already processed exists in metadata, avoiding updating metadata"
+                        )
 
                 with open(os.path.join(type_dir, "metadata.json"), "w") as f:
                     json.dump(existing_metadata, f, indent=3)
@@ -194,7 +207,7 @@ class CustomEmbeddingCluster:
         filtered_df = dataframe[
             (dataframe[DataFrameKeys.embeddings_key].notna())
             & (dataframe[DataFrameKeys.cluster_name] != ClusterSpecificKeys.non_grouped_key)
-            & (pd.isna(dataframe[DataFrameKeys.grouped_from_faiss]))
+            # & (pd.isna(dataframe[DataFrameKeys.grouped_from_faiss]))
         ].copy()
 
         already_existing_issues = dataframe[
@@ -203,7 +216,7 @@ class CustomEmbeddingCluster:
 
         lock = Lock()
         type_groups = list(filtered_df.groupby("type"))
-        print(f"Processing {len(type_groups)} types in parallel")
+        logger.info(f"Processing {len(type_groups)} types in parallel")
 
         if not filtered_df.empty:
             max_workers = min(10, len(type_groups))
@@ -217,12 +230,12 @@ class CustomEmbeddingCluster:
                     type_ = future_to_type[future]
                     try:
                         result = future.result()
-                        print(result)
+                        logger.info(result)
                     except Exception as e:
-                        print(f"Exception processing type {type_}: {str(e)}")
+                        logger.error(f"Exception processing type {type_}: {str(e)}")
 
         if not already_existing_issues.empty:
-            print(f"found DataFrame with already existing issues: {run_id}: Updating metadata")
+            logger.info(f"found DataFrame with already existing issues: {run_id}: Updating metadata")
             already_grouped_dfs = list(already_existing_issues.groupby("type"))
             max_workers = min(10, len(already_grouped_dfs))
             with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -235,9 +248,9 @@ class CustomEmbeddingCluster:
                     type_ = future_to_type[future]
                     try:
                         result = future.result()
-                        print(result)
+                        logger.info(result)
                     except Exception as e:
-                        print(f"Exception saving metadat for {type_}: {str(e)}")
+                        logger.error(f"Exception saving metadat for {type_}: {str(e)}")
 
     def save(self, dataframe: pd.DataFrame, type_: str = None, run_id: Optional[str] = None) -> None:
         """
@@ -256,7 +269,7 @@ class CustomEmbeddingCluster:
         ].copy()
 
         if filtered_df.empty:
-            print(f"No valid clustered embeddings found DataFrame: {run_id}")
+            logger.warning(f"No valid clustered embeddings found DataFrame: {run_id}")
 
         already_existing_issues = dataframe[~(pd.isna(dataframe[DataFrameKeys.grouped_from_faiss]))].copy()
 
@@ -302,7 +315,10 @@ class CustomEmbeddingCluster:
             with open(os.path.join(type_dir, "metadata.json"), "w") as f:
                 json.dump(metadata, f, indent=3)
 
-            print(f"Saved {len(centroids)} clusters for type: {type_}")
+            # Queue SPLADE update for background processing
+            self._queue_splade_update(type_, typed_dataframe, metadata)
+
+            logger.info(f"Saved {len(centroids)} clusters for type: {type_}")
 
     def update(
         self,
@@ -350,18 +366,21 @@ class CustomEmbeddingCluster:
                 max_sim = similarities[max_sim_idx]
 
                 if max_sim >= similarity_threshold:
+                    # max_sim_idx already points to the most similar existing cluster.
+                    # Use it in both branches — the else branch previously set
+                    # existing_cluster_name = cluster_name which is not yet in
+                    # updated_metadata, causing a KeyError at the run_ids update below.
+                    existing_cluster_name = list(updated_metadata.keys())[max_sim_idx]
                     if cluster_name.lower() in existing_cluster_names:
-                        existing_cluster_name = list(updated_metadata.keys())[max_sim_idx]
-                        print(
-                            f"Merging new cluster {cluster_name} with existing {existing_cluster_name} (sim={max_sim:.3f})"
+                        logger.info(
+                            f"Cluster {cluster_name} matches existing {existing_cluster_name} by name, "
+                            f"updating centroid (sim={max_sim:.3f})"
                         )
                     else:
-                        existing_cluster_name = cluster_name
-                        print(f"Cluster Name: {cluster_name} already exists in metadata updating with same")
-                        for idx, _cluster_name in enumerate(existing_cluster_names):
-                            if _cluster_name == cluster_name.lower():
-                                max_sim_idx = idx
-                                break
+                        logger.info(
+                            f"Merging new cluster {cluster_name} into existing {existing_cluster_name} "
+                            f"(sim={max_sim:.3f})"
+                        )
 
                     # Update centroid (weighted average), then re-normalize
                     updated_centroids[max_sim_idx] = 0.7 * updated_centroids[max_sim_idx] + 0.3 * new_centroid
@@ -393,6 +412,11 @@ class CustomEmbeddingCluster:
                     )
                 existing_cluster_names.append(cluster_name)
 
+        # Queue SPLADE update with current metadata state.
+        # Done before the assertion so SPLADE is always queued even if centroid/metadata
+        # count diverges (SPLADE is independent of centroids count).
+        self._queue_splade_update(type_, filtered_df, updated_metadata)
+
         assert len(updated_centroids) == len(updated_metadata), (
             f"CRITICAL ERROR: Number of centroids ({len(updated_centroids)}) "
             f"does not match number of metadata entries ({len(updated_metadata)})"
@@ -405,7 +429,7 @@ class CustomEmbeddingCluster:
         with open(os.path.join(type_dir, "metadata.json"), "w") as f:
             json.dump(updated_metadata, f, indent=3)
 
-        print(f"Updated to {len(updated_metadata)} clusters for type: {type_}")
+        logger.info(f"Updated to {len(updated_metadata)} clusters for type: {type_}")
 
     def search(self, type_: str, query: str, similarity_threshold: float = 0.88) -> Tuple[str, str]:
         """
@@ -439,7 +463,7 @@ class CustomEmbeddingCluster:
             type_dir = os.path.join(self.base_path, f"{type_}_custom")
 
             if not os.path.exists(type_dir) or not os.path.exists(os.path.join(type_dir, "metadata.json")):
-                print(f"No data found for type: {type_}")
+                logger.warning(f"No data found for type: {type_}")
                 return ClusterSpecificKeys.non_grouped_key, np.nan
 
             # Load data
@@ -452,8 +476,8 @@ class CustomEmbeddingCluster:
                     with open(os.path.join(type_dir, "centroids.npy"), "rb") as f:
                         centroids = np.load(f)
                 except Exception as e:
-                    print(f"Exception occured while loading data for batch search: {e}")
-                    print(f"retrying in 5 seconds")
+                    logger.error(f"Exception occured while loading data for batch search: {e}")
+                    logger.info("retrying in 5 seconds")
                     time.sleep(5)
 
                 if metadata is not None and isinstance(metadata, dict):
@@ -464,24 +488,35 @@ class CustomEmbeddingCluster:
                 return ClusterSpecificKeys.non_grouped_key, np.nan
 
             cluster_names = list(metadata.keys())
-            # Compute similarities
-            similarities = cosine_similarity([query_embedding], centroids)[0]
+            # Compute similarities using hybrid scorer (falls back to cosine if no SPLADE index)
+            try:
+                matcher = _get_hybrid_matcher()
+                best_idx, best_score = matcher.search(
+                    type_=type_,
+                    query=original_query,
+                    query_embedding=query_embedding,
+                    centroids=centroids,
+                    cluster_names=cluster_names,
+                    threshold=similarity_threshold,
+                )
+            except Exception:
+                # Fallback: pure cosine
+                sims = cosine_similarity([query_embedding], centroids)[0]
+                best_idx = int(np.argmax(sims)) if len(sims) > 0 else -1
+                best_score = float(sims[best_idx]) if best_idx >= 0 else 0.0
+                if best_score < similarity_threshold:
+                    best_idx = -1
             cluster_name = ""
 
             # Get best match
-            if len(similarities) > 0:
-                max_sim_idx = np.argmax(similarities)
-                max_sim = similarities[max_sim_idx]
+            if best_idx >= 0:
+                cluster_name = cluster_names[best_idx]
+                class_name = metadata[cluster_name]["class"]
+                logger.info(f"For query: '{original_query}', found match: {cluster_name} with score {best_score:.3f}")
+                return cluster_name, class_name
 
-                if max_sim >= similarity_threshold:
-                    cluster_name = cluster_names[max_sim_idx]
-                    class_name = metadata[cluster_name]["class"]
-
-                    print(f"For query: '{original_query}', found match: {cluster_name} with similarity {max_sim:.3f}")
-                    return cluster_name, class_name
-
-            print(
-                f"No match found for query: '{original_query}' (best similarity: {max(similarities) if len(similarities) > 0 else 0:.3f}) for: {cluster_name}"
+            logger.debug(
+                f"No match found for query: '{original_query}' (best score: {best_score:.3f}) for: {cluster_name}"
             )
         except Exception as e:
             raise Exception(traceback.format_exc())
@@ -501,7 +536,7 @@ class CustomEmbeddingCluster:
         try:
             type_dir = os.path.join(self.base_path, f"{type_}_custom")
             if not os.path.exists(type_dir) or not os.path.exists(os.path.join(type_dir, "metadata.json")):
-                print(f"No data found for type: {type_}")
+                logger.warning(f"No data found for type: {type_}")
                 return [ClusterSpecificKeys.non_grouped_key] * len(original_queries), [np.nan] * len(original_queries)
 
             # Load data
@@ -514,8 +549,8 @@ class CustomEmbeddingCluster:
                     with open(os.path.join(type_dir, "centroids.npy"), "rb") as f:
                         centroids = np.load(f)
                 except Exception as e:
-                    print(f"Exception occured while loading data for batch search: {e}")
-                    print(f"retrying in 5 seconds")
+                    logger.error(f"Exception occured while loading data for batch search: {e}")
+                    logger.info("retrying in 5 seconds")
                     time.sleep(5)
 
                 if metadata is not None and isinstance(metadata, dict):
@@ -529,25 +564,38 @@ class CustomEmbeddingCluster:
                 return [ClusterSpecificKeys.non_grouped_key] * len(original_queries), [np.nan] * len(original_queries)
 
             cluster_names = list(metadata.keys())
-            # Compute similarities for all queries at once
-            similarities = cosine_similarity(query_embeddings, centroids)
+            # Compute similarities for all queries using hybrid scorer
+            try:
+                matcher = _get_hybrid_matcher()
+                best_indices, best_scores = matcher.batch_search(
+                    type_=type_,
+                    queries=original_queries,
+                    query_embeddings=query_embeddings,
+                    centroids=centroids,
+                    cluster_names=cluster_names,
+                    threshold=similarity_threshold,
+                )
+            except Exception:
+                # Fallback: pure cosine
+                sims_matrix = cosine_similarity(query_embeddings, centroids)
+                best_indices = []
+                best_scores = []
+                for row in sims_matrix:
+                    bi = int(np.argmax(row)) if len(row) > 0 else -1
+                    bs = float(row[bi]) if bi >= 0 else 0.0
+                    best_indices.append(bi if bs >= similarity_threshold else -1)
+                    best_scores.append(bs)
 
             # Process each query's results
-            for _, (query, sim_row) in enumerate(zip(original_queries, similarities)):
-                cluster_name = ""
-                if len(sim_row) > 0:
-                    max_sim_idx = np.argmax(sim_row)
-                    max_sim = sim_row[max_sim_idx]
-                    if max_sim >= similarity_threshold:
-                        cluster_name = cluster_names[max_sim_idx]
-                        class_name = metadata[cluster_name]["class"]
-                        print(f"For query: '{query}', found match: {cluster_name} with similarity {max_sim:.3f}")
-                        result_cluster_names.append(cluster_name)
-                        result_class_names.append(class_name)
-                        continue
-                    print(
-                        f"No match found for query: '{query}' (best similarity: {max(sim_row):.3f}): for: {cluster_name}"
-                    )
+            for query, best_idx, best_score in zip(original_queries, best_indices, best_scores):
+                if best_idx >= 0:
+                    cluster_name = cluster_names[best_idx]
+                    class_name = metadata[cluster_name]["class"]
+                    logger.info(f"For query: '{query}', found match: {cluster_name} with score {best_score:.3f}")
+                    result_cluster_names.append(cluster_name)
+                    result_class_names.append(class_name)
+                    continue
+                logger.debug(f"No match found for query: '{query}' (best score: {best_score:.3f})")
                 result_cluster_names.append(ClusterSpecificKeys.non_grouped_key)
                 result_class_names.append(np.nan)
 
@@ -603,7 +651,7 @@ class CustomEmbeddingCluster:
         type_dir = os.path.join(self.base_path, f"{type_}_custom")
 
         if not os.path.exists(type_dir) or not os.path.exists(os.path.join(type_dir, "metadata.json")):
-            print(f"No data found for type: {type_}")
+            logger.warning(f"No data found for type: {type_}")
             return False
 
         # Load metadata
@@ -611,7 +659,7 @@ class CustomEmbeddingCluster:
             metadata = json.load(f)
 
         if cluster_name not in metadata:
-            print(f"Cluster {cluster_name} not found in type {type_}")
+            logger.warning(f"Cluster {cluster_name} not found in type {type_}")
             return False
 
         # Add or update JIRA ID
@@ -638,7 +686,7 @@ class CustomEmbeddingCluster:
         type_dir = os.path.join(self.base_path, f"{type_}_custom")
 
         if not os.path.exists(type_dir) or not os.path.exists(os.path.join(type_dir, "metadata.json")):
-            print(f"No data found for type: {type_}")
+            logger.warning(f"No data found for type: {type_}")
             return {}
 
         # Load metadata
@@ -646,6 +694,33 @@ class CustomEmbeddingCluster:
             metadata = json.load(f)
 
         return metadata
+
+    def _queue_splade_update(self, type_: str, df: pd.DataFrame, metadata: dict) -> None:
+        """Queue SPLADE index update for background processing via splade_update_worker."""
+        try:
+            from src.helpers import splade_update_queue
+
+            text_col = DataFrameKeys.preprocessed_text_key
+            if text_col not in df.columns:
+                logger.debug(f"[SPLADE] Skipping queue for type={type_}: no '{text_col}' column")
+                return
+
+            updates = {}
+            if DataFrameKeys.cluster_name in df.columns:
+                for cluster_name, group in df.groupby(DataFrameKeys.cluster_name):
+                    updates[cluster_name] = group[text_col].iloc[0]
+
+            if updates:
+                splade_update_queue.put(
+                    {
+                        "type_": type_,
+                        "updates": updates,
+                        "all_clusters": list(metadata.keys()),
+                    }
+                )
+                logger.info(f"[SPLADE] Queued update for type={type_}: {len(updates)} cluster(s)")
+        except Exception as e:
+            logger.error(f"[SPLADE] Failed to queue update for type={type_}: {e}")
 
     def _update_processed_runids(self, type_dir: str, run_id: str) -> None:
         """Update the list of processed run IDs."""

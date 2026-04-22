@@ -29,7 +29,7 @@ from src.constants import (
     FaissConfigurations,
     FaissDBPath,
     SPLADEConfigurations,
-    regex_based_filteration_patterns
+    regex_based_filteration_patterns,
 )
 from src.custom_clustering import CustomEmbeddingCluster
 from src.db_connections import ConnectToMySql

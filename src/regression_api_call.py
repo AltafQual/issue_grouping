@@ -1,3 +1,7 @@
+from src.logger import AppLogger
+
+logger = AppLogger().get_logger(__name__)
+
 import importlib
 import os
 
@@ -22,12 +26,12 @@ def get_two_run_ids_cluster_info(run_id_a: str, run_id_b: str, timeout: int = 60
     payload = {"run_id_a": run_id_a, "run_id_b": run_id_b, "force": force}
 
     try:
-        print(f"POST: url: {url}, json: {payload}")
+        logger.info(f"POST: url: {url}, json: {payload}")
         response = requests.post(url, headers=headers, json=payload, timeout=timeout)
         response.raise_for_status()  # Raises HTTPError for bad responses
         return response.json()
     except requests.exceptions.RequestException as e:
-        print(f"Error while fetch regression between 2 apis: {e}")
+        logger.error(f"Error while fetch regression between 2 apis: {e}")
         return {}
 
 
@@ -47,7 +51,7 @@ async def get_two_run_ids_cluster_info_async(
 
     # Check if aiohttp is installed
     if importlib.util.find_spec("aiohttp") is None:
-        print("Warning: aiohttp module is not installed. Please install it using 'pip install aiohttp'.")
+        logger.warning("aiohttp module is not installed. Please install it using 'pip install aiohttp'.")
         return {}
     import aiohttp
 
@@ -56,11 +60,11 @@ async def get_two_run_ids_cluster_info_async(
     payload = {"run_id_a": run_id_a, "run_id_b": run_id_b, "force": force}
 
     try:
-        print(f"POST: url: {url}, json: {payload}")
+        logger.info(f"POST: url: {url}, json: {payload}")
         async with aiohttp.ClientSession() as session:
             async with session.post(url, headers=headers, json=payload, timeout=timeout) as response:
                 response.raise_for_status()
                 return await response.json()
     except Exception as e:
-        print(f"Error while fetching regression between 2 APIs: {e}")
+        logger.error(f"Error while fetching regression between 2 APIs: {e}")
         return {}

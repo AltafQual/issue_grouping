@@ -1,5 +1,4 @@
 import hashlib
-import logging
 import re
 import time
 from abc import ABC, abstractmethod
@@ -11,8 +10,9 @@ import mysql.connector as msqlconnector
 import pandas as pd
 
 from src.constants import DataFrameKeys
+from src.logger import AppLogger
 
-logger = logging.getLogger(__name__)
+logger = AppLogger().get_logger(__name__)
 
 
 class DatabaseConnection(ABC):
@@ -175,7 +175,7 @@ class ConnectToMySql(DatabaseConnection):
 
         def _get_df(table):
             with self.connection_context() as cnx:
-                print(f"Checking in result table: {table}")
+                logger.info(f"Checking in result table: {table}")
                 query = f'select * from {table} where testplan_id = "{runid}";'
                 return pd.read_sql(query, cnx)
 
@@ -185,7 +185,7 @@ class ConnectToMySql(DatabaseConnection):
             df = _get_df(table)
             if not df.empty:
                 return df
-            print(f"No Data Found for runid: {runid} in table: {table}")
+            logger.warning(f"No Data Found for runid: {runid} in table: {table}")
 
         return df
 
@@ -417,7 +417,7 @@ class ConnectToMySql(DatabaseConnection):
 
     def get_regressions(self, test_id_a: str, test_id_b: str):
         def _get_df(table):
-            print(f"Checking in result table: {table}")
+            logger.info(f"Checking in result table: {table}")
             query = f"""
             SELECT 
                 r1.tc_uuid AS tc_uuid,
@@ -448,9 +448,9 @@ class ConnectToMySql(DatabaseConnection):
             with self.connection_context() as cnx:
                 return pd.read_sql(query, cnx)
 
-        print(f"Run id A: {test_id_a} : Run id B {test_id_b}")
+        logger.info(f"Run id A: {test_id_a} : Run id B {test_id_b}")
         test_id_a, test_id_b = self.sort_run_ids(test_id_a, test_id_b)
-        print(f"After Sorting Run id A: {test_id_a} : Run id B {test_id_b}")
+        logger.info(f"After Sorting Run id A: {test_id_a} : Run id B {test_id_b}")
 
         df = pd.DataFrame()
         dates_to_check = self._get_past_result_table_names(include_result=True)

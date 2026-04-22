@@ -38,7 +38,7 @@ class ClusterSpecificKeys:
 
 @dataclass
 class FaissConfigurations:
-    base_path: str = "issue_grouping_db"
+    base_path: str = "issue_grouping_db_older"
 
 
 @dataclass
@@ -50,6 +50,19 @@ class FaissDBPath:
         "/prj/qct/webtech_scratch29/altaf/issue_grouping/issue_grouping/issue_grouping_hosting/issue_grouping",
         FaissConfigurations.base_path,
     )
+
+
+@dataclass
+class SPLADEConfigurations:
+    model_name: str = "naver/splade-cocondenser-ensembledistil"
+    splade_vectors_file: str = "splade_vectors.npz"
+    splade_cluster_names_file: str = "splade_cluster_names.json"
+    hybrid_alpha: float = 0.55  # dense cosine weight
+    hybrid_beta: float = 0.45  # SPLADE sparse weight
+    ema_decay: float = 0.85  # EMA decay for per-run accumulation
+    pregroup_threshold: float = 0.70  # SPLADE similarity threshold for pre-grouping
+    low_cohesion_threshold: float = 0.35
+    core_member_percentile: float = 0.50
 
 
 @dataclass

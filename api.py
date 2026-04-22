@@ -1,6 +1,5 @@
 import asyncio
 import json
-import logging
 import threading
 import time
 import traceback
@@ -21,9 +20,9 @@ from src.custom_clustering import CustomEmbeddingCluster
 from src.failure_analyzer import FailureAnalyzer
 from src.gerrit_data_fetching_helpers import get_gerrit_info_between_2_runids, get_regression_gerrits_based_of_type
 from src.get_prev_testplan_id import iterate_db_get_testplan
+from src.logger import AppLogger
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-logger = logging.getLogger("memlog")
+logger = AppLogger().get_logger(__name__)
 proc = psutil.Process()
 analyzer = FailureAnalyzer()
 TTL_CACHE = TTLCache(maxsize=9000, ttl=(604800 * 604800))

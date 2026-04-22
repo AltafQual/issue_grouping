@@ -6,6 +6,9 @@ from urllib.parse import urljoin
 import aiohttp
 
 from src.constants import GERRIT_API_CONFIG
+from src.logger import AppLogger
+
+logger = AppLogger().get_logger(__name__)
 
 _GERRIT_MAGIC_PREFIX = ")]}'\n"
 
@@ -79,7 +82,7 @@ class GerritClientAsync:
             # Gerrit allows multiple 'o' query params as a list
             # aiohttp will serialize list values into repeated params
             q.update(params)
-        print(f"GET: url: {url}, params: {params}")
+        logger.info(f"GET: url: {url}, params: {params}")
         async with self._session.get(url, params=q, auth=self.auth, ssl=self.verify_ssl) as resp:
             resp.raise_for_status()
             text = await resp.text()

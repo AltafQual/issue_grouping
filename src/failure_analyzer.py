@@ -16,10 +16,12 @@ from src.logger import AppLogger
 from src.qgenie_llm_calls import (
     detect_and_merge_near_duplicate_clusters,
     qgenie_post_processing,
-    subcluster_verifier_failed
+    subcluster_verifier_failed,
 )
+from src.splade_clustering import ClusterCohesionAnalyzer, ClusterRanker
 
 threading.Thread(target=helpers.faissdb_update_worker, daemon=True).start()
+threading.Thread(target=helpers.splade_update_worker, daemon=True, name="splade-update").start()
 
 
 class FailureAnalyzer:
@@ -182,6 +184,8 @@ class FailureAnalyzer:
 
             failure_df = await helpers.assign_cluster_class(failure_df)
             failure_df = await detect_and_merge_near_duplicate_clusters(failure_df)
+            failure_df = ClusterRanker().rank_dataframe(failure_df)
+            failure_df = ClusterCohesionAnalyzer().analyze_dataframe(failure_df)
             self.logger.info(f"Finished processing: {current_type}")
             return failure_df
 
@@ -197,12 +201,43 @@ class FailureAnalyzer:
             f"{already_clustered_df.shape[0]} already clustered logs and {non_clustered_df.shape[0]} non-clustered logs"
         )
 
+        bm25_grouped_df = pd.DataFrame()
         if not non_clustered_df.empty:
-            embeddings = self.generate_embeddings(non_clustered_df[DataFrameKeys.preprocessed_text_key].tolist())
-            non_clustered_df.loc[:, DataFrameKeys.embeddings_key] = pd.Series(embeddings, index=non_clustered_df.index)
+            # SPLADE pre-grouping pass: catches same-root-cause errors before HDBSCAN
+            non_clustered_df = await helpers.splade_pregroup(non_clustered_df, type_=current_type)
+
+            # Split SPLADE-grouped rows (have names already) from still-unclustered
+            bm25_grouped_mask = non_clustered_df[DataFrameKeys.cluster_name] != ClusterSpecificKeys.non_grouped_key
+            bm25_grouped_df = non_clustered_df[bm25_grouped_mask].copy()
+            non_clustered_df = non_clustered_df[~bm25_grouped_mask].reset_index(drop=True)
+
+            self.logger.info(
+                f"[SPLADESplit] type={current_type}: "
+                f"{len(bm25_grouped_df)} rows pre-grouped by SPLADE, "
+                f"{len(non_clustered_df)} rows remain for HDBSCAN"
+            )
+
+            # Generate embeddings for SPLADE-grouped rows (needed for FAISS DB persistence)
+            if not bm25_grouped_df.empty:
+                self.logger.info(
+                    f"[SPLADESplit] type={current_type}: generating embeddings for "
+                    f"{len(bm25_grouped_df)} SPLADE-grouped rows"
+                )
+                bm25_embs = self.generate_embeddings(bm25_grouped_df[DataFrameKeys.preprocessed_text_key].tolist())
+                bm25_grouped_df.loc[:, DataFrameKeys.embeddings_key] = pd.Series(bm25_embs, index=bm25_grouped_df.index)
+
+            embeddings = (
+                self.generate_embeddings(non_clustered_df[DataFrameKeys.preprocessed_text_key].tolist())
+                if not non_clustered_df.empty
+                else []
+            )
+            if embeddings:
+                non_clustered_df.loc[:, DataFrameKeys.embeddings_key] = pd.Series(
+                    embeddings, index=non_clustered_df.index
+                )
 
             # Process non-clustered data
-            if non_clustered_df.shape[0] > 10:
+            if not non_clustered_df.empty and non_clustered_df.shape[0] > 10:
 
                 # Cluster embeddings
                 non_clustered_df.loc[:, DataFrameKeys.cluster_type_int] = self.cluster_embeddings(embeddings)
@@ -224,8 +259,9 @@ class FailureAnalyzer:
                 self.logger.info(f"Found {num_clusters} clusters")
                 self.logger.info(f"Noise points: {cluster_counts.get(-1, 0)}")
 
-            # Apply Qgenie post-processing
-            non_clustered_df = await qgenie_post_processing(non_clustered_df)
+            # Apply Qgenie post-processing to remaining unclustered rows
+            if not non_clustered_df.empty:
+                non_clustered_df = await qgenie_post_processing(non_clustered_df)
 
         dfs_to_concat = []
         if not already_clustered_df.empty:
@@ -238,6 +274,7 @@ class FailureAnalyzer:
             # Combine results and reset index
             dfs_to_concat = [
                 non_clustered_df,
+                bm25_grouped_df,
                 already_clustered_df[already_clustered_df[DataFrameKeys.cluster_name] != "VerifierFailed"],
             ]
             if verifier_failed_df is not None and not verifier_failed_df.empty:
@@ -260,6 +297,8 @@ class FailureAnalyzer:
 
         final_df = await helpers.assign_cluster_class(final_df)
         final_df = await detect_and_merge_near_duplicate_clusters(final_df)
+        final_df = ClusterRanker().rank_dataframe(final_df)
+        final_df = ClusterCohesionAnalyzer().analyze_dataframe(final_df)
         self.logger.info(f"Finished processing: {current_type}")
         return final_df
 

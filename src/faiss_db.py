@@ -10,6 +10,9 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 from src.constants import ClusterSpecificKeys, DataFrameKeys, FaissConfigurations
 from src.embeddings import FallbackEmbeddings
+from src.logger import AppLogger
+
+logger = AppLogger().get_logger(__name__)
 
 
 class EmbeddingsDB(object):
@@ -53,7 +56,7 @@ class FaissIVFFlatIndex(EmbeddingsDB):
             if os.path.isfile(os.path.join(type_based_path, "index.faiss")):
                 return True
 
-        print(f"Existing FAISS index not found for type: {type}. Creating a new one.")
+        logger.info(f"Existing FAISS index not found for type: {type}. Creating a new one.")
         return False
 
     def update(
@@ -91,7 +94,7 @@ class FaissIVFFlatIndex(EmbeddingsDB):
             existing_embeddings = faiss_db.reconstruct_n(0, faiss_db.ntotal)
             existing_embeddings = np.array(existing_embeddings)
 
-        print(f"Existing cluster names: {existing_cluster_names}, new cluster names: {new_cluster_names}")
+        logger.debug(f"Existing cluster names: {existing_cluster_names}, new cluster names: {new_cluster_names}")
         merged_embeddings = list(existing_embeddings)
         merged_cluster_names = list(existing_cluster_names)
 
@@ -181,7 +184,7 @@ class FaissIVFFlatIndex(EmbeddingsDB):
         d = 1024
         for t, df in dataframe.groupby("type"):
             metadata = {}
-            print(f"Saving FAISS for type: {t}")
+            logger.info(f"Saving FAISS for type: {t}")
             filtered_df = df[df[DataFrameKeys.embeddings_key].notna()]
 
             if not filtered_df.empty:
@@ -198,7 +201,7 @@ class FaissIVFFlatIndex(EmbeddingsDB):
                 if not self._check_existing_faiss_for_type(t):
 
                     if embeddings_grouped.empty:
-                        print(f"No embeddings found for type: {t} skipping...")
+                        logger.warning(f"No embeddings found for type: {t} skipping...")
                         continue
                     embeddings = np.array(embeddings_grouped.tolist())
                     faiss_db = build_faiss_index(embeddings)
@@ -221,7 +224,7 @@ class FaissIVFFlatIndex(EmbeddingsDB):
                         f.write(json.dumps(metadata, indent=3))
                 else:
                     if not embeddings_grouped.empty:
-                        print(f"Existing FAISS index found for type: {t}. Updating data")
+                        logger.info(f"Existing FAISS index found for type: {t}. Updating data")
                         self.update(t, filtered_df, embeddings_grouped, faiss_dir_path, run_id=run_id)
 
     def load(self, type: str, only_metadata=False):
@@ -274,7 +277,7 @@ class SearchInExistingFaiss(object):
             key = str(list(metadata.keys())[index])
             class_key = metadata[key]["class"]
 
-        print(f"For Query: {query}, score: {score}, cluster: {key}")
+        logger.debug(f"For Query: {query}, score: {score}, cluster: {key}")
         return key, class_key
 
     async def batch_search(self, type: str, query: Union[str, list[str]], k: int = 2):
@@ -285,11 +288,11 @@ class SearchInExistingFaiss(object):
         if faiss_db is None:
             return [key] * len(queries), [np.nan] * len(queries)
 
-        print(f"Generating embeddings in batch search")
+        logger.info("Generating embeddings in batch search")
         embeddings = await FallbackEmbeddings().aembed(queries)
 
         # Search in FAISS
-        print("Searching for closest index in faiss")
+        logger.info("Searching for closest index in faiss")
         Distance, Index = faiss_db.search(_normalize_vectors(np.array(embeddings)), k=k)
         all_cluster_names = list(metadata.keys())
         total_cluster_names = len(all_cluster_names)
@@ -300,13 +303,15 @@ class SearchInExistingFaiss(object):
             score = float(Distance[i][0])
             cluster_name = ""
             if index >= total_cluster_names:
-                print(f"index: {index} is greater than the overall custernames in metadata: {total_cluster_names}")
+                logger.warning(
+                    f"index: {index} is greater than the overall custernames in metadata: {total_cluster_names}"
+                )
                 score = 0
             else:
                 cluster_name = str(all_cluster_names[index])
                 class_name = metadata[cluster_name]["class"]
 
-            print(f"For Query: {q}, score: {score} | Cluster name: {cluster_name}")
+            logger.debug(f"For Query: {q}, score: {score} | Cluster name: {cluster_name}")
             if score >= 0.95:
                 cluster_names.append(cluster_name)
                 class_names.append(class_name)

@@ -31,7 +31,6 @@ Does NOT modify any existing file in the pipeline.
 
 import argparse
 import json
-import logging
 import os
 import re
 from collections import OrderedDict, defaultdict
@@ -39,7 +38,9 @@ from html import escape
 
 import joblib
 
-logger = logging.getLogger(__name__)
+from src.logger import AppLogger
+
+logger = AppLogger().get_logger(__name__)
 
 # ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -761,7 +762,9 @@ def build_html(qairt_id: str, data: dict, llm: dict, obj: dict) -> str:
         sev = (
             "<span class='badge bd'>Critical</span>"
             if cnt > 200
-            else "<span class='badge bw'>High</span>" if cnt > 50 else "<span class='badge bi'>Medium</span>"
+            else "<span class='badge bw'>High</span>"
+            if cnt > 50
+            else "<span class='badge bi'>Medium</span>"
         )
         html += f'<tr><td style="color:var(--muted)">{i}</td><td style="font-family:monospace;font-size:.83em">{escape(model)}</td><td><b>{cnt:,}</b></td><td>{sev}</td><td><div style="background:#8e44ad;height:8px;border-radius:4px;width:{bw}px;display:inline-block"></div></td></tr>'
     html += f"""</table></div>
@@ -874,7 +877,6 @@ def build_html(qairt_id: str, data: dict, llm: dict, obj: dict) -> str:
 
 
 def main():
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
     parser = argparse.ArgumentParser(description="Generate enhanced QAIRT analysis HTML report")
     parser.add_argument("--qairt_id", required=True, help="e.g. qaisw-v2.46.0.260319041023_nightly")
@@ -930,7 +932,7 @@ def main():
         f.write(html)
 
     logger.info("Report written to: %s  (%d bytes)", out_path, len(html))
-    print(f"\nDone. Report: {out_path}")
+    logger.info(f"Done. Report: {out_path}")
 
 
 if __name__ == "__main__":
