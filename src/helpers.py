@@ -1193,12 +1193,21 @@ async def splade_pregroup(df: pd.DataFrame, type_: str = None) -> pd.DataFrame:
     SPLADE-based pre-grouping pass.
     Groups errors with high SPLADE sparse-vector similarity before HDBSCAN clustering.
     Only processes rows with cluster_name == non_grouped_key.
+
+    For each discovered group:
+      1. Embeds all member texts (one batch for all groups) and computes a centroid.
+      2. Searches CustomEmbeddingCluster with that centroid — if an existing cluster
+         matches, assigns its name directly with no LLM call.
+      3. Only calls the LLM naming API for groups that did not match the DB.
+
     Returns df with cluster_name updated for discovered groups.
     """
     if not SPLADEConfigurations.enabled:
         logger.debug(f"[SPLADEPregroup] type={type_}: SPLADE disabled, skipping pre-grouping")
         return df
 
+    from src.custom_clustering import CustomEmbeddingCluster
+    from src.embeddings import FallbackEmbeddings
     from src.splade_clustering import SPLADEEncoder
 
     SPLADE_THRESHOLD = SPLADEConfigurations.pregroup_threshold
@@ -1245,26 +1254,30 @@ async def splade_pregroup(df: pd.DataFrame, type_: str = None) -> pd.DataFrame:
     assigned = [False] * len(indices)
     groups = []
 
-    for i in range(len(indices)):
-        if assigned[i]:
+    for anchor_pos in range(len(indices)):
+        if assigned[anchor_pos]:
             continue
 
-        row = sim_matrix[i].copy()
-        min_s, max_s = row.min(), row.max()
-        if max_s - min_s > 1e-9:
-            norm_row = (row - min_s) / (max_s - min_s)
+        similarity_row = sim_matrix[anchor_pos].copy()
+        min_sim, max_sim = similarity_row.min(), similarity_row.max()
+        if max_sim - min_sim > 1e-9:
+            normalized_row = (similarity_row - min_sim) / (max_sim - min_sim)
         else:
-            norm_row = np.zeros(len(indices))
+            normalized_row = np.zeros(len(indices))
 
-        group = [i]
-        for j in range(len(indices)):
-            if j != i and not assigned[j] and norm_row[j] >= SPLADE_THRESHOLD:
-                group.append(j)
+        group = [anchor_pos]
+        for candidate_pos in range(len(indices)):
+            if (
+                candidate_pos != anchor_pos
+                and not assigned[candidate_pos]
+                and normalized_row[candidate_pos] >= SPLADE_THRESHOLD
+            ):
+                group.append(candidate_pos)
 
         if len(group) >= MIN_GROUP_SIZE:
             groups.append(group)
-            for g in group:
-                assigned[g] = True
+            for member_pos in group:
+                assigned[member_pos] = True
 
     if not groups:
         logger.info(
@@ -1278,28 +1291,71 @@ async def splade_pregroup(df: pd.DataFrame, type_: str = None) -> pd.DataFrame:
         f"[SPLADEPregroup] type={type_}: found {len(groups)} candidate groups "
         f"(sizes: min={min(group_sizes)}, max={max(group_sizes)}, "
         f"total grouped={sum(group_sizes)}/{unclustered_count}); "
-        f"calling LLM to name groups"
+        f"attempting DB lookup before LLM"
     )
 
-    tasks = [generate_cluster_name(work_df.iloc[group]) for group in groups]
-    results = await asyncio.gather(*tasks)
+    # --- Batch embed all group texts at once, then compute per-group centroids ---
+    all_group_texts = []
+    group_text_ranges: list[tuple[int, int]] = []  # (start, count) into all_group_texts
+    for group_positions in groups:
+        range_start = len(all_group_texts)
+        all_group_texts.extend([texts[pos] for pos in group_positions])
+        group_text_ranges.append((range_start, len(group_positions)))
 
-    named_count = 0
-    for group, result in zip(groups, results):
-        if result and "cluster_name" in result:
-            group_df_indices = [indices[g] for g in group]
-            cluster_name = result["cluster_name"]
-            df.loc[group_df_indices, cluster_col] = cluster_name
-            named_count += len(group)
-            logger.debug(f"[SPLADEPregroup] type={type_}: group of {len(group)} rows → '{cluster_name}'")
+    embeddings_list = await FallbackEmbeddings().aembed(all_group_texts)
+    embeddings_array = np.array(embeddings_list)
+
+    # --- For each group: try DB lookup first, collect misses for LLM ---
+    custom_cluster = CustomEmbeddingCluster()
+    groups_needing_llm: list[list[int]] = []
+
+    for group_positions, (emb_start, emb_count) in zip(groups, group_text_ranges):
+        group_embeddings = embeddings_array[emb_start : emb_start + emb_count]
+        centroid = group_embeddings.mean(axis=0)
+        norm = np.linalg.norm(centroid)
+        if norm > 0:
+            centroid = centroid / norm
+
+        db_cluster_name = ClusterSpecificKeys.non_grouped_key
+        if type_:
+            db_cluster_name, _ = custom_cluster._search_with_embedding(type_, centroid)
+
+        if db_cluster_name != ClusterSpecificKeys.non_grouped_key:
+            group_df_indices = [indices[pos] for pos in group_positions]
+            df.loc[group_df_indices, cluster_col] = db_cluster_name
+            logger.debug(f"[SPLADEPregroup] DB hit: group of {len(group_positions)} rows → '{db_cluster_name}'")
         else:
-            logger.warning(
-                f"[SPLADEPregroup] type={type_}: LLM returned no cluster name for "
-                f"group of size {len(group)}, rows remain unclustered"
-            )
+            groups_needing_llm.append(group_positions)
 
+    db_hit_count = len(groups) - len(groups_needing_llm)
+
+    # --- LLM fallback only for groups the DB did not recognise ---
+    if groups_needing_llm:
+        logger.info(
+            f"[SPLADEPregroup] type={type_}: {db_hit_count}/{len(groups)} groups matched DB — "
+            f"calling LLM for remaining {len(groups_needing_llm)}"
+        )
+        llm_tasks = [generate_cluster_name(work_df.iloc[group_positions]) for group_positions in groups_needing_llm]
+        llm_results = await asyncio.gather(*llm_tasks)
+
+        for group_positions, result in zip(groups_needing_llm, llm_results):
+            if result and "cluster_name" in result:
+                group_df_indices = [indices[pos] for pos in group_positions]
+                cluster_name = result["cluster_name"]
+                df.loc[group_df_indices, cluster_col] = cluster_name
+                logger.debug(f"[SPLADEPregroup] LLM: group of {len(group_positions)} rows → '{cluster_name}'")
+            else:
+                logger.warning(
+                    f"[SPLADEPregroup] type={type_}: LLM returned no cluster name for "
+                    f"group of size {len(group_positions)}, rows remain unclustered"
+                )
+    else:
+        logger.info(f"[SPLADEPregroup] type={type_}: all {len(groups)} groups matched DB — no LLM calls needed")
+
+    named_count = (df.loc[list(work_df.index), cluster_col] != ClusterSpecificKeys.non_grouped_key).sum()
     logger.info(
         f"[SPLADEPregroup] type={type_}: complete — "
-        f"{named_count}/{unclustered_count} rows grouped into {len(groups)} clusters"
+        f"{named_count}/{unclustered_count} rows grouped into {len(groups)} clusters "
+        f"({db_hit_count} from DB, {len(groups_needing_llm)} from LLM)"
     )
     return df
