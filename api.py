@@ -172,6 +172,12 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(asyncio.to_thread(helpers.tc_id_scheduler))
     asyncio.create_task(asyncio.to_thread(consolidated_report_worker))
     yield
+    try:
+        from src.splade_clustering import SPLADEEncoder
+
+        SPLADEEncoder.release()
+    except Exception:
+        pass
 
 
 app = FastAPI(

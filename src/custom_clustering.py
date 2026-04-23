@@ -136,9 +136,6 @@ class CustomEmbeddingCluster:
                             data, typed_dataframe
                         )
 
-                # Queue SPLADE update for background processing
-                self._queue_splade_update(type_, typed_dataframe, metadata)
-                
                 assert len(centroids) == len(metadata), (
                     f"CRITICAL ERROR: Number of centroids ({len(centroids)}) "
                     f"does not match number of metadata entries ({len(metadata)})"
@@ -154,7 +151,6 @@ class CustomEmbeddingCluster:
                 # Save metadata
                 with open(os.path.join(type_dir, "metadata.json"), "w") as f:
                     json.dump(metadata, f, indent=3)
-
 
                 return f"Saved {len(centroids)} clusters for type: {type_}"
             except Exception as e:
@@ -208,7 +204,7 @@ class CustomEmbeddingCluster:
         filtered_df = dataframe[
             (dataframe[DataFrameKeys.embeddings_key].notna())
             & (dataframe[DataFrameKeys.cluster_name] != ClusterSpecificKeys.non_grouped_key)
-            # & (pd.isna(dataframe[DataFrameKeys.grouped_from_faiss]))
+            & (pd.isna(dataframe[DataFrameKeys.grouped_from_faiss]))
         ].copy()
 
         already_existing_issues = dataframe[
@@ -316,9 +312,6 @@ class CustomEmbeddingCluster:
             with open(os.path.join(type_dir, "metadata.json"), "w") as f:
                 json.dump(metadata, f, indent=3)
 
-            # Queue SPLADE update for background processing
-            self._queue_splade_update(type_, typed_dataframe, metadata)
-
             logger.info(f"Saved {len(centroids)} clusters for type: {type_}")
 
     def update(
@@ -412,11 +405,6 @@ class CustomEmbeddingCluster:
                         data, filtered_df
                     )
                 existing_cluster_names.append(cluster_name)
-
-        # Queue SPLADE update with current metadata state.
-        # Done before the assertion so SPLADE is always queued even if centroid/metadata
-        # count diverges (SPLADE is independent of centroids count).
-        self._queue_splade_update(type_, filtered_df, updated_metadata)
 
         assert len(updated_centroids) == len(updated_metadata), (
             f"CRITICAL ERROR: Number of centroids ({len(updated_centroids)}) "
@@ -637,43 +625,6 @@ class CustomEmbeddingCluster:
 
         return cluster_names, class_names, embeddings
 
-    def add_jira_id(self, type_: str, cluster_name: str, jira_id: str) -> bool:
-        """
-        Add a JIRA ID to a cluster's metadata.
-
-        Args:
-            type_: Type of data
-            cluster_name: Name of the cluster
-            jira_id: JIRA ID to add
-
-        Returns:
-            True if successful, False otherwise
-        """
-        type_dir = os.path.join(self.base_path, f"{type_}_custom")
-
-        if not os.path.exists(type_dir) or not os.path.exists(os.path.join(type_dir, "metadata.json")):
-            logger.warning(f"No data found for type: {type_}")
-            return False
-
-        # Load metadata
-        with open(os.path.join(type_dir, "metadata.json"), "r") as f:
-            metadata = json.load(f)
-
-        if cluster_name not in metadata:
-            logger.warning(f"Cluster {cluster_name} not found in type {type_}")
-            return False
-
-        # Add or update JIRA ID
-        metadata[cluster_name].setdefault("jira_ids", [])
-        if jira_id not in metadata[cluster_name]["jira_ids"]:
-            metadata[cluster_name]["jira_ids"].append(jira_id)
-
-        # Save updated metadata
-        with open(os.path.join(type_dir, "metadata.json"), "w") as f:
-            json.dump(metadata, f, indent=3)
-
-        return True
-
     def get_all_clusters(self, type_: str) -> Dict:
         """
         Get all clusters and their metadata for a given type.
@@ -695,33 +646,6 @@ class CustomEmbeddingCluster:
             metadata = json.load(f)
 
         return metadata
-
-    def _queue_splade_update(self, type_: str, df: pd.DataFrame, metadata: dict) -> None:
-        """Queue SPLADE index update for background processing via splade_update_worker."""
-        try:
-            from src.helpers import splade_update_queue
-
-            text_col = DataFrameKeys.preprocessed_text_key
-            if text_col not in df.columns:
-                logger.debug(f"[SPLADE] Skipping queue for type={type_}: no '{text_col}' column")
-                return
-
-            updates = {}
-            if DataFrameKeys.cluster_name in df.columns:
-                for cluster_name, group in df.groupby(DataFrameKeys.cluster_name):
-                    updates[cluster_name] = group[text_col].iloc[0]
-
-            if updates:
-                splade_update_queue.put(
-                    {
-                        "type_": type_,
-                        "updates": updates,
-                        "all_clusters": list(metadata.keys()),
-                    }
-                )
-                logger.info(f"[SPLADE] Queued update for type={type_}: {len(updates)} cluster(s)")
-        except Exception as e:
-            logger.error(f"[SPLADE] Failed to queue update for type={type_}: {e}")
 
     def _update_processed_runids(self, type_dir: str, run_id: str) -> None:
         """Update the list of processed run IDs."""

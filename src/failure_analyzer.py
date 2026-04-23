@@ -16,12 +16,11 @@ from src.logger import AppLogger
 from src.qgenie_llm_calls import (
     detect_and_merge_near_duplicate_clusters,
     qgenie_post_processing,
-    subcluster_verifier_failed,
+    subcluster_verifier_failed
 )
 from src.splade_clustering import ClusterCohesionAnalyzer, ClusterRanker
 
 threading.Thread(target=helpers.faissdb_update_worker, daemon=True).start()
-threading.Thread(target=helpers.splade_update_worker, daemon=True, name="splade-update").start()
 
 
 class FailureAnalyzer:
@@ -129,10 +128,39 @@ class FailureAnalyzer:
                     & (non_clustered_df[DataFrameKeys.cluster_name] == ClusterSpecificKeys.non_grouped_key)
                 ]
 
+        splade_grouped_df = pd.DataFrame()
+        if not non_clustered_df.empty:
+            # SPLADE pre-grouping pass: catches same-root-cause errors before HDBSCAN
+            non_clustered_df = await helpers.splade_pregroup(non_clustered_df, type_=current_type)
+
+            # Split SPLADE-grouped rows (have names already) from still-unclustered
+            splade_grouped_mask = non_clustered_df[DataFrameKeys.cluster_name] != ClusterSpecificKeys.non_grouped_key
+            splade_grouped_df = non_clustered_df[splade_grouped_mask].copy()
+            non_clustered_df = non_clustered_df[~splade_grouped_mask].reset_index(drop=True)
+
+            self.logger.info(
+                f"[SPLADESplit] type={current_type}: "
+                f"{len(splade_grouped_df)} rows pre-grouped by SPLADE, "
+                f"{len(non_clustered_df)} rows remain for HDBSCAN"
+            )
+
+            # Generate embeddings for SPLADE-grouped rows (needed for FAISS DB persistence)
+            if not splade_grouped_df.empty:
+                self.logger.info(
+                    f"[SPLADESplit] type={current_type}: generating embeddings for "
+                    f"{len(splade_grouped_df)} SPLADE-grouped rows"
+                )
+                splade_embs = self.generate_embeddings(splade_grouped_df[DataFrameKeys.preprocessed_text_key].tolist())
+                splade_grouped_df.loc[:, DataFrameKeys.embeddings_key] = pd.Series(
+                    splade_embs, index=splade_grouped_df.index
+                )
+
         self.logger.info(
-            f"\nType: {current_type} \ntotal errors: {failure_df_copy.shape[0]}, \nEmpty logs grouped: {empty_log_df.shape[0]}, \nFuzzy grouped: {fuzzy_clustered_df.shape[0]}, \nFaiss Grouped: {faiss_grouped.shape[0]}, \nNot grouped: {non_clustered_df.shape[0]}"
+            f"\nType: {current_type} \ntotal errors: {failure_df_copy.shape[0]}, \nEmpty logs grouped: {empty_log_df.shape[0]}, \nFuzzy grouped: {fuzzy_clustered_df.shape[0]}, \nFaiss Grouped: {faiss_grouped.shape[0]}, \nNot grouped: {non_clustered_df.shape[0]} \n Splade Grouped: {splade_grouped_df.shape[0]}"
         )
-        failure_df = pd.concat([empty_log_df, fuzzy_clustered_df, non_clustered_df, faiss_grouped], axis=0)
+        failure_df = pd.concat(
+            [empty_log_df, fuzzy_clustered_df, splade_grouped_df, non_clustered_df, faiss_grouped], axis=0
+        )
 
         # Handle small datasets (10 or fewer rows)
         if failure_df.shape[0] <= 10:
@@ -201,30 +229,7 @@ class FailureAnalyzer:
             f"{already_clustered_df.shape[0]} already clustered logs and {non_clustered_df.shape[0]} non-clustered logs"
         )
 
-        splade_grouped_df = pd.DataFrame()
         if not non_clustered_df.empty:
-            # SPLADE pre-grouping pass: catches same-root-cause errors before HDBSCAN
-            non_clustered_df = await helpers.splade_pregroup(non_clustered_df, type_=current_type)
-
-            # Split SPLADE-grouped rows (have names already) from still-unclustered
-            splade_grouped_mask = non_clustered_df[DataFrameKeys.cluster_name] != ClusterSpecificKeys.non_grouped_key
-            splade_grouped_df = non_clustered_df[splade_grouped_mask].copy()
-            non_clustered_df = non_clustered_df[~splade_grouped_mask].reset_index(drop=True)
-
-            self.logger.info(
-                f"[SPLADESplit] type={current_type}: "
-                f"{len(splade_grouped_df)} rows pre-grouped by SPLADE, "
-                f"{len(non_clustered_df)} rows remain for HDBSCAN"
-            )
-
-            # Generate embeddings for SPLADE-grouped rows (needed for FAISS DB persistence)
-            if not splade_grouped_df.empty:
-                self.logger.info(
-                    f"[SPLADESplit] type={current_type}: generating embeddings for "
-                    f"{len(splade_grouped_df)} SPLADE-grouped rows"
-                )
-                splade_embs = self.generate_embeddings(splade_grouped_df[DataFrameKeys.preprocessed_text_key].tolist())
-                splade_grouped_df.loc[:, DataFrameKeys.embeddings_key] = pd.Series(splade_embs, index=splade_grouped_df.index)
 
             embeddings = (
                 self.generate_embeddings(non_clustered_df[DataFrameKeys.preprocessed_text_key].tolist())

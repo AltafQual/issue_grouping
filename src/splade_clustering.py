@@ -1,14 +1,13 @@
 """
 SPLADE-enhanced clustering utilities for error log grouping.
 - ErrorNormalizer: strips noise from error logs before SPLADE encoding
-- SPLADEEncoder: encodes text to sparse vectors via SPLADE model
-- SPLADEClusterIndex: per-type SPLADE index with EMA accumulation
-- HybridSPLADEMatcher: combines cosine + SPLADE scores for matching
+- SPLADEEncoder: encodes text to sparse vectors via SPLADE model (singleton, stays loaded)
+- HybridSPLADEMatcher: combines cosine + SPLADE scores for matching (in-memory cluster cache)
 - ClusterRanker: ranks cluster members by embedding cosine similarity
 - ClusterCohesionAnalyzer: detects loose/poorly-formed clusters
 """
 
-import json
+import gc
 import os
 import re
 from typing import Dict, List, Optional, Tuple
@@ -80,7 +79,7 @@ class ErrorNormalizer:
 
 class SPLADEEncoder:
     """
-    Singleton SPLADE encoder.
+    Singleton SPLADE encoder. Loaded once and kept in memory for the process lifetime.
 
     When SPLADEConfigurations.use_quantized=True (default):
         Uses rasyosef/splade-tiny via sentence-transformers SparseEncoder (~17 MB).
@@ -213,244 +212,99 @@ class SPLADEEncoder:
         """Encode a single text string."""
         return self.encode([text])
 
+    @classmethod
+    def release(cls) -> None:
+        """
+        Unload the SPLADE model from RAM and reset the singleton.
+        Also clears the HybridSPLADEMatcher in-memory cluster vector cache.
 
-class SPLADEClusterIndex:
-    """
-    Per-type SPLADE index with EMA accumulation.
-
-    Storage per type directory:
-      - splade_vectors.npz: scipy CSR matrix (N_clusters, vocab_size)
-      - splade_cluster_names.json: ordered list of cluster names (row alignment)
-      - splade_model_info.json: {"model": "<model_name>"} — guards against mixing vectors
-        from different models. On load, if the stored model name differs from the current
-        SPLADEConfigurations model, the old index is discarded and rebuilt from scratch.
-
-    EMA update: new_vec = EMA_DECAY * old_vec + (1 - EMA_DECAY) * encode(new_log)
-    This lets the index improve over time as more runs are processed.
-    """
-
-    _VECTORS_FILE = SPLADEConfigurations.splade_vectors_file
-    _NAMES_FILE = SPLADEConfigurations.splade_cluster_names_file
-    _MODEL_INFO_FILE = "splade_model_info.json"
-
-    def __init__(self, base_path: str = FaissConfigurations.base_path):
-        self.base_path = base_path
-        self._vectors: Optional[scipy.sparse.csr_matrix] = None
-        self._cluster_names: List[str] = []
-
-    def _type_dir(self, type_: str) -> str:
-        return os.path.join(self.base_path, f"{type_}_custom")
-
-    def _active_model_name(self) -> str:
-        """Return the model name that will produce the current vectors."""
-        return (
-            SPLADEConfigurations.quantized_model_name
-            if SPLADEConfigurations.use_quantized
-            else SPLADEConfigurations.model_name
-        )
-
-    def load(self, type_: str) -> bool:
-        """Load index from disk. Returns True if successful, False if not found or model mismatch."""
-        type_dir = self._type_dir(type_)
-        vectors_path = os.path.join(type_dir, self._VECTORS_FILE)
-        names_path = os.path.join(type_dir, self._NAMES_FILE)
-        model_info_path = os.path.join(type_dir, self._MODEL_INFO_FILE)
-
-        if not os.path.exists(vectors_path) or not os.path.exists(names_path):
-            logger.debug(f"[SPLADE] No index found for type={type_}, starting fresh")
-            self._vectors = None
-            self._cluster_names = []
-            return False
-
-        # Guard: discard index if it was built with a different model
-        active_model = self._active_model_name()
-        if os.path.exists(model_info_path):
-            with open(model_info_path) as f:
-                stored_model = json.load(f).get("model", "")
-            if stored_model != active_model:
-                logger.warning(
-                    f"[SPLADE] Model mismatch for type={type_}: "
-                    f"stored='{stored_model}' vs active='{active_model}'. "
-                    f"Discarding old index — will rebuild from next run."
-                )
-                self._discard(type_dir)
-                return False
-        else:
-            # No model info file → legacy index built before this guard was added.
-            # Discard to avoid mixing vector spaces silently.
-            logger.warning(
-                f"[SPLADE] No model info for type={type_} (legacy index). "
-                f"Discarding — will rebuild with '{active_model}'."
-            )
-            self._discard(type_dir)
-            return False
-
-        try:
-            self._vectors = scipy.sparse.load_npz(vectors_path)
-            with open(names_path) as f:
-                self._cluster_names = json.load(f)
-            logger.info(
-                f"[SPLADE] Loaded index for type={type_}: "
-                f"{len(self._cluster_names)} clusters, shape={self._vectors.shape}"
-            )
-            return True
-        except Exception as e:
-            logger.error(f"[SPLADE] Failed to load index for type={type_}: {e}")
-            self._vectors = None
-            self._cluster_names = []
-            return False
-
-    def _discard(self, type_dir: str) -> None:
-        """Remove stale SPLADE artifacts so the index rebuilds cleanly."""
-        for fname in (self._VECTORS_FILE, self._NAMES_FILE, self._MODEL_INFO_FILE):
-            path = os.path.join(type_dir, fname)
-            try:
-                if os.path.exists(path):
-                    os.remove(path)
-            except OSError as e:
-                logger.debug(f"[SPLADE] Could not remove {path}: {e}")
-        self._vectors = None
-        self._cluster_names = []
-
-    def save(self, type_: str) -> None:
-        """Persist index to disk, recording which model produced the vectors."""
-        if self._vectors is None or not self._cluster_names:
-            logger.debug(f"[SPLADE] Nothing to save for type={type_}")
+        Call this on graceful application shutdown.
+        """
+        inst = cls._instance
+        if inst is None:
+            logger.info("[SPLADE] SPLADEEncoder.release() called but no instance loaded — nothing to do")
             return
 
-        type_dir = self._type_dir(type_)
-        os.makedirs(type_dir, exist_ok=True)
+        model_name = getattr(inst, "_model_name", "unknown")
+        if inst._model is not None:
+            del inst._model
+            inst._model = None
+        if inst._tokenizer is not None:
+            del inst._tokenizer
+            inst._tokenizer = None
+        inst._available = False
+        inst._initialized = False
+        cls._instance = None
 
-        vectors_path = os.path.join(type_dir, self._VECTORS_FILE)
-        names_path = os.path.join(type_dir, self._NAMES_FILE)
-        model_info_path = os.path.join(type_dir, self._MODEL_INFO_FILE)
+        # Clear the in-memory cluster vector cache in HybridSPLADEMatcher
+        HybridSPLADEMatcher._cluster_vec_cache.clear()
 
+        gc.collect()
         try:
-            scipy.sparse.save_npz(vectors_path, self._vectors.tocsr())
-            with open(names_path, "w") as f:
-                json.dump(self._cluster_names, f)
-            with open(model_info_path, "w") as f:
-                json.dump({"model": self._active_model_name()}, f)
-            logger.info(f"[SPLADE] Saved index for type={type_}: {len(self._cluster_names)} clusters → {type_dir}")
-        except Exception as e:
-            logger.error(f"[SPLADE] Failed to save index for type={type_}: {e}")
+            torch.cuda.empty_cache()
+        except Exception:
+            pass
 
-    def get_scores_array(self, query_vec: scipy.sparse.csr_matrix) -> Tuple[np.ndarray, List[str]]:
-        """
-        Compute dot-product scores between query_vec and all cluster vectors.
-
-        Returns (normalized_scores [0,1], cluster_names) aligned to index order.
-        """
-        if self._vectors is None or not self._cluster_names:
-            return np.array([]), []
-
-        raw = (self._vectors @ query_vec.T).toarray().flatten()
-        return self.normalize_scores(raw), self._cluster_names
-
-    def normalize_scores(self, raw: np.ndarray) -> np.ndarray:
-        """Min-max normalize to [0, 1]."""
-        min_s, max_s = raw.min(), raw.max()
-        if max_s - min_s < 1e-9:
-            return np.zeros_like(raw)
-        return (raw - min_s) / (max_s - min_s)
-
-    def batch_update(
-        self,
-        type_: str,
-        updates: Dict[str, str],
-        encoder: "SPLADEEncoder",
-    ) -> None:
-        """
-        Encode representative logs and EMA-update cluster vectors.
-
-        updates: {cluster_name: representative_log_text}
-        New clusters are appended; existing clusters are EMA-merged.
-        """
-        if not encoder.is_available:
-            logger.debug(f"[SPLADE] Encoder unavailable, skipping batch_update for type={type_}")
-            return
-
-        ema_decay = SPLADEConfigurations.ema_decay
-
-        for cluster_name, rep_log in updates.items():
-            new_vec = encoder.encode_single(rep_log)
-            if new_vec is None:
-                continue
-
-            if cluster_name in self._cluster_names:
-                idx = self._cluster_names.index(cluster_name)
-                old_vec = self._vectors[idx]
-                # EMA update: blend toward new data, preserving historical signal
-                updated = ema_decay * old_vec + (1 - ema_decay) * new_vec
-                # Rebuild matrix with updated row
-                rows = [updated if i == idx else self._vectors[i] for i in range(self._vectors.shape[0])]
-                self._vectors = scipy.sparse.vstack(rows, format="csr")
-                logger.debug(f"[SPLADE] EMA-updated cluster '{cluster_name}' for type={type_} " f"(decay={ema_decay})")
-            else:
-                # New cluster: append row
-                if self._vectors is None:
-                    self._vectors = new_vec.tocsr()
-                else:
-                    self._vectors = scipy.sparse.vstack([self._vectors, new_vec], format="csr")
-                self._cluster_names.append(cluster_name)
-                logger.debug(f"[SPLADE] Added new cluster '{cluster_name}' for type={type_}")
-
-        logger.info(
-            f"[SPLADE] batch_update complete for type={type_}: " f"{len(self._cluster_names)} clusters in index"
-        )
+        logger.info(f"[SPLADE] SPLADEEncoder released from memory (model={model_name})")
 
 
 class HybridSPLADEMatcher:
     """
     Combines cosine similarity (embedding) and SPLADE sparse dot-product scores.
 
+    Cluster SPLADE vectors are computed from cluster names on first use and cached
+    in memory for the process lifetime — no disk I/O or EMA updates.
+
     alpha: weight for embedding cosine score (default 0.55)
     beta:  weight for SPLADE score (default 0.45)
 
-    Drop-in replacement for HybridClusterMatcher — same search/batch_search interface.
-    Falls back to pure cosine if SPLADE index or encoder is unavailable.
+    Falls back to pure cosine if the SPLADE encoder is unavailable.
     """
+
+    # Class-level cache shared across all instances: {type_: {cluster_name: sparse_vec}}
+    _cluster_vec_cache: Dict[str, Dict[str, scipy.sparse.csr_matrix]] = {}
 
     def __init__(
         self,
         alpha: float = SPLADEConfigurations.hybrid_alpha,
         beta: float = SPLADEConfigurations.hybrid_beta,
-        base_path: str = FaissConfigurations.base_path,
     ):
         self.alpha = alpha
         self.beta = beta
-        self.base_path = base_path
-        self._splade_index_cache: Dict[str, SPLADEClusterIndex] = {}
-        self._encoder: Optional[SPLADEEncoder] = None
 
-    def _get_encoder(self) -> "SPLADEEncoder":
-        """Load (or return cached) encoder. Only call this from update/pregroup paths."""
-        if self._encoder is None:
-            self._encoder = SPLADEEncoder()
-        return self._encoder
+    def _get_encoder(self) -> Optional["SPLADEEncoder"]:
+        enc = SPLADEEncoder()
+        return enc if enc.is_available else None
 
-    def _get_encoder_if_loaded(self) -> Optional["SPLADEEncoder"]:
+    @staticmethod
+    def _normalize_scores(raw: np.ndarray) -> np.ndarray:
+        """Min-max normalize scores to [0, 1]."""
+        min_s, max_s = raw.min(), raw.max()
+        if max_s - min_s < 1e-9:
+            return np.zeros_like(raw)
+        return (raw - min_s) / (max_s - min_s)
+
+    def _get_cluster_matrix(
+        self, type_: str, cluster_names: List[str], enc: "SPLADEEncoder"
+    ) -> Optional[scipy.sparse.csr_matrix]:
         """
-        Return the encoder only if it is already initialised as a singleton.
-        Used in the search hot-path to avoid loading the ~440 MB transformer
-        model on top of already-loaded BGE-M3 and causing an OOM kill.
+        Return a (len(cluster_names), vocab_size) CSR matrix of SPLADE vectors.
+        Unseen cluster names are encoded on-the-fly and cached in memory.
+        Returns None if any cluster could not be encoded.
         """
-        inst = SPLADEEncoder._instance
-        if inst is not None and getattr(inst, "_available", False):
-            return inst
-        return None
+        cache = HybridSPLADEMatcher._cluster_vec_cache.setdefault(type_, {})
 
-    def _get_splade_index(self, type_: str) -> Optional[SPLADEClusterIndex]:
-        """Load SPLADE index for type, with in-memory cache."""
-        if type_ not in self._splade_index_cache:
-            idx = SPLADEClusterIndex(self.base_path)
-            if idx.load(type_):
-                self._splade_index_cache[type_] = idx
-                logger.info(f"[HybridSPLADE] SPLADE index cached for type={type_}")
-            else:
-                logger.debug(f"[HybridSPLADE] No SPLADE index for type={type_}, using pure cosine")
-                return None
-        return self._splade_index_cache.get(type_)
+        new_names = [n for n in cluster_names if n not in cache]
+        if new_names:
+            vecs = enc.encode(new_names)
+            if vecs is not None:
+                for i, name in enumerate(new_names):
+                    cache[name] = vecs[i]  # (1, vocab_size) slice
+
+        rows = [cache.get(n) for n in cluster_names]
+        if any(r is None for r in rows):
+            return None
+        return scipy.sparse.vstack(rows, format="csr")
 
     def search(
         self,
@@ -466,26 +320,18 @@ class HybridSPLADEMatcher:
         Returns (best_idx, best_score). Returns (-1, best_score) if below threshold.
         """
         cosine_scores = cosine_similarity([query_embedding], centroids)[0]
+        scores = cosine_scores
+        scoring_mode = "pure cosine"
 
-        splade_idx = self._get_splade_index(type_)
-        if splade_idx is not None:
-            enc = self._get_encoder_if_loaded()
-            query_vec = enc.encode_single(query) if enc is not None else None
-            if query_vec is not None:
-                splade_scores_arr, splade_names = splade_idx.get_scores_array(query_vec)
-                if splade_names == cluster_names:
-                    aligned_splade = splade_scores_arr
-                else:
-                    name_to_splade = dict(zip(splade_names, splade_scores_arr))
-                    aligned_splade = np.array([name_to_splade.get(n, 0.0) for n in cluster_names])
-                scores = self.alpha * cosine_scores + self.beta * aligned_splade
+        enc = self._get_encoder()
+        if enc is not None:
+            query_vec = enc.encode_single(query)
+            cluster_matrix = self._get_cluster_matrix(type_, cluster_names, enc)
+            if query_vec is not None and cluster_matrix is not None:
+                raw = (cluster_matrix @ query_vec.T).toarray().flatten()
+                splade_scores = self._normalize_scores(raw)
+                scores = self.alpha * cosine_scores + self.beta * splade_scores
                 scoring_mode = f"hybrid (α={self.alpha}, β={self.beta})"
-            else:
-                scores = cosine_scores
-                scoring_mode = "pure cosine (SPLADE encoder unavailable)"
-        else:
-            scores = cosine_scores
-            scoring_mode = "pure cosine (no SPLADE index)"
 
         best_idx = int(np.argmax(scores))
         best_score = float(scores[best_idx])
@@ -517,31 +363,19 @@ class HybridSPLADEMatcher:
         Returns (best_indices, best_scores). Index -1 means no match found.
         """
         cosine_matrix = cosine_similarity(query_embeddings, centroids)  # (N, C)
+        score_matrix = cosine_matrix
+        scoring_mode = "pure cosine (SPLADE unavailable)"
 
-        splade_idx = self._get_splade_index(type_)
-        splade_matrix = None
-        if splade_idx is not None:
-            enc = self._get_encoder_if_loaded()
-            if enc is not None:
-                query_vecs = enc.encode(queries)
-                if query_vecs is not None:
-                    rows = []
-                    for i in range(query_vecs.shape[0]):
-                        q_vec = query_vecs[i]
-                        splade_scores_arr, splade_names = splade_idx.get_scores_array(q_vec)
-                        if splade_names == cluster_names:
-                            rows.append(splade_scores_arr)
-                        else:
-                            name_to_splade = dict(zip(splade_names, splade_scores_arr))
-                            rows.append(np.array([name_to_splade.get(n, 0.0) for n in cluster_names]))
-                    splade_matrix = np.vstack(rows)
-
-        if splade_matrix is not None:
-            score_matrix = self.alpha * cosine_matrix + self.beta * splade_matrix
-            scoring_mode = f"hybrid (α={self.alpha}, β={self.beta})"
-        else:
-            score_matrix = cosine_matrix
-            scoring_mode = "pure cosine (no SPLADE index/encoder)"
+        enc = self._get_encoder()
+        if enc is not None:
+            query_vecs = enc.encode(queries)
+            cluster_matrix = self._get_cluster_matrix(type_, cluster_names, enc)
+            if query_vecs is not None and cluster_matrix is not None:
+                # (N_queries, vocab) @ (vocab, N_clusters) → (N_queries, N_clusters)
+                raw_splade = (query_vecs @ cluster_matrix.T).toarray()
+                splade_matrix = np.vstack([self._normalize_scores(row) for row in raw_splade])
+                score_matrix = self.alpha * cosine_matrix + self.beta * splade_matrix
+                scoring_mode = f"hybrid (α={self.alpha}, β={self.beta})"
 
         logger.info(
             f"[HybridSPLADE] Batch search for type={type_} | {scoring_mode} | "

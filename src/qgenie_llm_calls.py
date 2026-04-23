@@ -462,9 +462,9 @@ async def merge_duplicate_clusters(
             cluster_results[base_cluster_id]["cluster_name"] = response["merged_name"]
 
             # Move all rows from next_cluster to base_cluster
-            df.loc[
-                df[DataFrameKeys.cluster_type_int] == next_cluster_id, DataFrameKeys.cluster_type_int
-            ] = base_cluster_id
+            df.loc[df[DataFrameKeys.cluster_type_int] == next_cluster_id, DataFrameKeys.cluster_type_int] = (
+                base_cluster_id
+            )
 
             # Move outliers to cluster -1
             outlier_indices = [int(index) for index in response.get("outlier_indices")]
@@ -485,9 +485,9 @@ def give_cluster_names_and_reassign_misc_clusters(df: pd.DataFrame, cluster_resu
     for cluster_id, result in cluster_results.items():
         misclassified_ids = result.get("misclassified_ids", [])
         if misclassified_ids:
-            df.loc[
-                df.index.isin(misclassified_ids), DataFrameKeys.cluster_type_int
-            ] = ClusterSpecificKeys.non_grouped_key
+            df.loc[df.index.isin(misclassified_ids), DataFrameKeys.cluster_type_int] = (
+                ClusterSpecificKeys.non_grouped_key
+            )
 
         cluster_name = result.get("cluster_name")
         if cluster_name:
@@ -585,9 +585,9 @@ def inter_cluster_merging(df: pd.DataFrame) -> pd.DataFrame:
                 merge_response = merge_clusters(df, current_cluster_name, merge_target_name)
 
                 # Update cluster labels in df
-                df.loc[
-                    df[DataFrameKeys.cluster_name] == current_cluster_name, DataFrameKeys.cluster_name
-                ] = merge_response["merged_name"]
+                df.loc[df[DataFrameKeys.cluster_name] == current_cluster_name, DataFrameKeys.cluster_name] = (
+                    merge_response["merged_name"]
+                )
 
                 # Handle outliers
                 outlier_indices = merge_response.get("outlier_indices", [])
@@ -772,38 +772,20 @@ def subcluster_verifier_failed(df: pd.DataFrame):
 @execution_timer
 async def detect_and_merge_near_duplicate_clusters(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Detect near-duplicate clusters using centroid cosine similarity (threshold=0.90),
-    then confirm duplicates via LLM with full logs (batched 5 pairs per call).
-    Prints confirmed duplicates with reason to terminal, then merges them in the df.
+    Detect near-duplicate clusters using centroid cosine similarity, then confirm
+    via LLM with representative logs (batched per call).
+
+    Candidate pairs are sorted by descending similarity so the most obvious
+    near-duplicates are reviewed first. The LLM is the final gate — it rejects
+    false positives — so the cosine threshold can be set conservatively low to
+    avoid missing similar-but-distinct clusters.
     """
 
-    def build_pairs_block(pairs: list[tuple[str, str, float]]) -> str:
-        blocks = []
-        for idx, (name_a, name_b, sim) in enumerate(pairs, start=1):
-            logs_a = cluster_logs.get(name_a, [])
-            logs_b = cluster_logs.get(name_b, [])
-            logs_a_str = "\n".join(f"  [{i+1}] {log}" for i, log in enumerate(logs_a))
-            logs_b_str = "\n".join(f"  [{i+1}] {log}" for i, log in enumerate(logs_b))
-            blocks.append(
-                f"Pair {idx} (cosine similarity: {sim:.3f}):\n"
-                f'  Cluster A: "{name_a}"\n'
-                f"  Cluster A logs:\n{logs_a_str}\n\n"
-                f'  Cluster B: "{name_b}"\n'
-                f"  Cluster B logs:\n{logs_b_str}"
-            )
-        return "\n\n" + ("-" * 60 + "\n\n").join(blocks)
-
-    def chunk_pairs(pairs, size):
-        for i in range(0, len(pairs), size):
-            yield pairs[i : i + size]
-
-    def resolve(name: str) -> str:
-        while name in rename_map:
-            name = rename_map[name]
-        return name
-
-    COSINE_THRESHOLD = 0.90
-    BATCH_SIZE = 5
+    # Threshold is intentionally lower than 1.0 so pairs that are genuinely
+    # similar but not perfectly aligned still get sent to the LLM for review.
+    COSINE_SIMILARITY_THRESHOLD = 0.85
+    PAIRS_PER_LLM_BATCH = 5
+    MAX_LOGS_PER_CLUSTER = 8  # more logs give the LLM better context per cluster
 
     excluded = {ClusterSpecificKeys.non_grouped_key, str(ClusterSpecificKeys.non_grouped_key)}
     valid_df = df[~df[DataFrameKeys.cluster_name].isin(excluded)].copy()
@@ -814,50 +796,90 @@ async def detect_and_merge_near_duplicate_clusters(df: pd.DataFrame) -> pd.DataF
         logger.info("Near-duplicate check: fewer than 2 clusters, skipping.")
         return df
 
+    # --- Build per-cluster centroid and representative logs ---
     cluster_centroids: dict[str, np.ndarray] = {}
-    cluster_logs: dict[str, list[str]] = {}
+    cluster_representative_logs: dict[str, list[str]] = {}
 
     for cluster_name in unique_clusters:
         cluster_rows = valid_df[valid_df[DataFrameKeys.cluster_name] == cluster_name]
         logs = cluster_rows[DataFrameKeys.preprocessed_text_key].dropna().tolist()
-        cluster_logs[cluster_name] = logs[:5] if len(logs) > 5 else logs
+        cluster_representative_logs[cluster_name] = logs[:MAX_LOGS_PER_CLUSTER]
 
-        emb_col = cluster_rows[DataFrameKeys.embeddings_key].dropna()
-        if emb_col.empty:
+        valid_embeddings = cluster_rows[DataFrameKeys.embeddings_key].dropna()
+        if valid_embeddings.empty:
             continue
-        embeddings = np.array([np.array(e) for e in emb_col if e is not None and not (isinstance(e, float))])
-        if embeddings.ndim == 2 and embeddings.shape[0] > 0:
-            cluster_centroids[cluster_name] = embeddings.mean(axis=0)
+        embedding_array = np.array(
+            [np.array(emb) for emb in valid_embeddings if emb is not None and not isinstance(emb, float)]
+        )
+        if embedding_array.ndim == 2 and embedding_array.shape[0] > 0:
+            cluster_centroids[cluster_name] = embedding_array.mean(axis=0)
 
     clusters_with_centroids = list(cluster_centroids.keys())
     if len(clusters_with_centroids) <= 2:
         logger.info("Near-duplicate check: not enough clusters with embeddings, skipping.")
         return df
 
-    names = clusters_with_centroids
-    matrix = np.array([cluster_centroids[n] for n in names])
+    # --- Compute pairwise cosine similarity matrix ---
+    cluster_name_list = clusters_with_centroids
+    centroid_matrix = np.array([cluster_centroids[name] for name in cluster_name_list])
 
-    # Normalize rows for cosine similarity
-    norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+    norms = np.linalg.norm(centroid_matrix, axis=1, keepdims=True)
     norms = np.where(norms == 0, 1e-10, norms)
-    normed = matrix / norms
-    similarity_matrix = normed @ normed.T  # shape (n, n)
+    normed_centroids = centroid_matrix / norms
+    similarity_matrix = normed_centroids @ normed_centroids.T  # (num_clusters, num_clusters)
+
+    # --- Collect upper-triangle pairs above threshold, sorted by similarity desc ---
+    cluster_count = len(cluster_name_list)
+    upper_row_indices, upper_col_indices = np.triu_indices(cluster_count, k=1)
 
     candidate_pairs: list[tuple[str, str, float]] = []
-    n = len(names)
-    for i in range(n):
-        for j in range(i + 1, n):
-            sim = float(similarity_matrix[i, j])
-            if sim >= COSINE_THRESHOLD:
-                candidate_pairs.append((names[i], names[j], sim))
+    for row_idx, col_idx in zip(upper_row_indices, upper_col_indices):
+        similarity = float(similarity_matrix[row_idx, col_idx])
+        if similarity >= COSINE_SIMILARITY_THRESHOLD:
+            candidate_pairs.append((cluster_name_list[row_idx], cluster_name_list[col_idx], similarity))
+
+    # Sort most similar pairs first — LLM sees the clearest cases per batch
+    candidate_pairs.sort(key=lambda pair: pair[2], reverse=True)
 
     if not candidate_pairs:
-        logger.info("Near-duplicate check: no candidate pairs above threshold 0.90.")
+        logger.info(f"Near-duplicate check: no candidate pairs above threshold {COSINE_SIMILARITY_THRESHOLD}.")
         return df
 
     logger.info(
-        f"Near-duplicate check: {len(candidate_pairs)} candidate pairs found above {COSINE_THRESHOLD} cosine similarity."
+        f"Near-duplicate check: {len(candidate_pairs)} candidate pairs above "
+        f"{COSINE_SIMILARITY_THRESHOLD} cosine similarity."
     )
+
+    # --- Helper: build the text block sent to the LLM for one batch of pairs ---
+    def build_pairs_block(pairs: list[tuple[str, str, float]]) -> str:
+        blocks = []
+        for pair_num, (cluster_a_name, cluster_b_name, similarity) in enumerate(pairs, start=1):
+            logs_a = cluster_representative_logs.get(cluster_a_name, [])
+            logs_b = cluster_representative_logs.get(cluster_b_name, [])
+            logs_a_str = "\n".join(f"  [{log_pos}] {log}" for log_pos, log in enumerate(logs_a, start=1))
+            logs_b_str = "\n".join(f"  [{log_pos}] {log}" for log_pos, log in enumerate(logs_b, start=1))
+            blocks.append(
+                f"Pair {pair_num} (cosine similarity: {similarity:.3f}):\n"
+                f'  Cluster A: "{cluster_a_name}"\n'
+                f"  Cluster A logs:\n{logs_a_str}\n\n"
+                f'  Cluster B: "{cluster_b_name}"\n'
+                f"  Cluster B logs:\n{logs_b_str}"
+            )
+        return "\n\n" + ("-" * 60 + "\n\n").join(blocks)
+
+    def chunk_pairs(pairs: list, batch_size: int):
+        for start in range(0, len(pairs), batch_size):
+            yield pairs[start : start + batch_size]
+
+    # --- Chain renames so chained merges resolve to their canonical name ---
+    rename_map: dict[str, str] = {}
+
+    def resolve_to_canonical(name: str) -> str:
+        while name in rename_map:
+            name = rename_map[name]
+        return name
+
+    # --- LLM confirmation pass ---
     prompt_template = ChatPromptTemplate.from_messages(
         [
             ("system", prompts.NEAR_DUPLICATE_CLUSTER_SYS_MESSAGE),
@@ -865,58 +887,57 @@ async def detect_and_merge_near_duplicate_clusters(df: pd.DataFrame) -> pd.DataF
         ]
     )
     chain = prompt_template | QgenieModels.azure_gpt_5_2 | near_duplicate_parser
-    confirmed_merges: list[tuple[str, str, str, str]] = []  # (name_a, name_b, keep_name, reason)
+    confirmed_merges: list[tuple[str, str, str, str]] = []  # (cluster_a, cluster_b, kept_name, reason)
 
-    for batch_idx, batch in enumerate(chunk_pairs(candidate_pairs, BATCH_SIZE), start=1):
+    for batch_num, batch in enumerate(chunk_pairs(candidate_pairs, PAIRS_PER_LLM_BATCH), start=1):
         pairs_block = build_pairs_block(batch)
         try:
             response = await chain.ainvoke({"pairs_block": pairs_block})
-            logger.debug(f"merge clusters response: {response}")
-            for item in response:
-                if not isinstance(item, dict):
+            logger.debug(f"Near-duplicate batch {batch_num} LLM response: {response}")
+            for result_item in response:
+                if not isinstance(result_item, dict):
                     continue
-                if item.get("is_duplicate"):
-                    name_a = item.get("cluster_a", "")
-                    name_b = item.get("cluster_b", "")
-                    keep = item.get("keep_name") or name_a
-                    reason = item.get("reason", "")
-                    confirmed_merges.append((name_a, name_b, keep, reason))
+                if result_item.get("is_duplicate"):
+                    cluster_a = result_item.get("cluster_a", "")
+                    cluster_b = result_item.get("cluster_b", "")
+                    kept_name = result_item.get("keep_name") or cluster_a
+                    reason = result_item.get("reason", "")
+                    confirmed_merges.append((cluster_a, cluster_b, kept_name, reason))
 
-        except Exception as e:
-            logger.error(f"Near-duplicate LLM batch {batch_idx} failed: {e}")
+        except Exception as exc:
+            logger.error(f"Near-duplicate LLM batch {batch_num} failed: {exc}")
             traceback.print_exc()
 
     if not confirmed_merges:
-        logger.info("[Near-Duplicate Check] No duplicate clusters found.")
+        logger.info("[Near-Duplicate Check] No duplicate clusters confirmed.")
         return df
 
+    # --- Log confirmed merges ---
     sep = "=" * 70
     lines = [f"\n{sep}", "[Near-Duplicate Cluster Detection] Confirmed duplicates to merge:", sep]
-    for i, (name_a, name_b, keep, reason) in enumerate(confirmed_merges, start=1):
-        discard = name_b if keep == name_a else name_a
-        lines.append(f'  [{i}] MERGE: "{name_a}" + "{name_b}"')
-        lines.append(f'       Keep name : "{keep}"')
-        lines.append(f'       Discard   : "{discard}"')
+    for merge_num, (cluster_a, cluster_b, kept_name, reason) in enumerate(confirmed_merges, start=1):
+        discarded_name = cluster_b if kept_name == cluster_a else cluster_a
+        lines.append(f'  [{merge_num}] MERGE: "{cluster_a}" + "{cluster_b}"')
+        lines.append(f'       Keep name : "{kept_name}"')
+        lines.append(f'       Discard   : "{discarded_name}"')
         lines.append(f"       Reason    : {reason}")
     lines.append(sep)
     logger.info("\n".join(lines))
 
-    # Apply merges — track renames so chained merges resolve correctly
-    rename_map: dict[str, str] = {}  # old_name -> canonical keep_name
-    for name_a, name_b, keep, reason in confirmed_merges:
-        resolved_a = resolve(name_a)
-        resolved_b = resolve(name_b)
-        resolved_keep = resolve(keep)
+    # --- Apply merges ---
+    for cluster_a, cluster_b, kept_name, _ in confirmed_merges:
+        resolved_a = resolve_to_canonical(cluster_a)
+        resolved_b = resolve_to_canonical(cluster_b)
+        resolved_kept = resolve_to_canonical(kept_name)
 
         if resolved_a == resolved_b:
-            continue  # already merged via a previous step
+            continue  # already unified by a prior merge in this loop
 
-        discard = resolved_b if resolved_keep == resolved_a else resolved_a
+        discarded_name = resolved_b if resolved_kept == resolved_a else resolved_a
 
-        # Rename discard -> keep in df
-        df.loc[df[DataFrameKeys.cluster_name] == discard, DataFrameKeys.cluster_name] = resolved_keep
-        rename_map[discard] = resolved_keep
-        logger.info(f"Near-duplicate merge: '{discard}' -> '{resolved_keep}'")
+        df.loc[df[DataFrameKeys.cluster_name] == discarded_name, DataFrameKeys.cluster_name] = resolved_kept
+        rename_map[discarded_name] = resolved_kept
+        logger.info(f"Near-duplicate merge applied: '{discarded_name}' → '{resolved_kept}'")
 
     return df
 

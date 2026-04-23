@@ -1,4 +1,5 @@
 import asyncio
+import gc
 import json
 import math
 import os
@@ -42,7 +43,6 @@ logger = AppLogger().get_logger(__name__)
 sql_connection = ConnectToMySql()
 faiss_runner = FaissIVFFlatIndex()
 faiss_update_queue = Queue()
-splade_update_queue = Queue()
 scheduler = BackgroundScheduler()
 parquet_file = "run_ids.parquet"
 _ERROR_PATTERN = re.compile(r"<[eE]>|\[ ?[Ee][Rr][Rr][Oo][Rr] ?\]", re.IGNORECASE)
@@ -799,6 +799,8 @@ async def process_tc_ids_async_bg_job(run_ids):
                     await async_sequential_process_by_type(
                         FailureAnalyzer().load_data(tc_id=run_id), update_faiss_and_sql=True, run_id=run_id
                     )
+                    # Free DataFrame memory (embeddings, logs) held by the completed run_id
+                    gc.collect()
                     await asyncio.sleep(30)
                 else:
                     logger.info(f"Skipping processing: {run_id} already processed")
@@ -817,6 +819,10 @@ async def process_tc_ids_async_bg_job(run_ids):
             logger.info(f"Skipping processing: {run_id} doesn't start with QNN/SNPE")
 
     requeue_failed_run_ids()
+
+    gc.collect()
+    logger.info("[MemCleanup] Post-job memory cleanup complete")
+
     swap_issue_grouping_db_to_prod()
     logger.info("Finished background job processing of TC IDs")
 
@@ -968,57 +974,6 @@ def faissdb_update_worker():
 
         finally:
             faiss_update_queue.task_done()
-
-
-def splade_update_worker():
-    """
-    Daemon: consumes splade_update_queue, encodes cluster representative logs,
-    and EMA-updates the SPLADE index for each type.
-
-    The SPLADE encoder is loaded lazily on the first task (not at thread start)
-    to avoid competing with the main thread's data loading and causing OOM.
-    An in-process cache keeps each SPLADEClusterIndex loaded across tasks for the
-    same type to avoid repeated disk reads.
-    """
-    logger.info("Starting SPLADE update background job")
-    import queue as _queue
-
-    from src.splade_clustering import SPLADEClusterIndex, SPLADEEncoder
-
-    encoder = None  # loaded lazily on first task — avoids OOM race at startup
-    idx_cache: dict = {}  # type_ → SPLADEClusterIndex
-
-    while True:
-        try:
-            task = splade_update_queue.get(timeout=5)
-        except _queue.Empty:
-            continue
-
-        try:
-            type_ = task["type_"]
-            updates = task["updates"]  # {cluster_name: representative_log}
-
-            # Load encoder lazily — deferred until first real task so the
-            # 440 MB model load doesn't race with the main thread at startup.
-            if encoder is None:
-                if not SPLADEConfigurations.enabled:
-                    logger.debug("[SPLADE worker] SPLADE disabled, draining queue without processing")
-                    continue
-                encoder = SPLADEEncoder()
-
-            if type_ not in idx_cache:
-                idx = SPLADEClusterIndex(FaissConfigurations.base_path)
-                idx.load(type_)
-                idx_cache[type_] = idx
-
-            idx_cache[type_].batch_update(type_, updates, encoder)
-            idx_cache[type_].save(type_)
-            logger.info(f"[SPLADE worker] Processed type={type_}: {len(updates)} cluster(s) updated")
-        except Exception as e:
-            logger.error(f"[SPLADE worker] Error processing task: {e}")
-            logger.error(traceback.format_exc())
-        finally:
-            splade_update_queue.task_done()
 
 
 def get_bu_name(soc_name: str) -> str:

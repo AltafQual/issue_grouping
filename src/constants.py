@@ -38,7 +38,7 @@ class ClusterSpecificKeys:
 
 @dataclass
 class FaissConfigurations:
-    base_path: str = "issue_grouping_db_older"
+    base_path: str = "issue_grouping_db"
 
 
 @dataclass
@@ -58,12 +58,9 @@ class SPLADEConfigurations:
     use_quantized: bool = True  # use rasyosef/splade-small (~17 MB) instead of the 440 MB model
     model_name: str = "naver/splade-cocondenser-ensembledistil"
     quantized_model_name: str = "rasyosef/splade-small"
-    splade_vectors_file: str = "splade_vectors.npz"
-    splade_cluster_names_file: str = "splade_cluster_names.json"
     hybrid_alpha: float = 0.55  # dense cosine weight
     hybrid_beta: float = 0.45  # SPLADE sparse weight
-    ema_decay: float = 0.85  # EMA decay for per-run accumulation
-    pregroup_threshold: float = 0.70  # SPLADE similarity threshold for pre-grouping
+    pregroup_threshold: float = 0.80
     low_cohesion_threshold: float = 0.35
     core_member_percentile: float = 0.50
 
