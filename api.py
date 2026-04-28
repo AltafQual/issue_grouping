@@ -1,14 +1,10 @@
 import asyncio
 import json
-import os
-import pickle
 import threading
 import time
-import traceback
 from contextlib import asynccontextmanager
 from typing import Annotated, Any, Dict, List
 
-import httpx
 import pandas as pd
 import psutil
 from cachetools import TTLCache
@@ -18,15 +14,13 @@ from pydantic import BaseModel, Field
 
 from src import helpers
 from src.consolidated_reports_analysis import CombinedRegressionAnalysis, ConsolidatedReportAnalysis
-from src.constants import CONSOLIDATED_REPORTS, NIGHTLY_EXECUTION, DataFrameKeys, StabilityReportConfig
+from src.constants import CONSOLIDATED_REPORTS, NIGHTLY_EXECUTION, DataFrameKeys
 from src.custom_clustering import CustomEmbeddingCluster
-from src.email_helpers import send_email_report
 from src.failure_analyzer import FailureAnalyzer
 from src.gerrit_data_fetching_helpers import get_gerrit_info_between_2_runids, get_regression_gerrits_based_of_type
 from src.get_prev_testplan_id import iterate_db_get_testplan
 from src.logger import AppLogger
-from src.stability_report import RunAnalysis, analyze_type_failures, build_combined_stability_html
-from src.teams_helpers import send_teams_breakdown_card, send_teams_summary_card
+from src.nightly_stability_job import run_stability_check
 
 logger = AppLogger().get_logger(__name__)
 proc = psutil.Process()
@@ -535,105 +529,4 @@ async def get_running_jobs(
         str, Query(description='Filter query, e.g. status="RUNNING"')
     ] = NIGHTLY_EXECUTION.DAG_API_DEFAULT_QUERY,
 ) -> Dict:
-    # get this token from the qa2 dashboard
-    token = os.environ.get("DAG_API_BEARER_TOKEN", "")
-    if not token:
-        return {
-            "status": 401,
-            "error": "DAG_API_BEARER_TOKEN environment variable not set, get it from the qa2 dashboard",
-        }
-
-    # fetch all the running jobs
-    dag_data = None
-    try:
-        async with httpx.AsyncClient(timeout=30.0, verify=False) as client:
-            resp = await client.get(
-                NIGHTLY_EXECUTION.DAG_API_BASE,
-                params={"query": query},
-                headers={"accept": "application/json", "Authorization": f"Bearer {token}"},
-            )
-        resp.raise_for_status()
-        dag_data = resp.json()
-    except httpx.HTTPStatusError as e:
-        logger.error(f"DAG API returned HTTP {e.response.status_code}: {e.response.text}")
-        return {"status": e.response.status_code, "error": e.response.text}
-    except Exception as e:
-        logger.exception(f"Error calling DAG API: {e}")
-        return {"status": 500, "error": str(e)}
-
-    # Filter only auto runds and process those
-    auto_run_ids = [
-        job
-        for job in (dag_data.get("data") or [])
-        if job.get("run_id", "").startswith("QNN") and "auto" in job.get("run_id", "")
-    ]
-    logger.info(f"Found {len(auto_run_ids)} QNN auto run(s) in RUNNING state")
-
-    processed_runs: list[RunAnalysis] = []
-    results_summary = []
-    loop = asyncio.get_event_loop()
-
-    for job_info in auto_run_ids:
-        run_id = job_info.get("run_id", "unknown")
-        pkl_path = job_info.get("excel_report_path", "")
-
-        # Load DataFrame from pkl (blocking I/O → offload to thread)
-        df: pd.DataFrame | None = None
-        if run_id and pkl_path:
-            try:
-
-                def _load_pkl(path):
-                    with open(path + ".pkl", "rb") as f:
-                        raw = pickle.load(f)
-                    return pd.DataFrame(raw) if not isinstance(raw, pd.DataFrame) else raw
-
-                df = await loop.run_in_executor(None, _load_pkl, pkl_path)
-            except Exception as e:
-                logger.warning(f"{run_id}: Could not load pkl from {pkl_path}: {e}")
-
-        if df is None or df.empty:
-            results_summary.append({"run_id": run_id, "status": "no_data"})
-            continue
-
-        if "type" not in df.columns or "result" not in df.columns:
-            logger.warning(f"{run_id}: DataFrame missing 'type' or 'result' columns — skipping")
-            results_summary.append({"run_id": run_id, "status": "missing_columns"})
-            continue
-
-        type_stats = analyze_type_failures(df)
-        highlighted = [t for t, s in type_stats.items() if s.highlighted]
-        logger.info(
-            f"{run_id}: {len(type_stats)} types analysed, "
-            f"{len(highlighted)} flagged (>={int(StabilityReportConfig.FAILURE_THRESHOLD * 100)}%)"
-        )
-        processed_runs.append(RunAnalysis(run_id=run_id, job_info=job_info, type_stats=type_stats))
-        results_summary.append(
-            {
-                "run_id": run_id,
-                "status": "ok",
-                "types_analysed": len(type_stats),
-                "highlighted_types": highlighted,
-            }
-        )
-
-    if processed_runs:
-        if StabilityReportConfig.TEAMS_WEBHOOK_URL:
-            await send_teams_summary_card(StabilityReportConfig.TEAMS_WEBHOOK_URL, processed_runs)
-            await send_teams_breakdown_card(StabilityReportConfig.TEAMS_WEBHOOK_URL, processed_runs)
-        elif not StabilityReportConfig.SEND_EMAIL:
-            logger.warning("TEAMS_WEBHOOK_URL not set and SEND_EMAIL=false — no notification sent")
-
-        if StabilityReportConfig.SEND_EMAIL:
-            html_report = build_combined_stability_html(processed_runs)
-            send_email_report("Hourly Nightly Failure Analysis", StabilityReportConfig.SENDER, StabilityReportConfig.RECIPIENT, html_report)
-            logger.info(f"Stability email sent to {StabilityReportConfig.RECIPIENT} for {len(processed_runs)} run(s)")
-
-    return {
-        "status": 200,
-        "total_running_auto_jobs": len(auto_run_ids),
-        "email_sent_to": (
-            StabilityReportConfig.RECIPIENT if processed_runs and StabilityReportConfig.SEND_EMAIL else None
-        ),
-        "teams_notified": bool(processed_runs and StabilityReportConfig.TEAMS_WEBHOOK_URL),
-        "processed": results_summary,
-    }
+    return await run_stability_check(query)

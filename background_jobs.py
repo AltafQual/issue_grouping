@@ -7,6 +7,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from src.consolidated_reports_analysis import run_report_generation_for_all_qairt_ids
 from src.helpers import process_tc_ids_async_bg_job, sql_connection
+from src.nightly_stability_job import run_stability_check
 
 IST = timezone(timedelta(hours=5, minutes=30))
 logger = logging.getLogger(__name__)
@@ -38,6 +39,23 @@ def run_ids_issue_grouping_processing():
         print(f"[ERROR]   {now3.strftime('%Y-%m-%d %H:%M:%S')} IST (UTC+05:30) -> {e}")
 
 
+def nightly_stability_monitor_job():
+    now = datetime.now(IST)
+    print(f"[STABILITY START]  {now.strftime('%Y-%m-%d %H:%M:%S')} IST (UTC+05:30)")
+    try:
+        result = asyncio.run(run_stability_check())
+        now2 = datetime.now(IST)
+        print(
+            f"[STABILITY SUCCESS] {now2.strftime('%Y-%m-%d %H:%M:%S')} IST (UTC+05:30) "
+            f"| jobs={result.get('total_running_auto_jobs', 0)} "
+            f"| teams={result.get('teams_notified')} "
+            f"| email={result.get('email_sent_to')}"
+        )
+    except Exception as e:
+        now3 = datetime.now(IST)
+        print(f"[STABILITY ERROR]   {now3.strftime('%Y-%m-%d %H:%M:%S')} IST (UTC+05:30) -> {e}")
+
+
 if __name__ == "__main__":
     scheduler.add_job(
         consolidated_report_processing_job,
@@ -51,6 +69,16 @@ if __name__ == "__main__":
         run_ids_issue_grouping_processing,
         "interval",
         hours=12,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=3600,
+        next_run_time=datetime.now(IST),
+    )
+    scheduler.add_job(
+        nightly_stability_monitor_job,
+        "interval",
+        hours=4,
+        id="nightly_stability_monitor",
         max_instances=1,
         coalesce=True,
         misfire_grace_time=3600,

@@ -138,10 +138,11 @@ class TypeStats:
     failure_rate: float  # FAIL / effective_total; 0.0 when effective_total == 0
     highlighted: bool  # True when failure_rate >= threshold
 
-    # soc_name → { host_name → (fail_count, pass_count) }
+    # soc_name → { host_name → (fail_count, pass_count, device_id) }
+    # device_id is populated only for SoCs whose name contains "nord" (case-insensitive).
     # Populated only for non-primary types.
     # When no host column exists, the inner key is an empty string ("").
-    host_failures: dict[str, dict[str, tuple[int, int]]] = field(default_factory=dict)
+    host_failures: dict[str, dict[str, tuple[int, int, str]]] = field(default_factory=dict)
     failure_rows: list[dict[str, Any]] = field(default_factory=list)
 
     @property
@@ -250,27 +251,41 @@ def analyze_type_failures(
         rate = failed / effective_total if effective_total > 0 else 0.0
         highlighted = rate >= threshold
 
-        # ── Step 3: soc → host → (fail, pass) (non-primary types only) ─────
-        host_failures: dict[str, dict[str, tuple[int, int]]] = {}
+        # ── Step 3: soc → host → (fail, pass, device_id) (non-primary types only) ─────
+        host_failures: dict[str, dict[str, tuple[int, int, str]]] = {}
         if not _is_primary_type(type_str):
             if "soc_name" in type_df.columns:
                 for soc_name, soc_df in type_df.groupby("soc_name"):
                     soc_str = str(soc_name)
                     soc_res = result_upper.loc[soc_df.index]
+                    is_nord = "nord" in soc_str.lower()
                     host_failures[soc_str] = {}
 
-                    if host_col:
+                    # Nord SoCs with device_id column: group by device_id so that
+                    # multiple devices on the same host each get their own entry.
+                    # key = device_id,  tuple[2] = host_name
+                    if is_nord and host_col and "device_id" in soc_df.columns:
+                        for dev_val, dev_df in soc_df.groupby("device_id"):
+                            d_res = result_upper.loc[dev_df.index]
+                            fail_c = int((d_res == "FAIL").sum())
+                            pass_c = int((d_res == "PASS").sum())
+                            if fail_c > 0 or pass_c > 0:
+                                host_name = str(dev_df[host_col].iloc[0]) if not dev_df.empty else ""
+                                host_failures[soc_str][str(dev_val)] = (fail_c, pass_c, host_name)
+                    elif host_col:
+                        # Non-Nord (or Nord without device_id): group by host.
+                        # key = host_name,  tuple[2] = "" (no device context needed)
                         for host_val, host_df in soc_df.groupby(host_col):
                             h_res = result_upper.loc[host_df.index]
                             fail_c = int((h_res == "FAIL").sum())
                             pass_c = int((h_res == "PASS").sum())
                             if fail_c > 0 or pass_c > 0:
-                                host_failures[soc_str][str(host_val)] = (fail_c, pass_c)
+                                host_failures[soc_str][str(host_val)] = (fail_c, pass_c, "")
                     else:
                         fail_c = int((soc_res == "FAIL").sum())
                         pass_c = int((soc_res == "PASS").sum())
                         if fail_c > 0 or pass_c > 0:
-                            host_failures[soc_str][""] = (fail_c, pass_c)
+                            host_failures[soc_str][""] = (fail_c, pass_c, "")
 
         # Collect raw FAIL rows for highlighted types (capped).
         fail_rows = (
@@ -298,25 +313,45 @@ def _sorted_type_stats(type_stats: dict[str, TypeStats]) -> list[TypeStats]:
     return sorted(type_stats.values(), key=lambda s: (-int(s.highlighted), -s.failure_rate))
 
 
-def _render_host_failures_cell(host_failures: dict[str, dict[str, tuple[int, int]]], top_n: int = 5) -> str:
-    """Render SoC → host → fail/pass as a 3-column flex grid.
+def _render_host_failures_cell(host_failures: dict[str, dict[str, tuple[int, int, str]]], top_n: int = 5) -> str:
+    """Render SoC → entry → fail/pass as a 3-column flex grid.
 
-    Every SoC that has any data gets a card.  Within each card the top *top_n*
-    hosts (by FAIL count descending) are shown in the format:
-        <host_name> - <red:fail>/<green:pass>   (pass omitted when 0)
+    Non-Nord SoCs:  key=host_name,  tuple[2]=""
+        → <host_name> - <red:fail>/<green:pass>
+
+    Nord SoCs:      key=device_id,  tuple[2]=host_name
+        → <host_name> - <red:fail>/<green:pass> (device_id)
+        device_id is omitted when it starts with host_name (redundant suffix).
+
+    Top *top_n* entries per SoC, ranked by FAIL count descending.
+    pass count is omitted when 0.
     """
     if not host_failures:
         return "&mdash;"
 
     cards: list[str] = []
-    for soc, hosts in sorted(host_failures.items()):
-        top_hosts = sorted(hosts.items(), key=lambda x: -x[1][0])[:top_n]
+    for soc, entries in sorted(host_failures.items()):
+        is_nord = "nord" in soc.lower()
+        top_entries = sorted(entries.items(), key=lambda x: -x[1][0])[:top_n]
         host_rows = []
-        for host, (fail_c, pass_c) in top_hosts:
-            name = host if host else "—"
+        for entry_key, (fail_c, pass_c, extra) in top_entries:
+            if is_nord:
+                # entry_key = device_id, extra = host_name
+                name = extra if extra else entry_key
+                device_id = entry_key
+                dev_part = (
+                    f' <span class="text-muted">({device_id})</span>'
+                    if device_id and not device_id.startswith(name)
+                    else ""
+                )
+            else:
+                name = entry_key if entry_key else "—"
+                dev_part = ""
             pass_part = f'/<span class="text-success">{pass_c}</span>' if pass_c > 0 else ""
             host_rows.append(
-                f'<div class="host-row">' f'{name} - <span class="text-danger">{fail_c}</span>{pass_part}' f"</div>"
+                f'<div class="host-row">'
+                f'{name} - <span class="text-danger">{fail_c}</span>{pass_part}{dev_part}'
+                f"</div>"
             )
         cards.append(f'<div class="host-card">' f'<div class="soc-label">{soc}</div>' f'{"".join(host_rows)}' f"</div>")
 
@@ -476,19 +511,32 @@ if __name__ == "__main__":
     RESULT_WEIGHTS = [0.60, 0.25, 0.10, 0.05]
     MODELS = ["mobilenet_v2", "resnet50", "bert_base", "yolov5s", "efficientnet_b0"]
 
+    # Two device IDs per Nord host to exercise the multi-device grouping path.
+    NORD_DEVICE_IDS = {
+        "hydciqlab01": ["DEV-001-a", "DEV-001-b"],
+        "hydciqlab02": ["DEV-002-a", "DEV-002-b"],
+        "hydciqlab03": ["DEV-003-a", "DEV-003-b"],
+    }
+
     def _make_df(run_id: str) -> pd.DataFrame:
         rows = []
         for test_type in TYPES:
             n = random.randint(40, 120)
             for _ in range(n):
                 soc = random.choice(SOCS)
+                host = random.choice(HOSTS[soc])
+                if "nord" in soc.lower():
+                    device_id = random.choice(NORD_DEVICE_IDS[host])
+                else:
+                    device_id = ""
                 rows.append(
                     {
                         "tc_uuid": f"{run_id}-{random.randint(10000, 99999)}",
                         "type": test_type,
                         "result": random.choices(RESULTS, RESULT_WEIGHTS)[0],
                         "soc_name": soc,
-                        "host": random.choice(HOSTS[soc]),
+                        "host": host,
+                        "device_id": device_id,
                         "model_name": random.choice(MODELS),
                         "runtime": random.choice(["htp_fp16", "cpu", "gpu_fp16"]),
                         "reason": "Error: segfault in layer conv2d" if random.random() < 0.3 else "",
@@ -514,10 +562,15 @@ if __name__ == "__main__":
                 f"fail={s.failed:>3}  pf={s.parent_fail:>2}  nr={s.not_run:>2}  "
                 f"rate={s.failure_pct:.1f}%{flag}"
             )
-            for soc, hosts in s.host_failures.items():
+            for soc, entries in s.host_failures.items():
+                is_nord = "nord" in soc.lower()
                 print(f"    {soc}")
-                for h, (fail_c, pass_c) in sorted(hosts.items(), key=lambda x: -x[1][0]):
-                    print(f"      {h} — fail={fail_c} pass={pass_c}")
+                for key, (fail_c, pass_c, extra) in sorted(entries.items(), key=lambda x: -x[1][0]):
+                    if is_nord:
+                        label = f"{extra} ({key})" if extra and not key.startswith(extra) else key
+                    else:
+                        label = key
+                    print(f"      {label} — fail={fail_c} pass={pass_c}")
 
     html = build_combined_stability_html(processed)
     out_path = "/tmp/stability_report_test.html"

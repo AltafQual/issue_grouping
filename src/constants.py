@@ -125,8 +125,7 @@ class StabilityReportConfig:
     DETAIL_ROW_CAP: int = 100  # max failure rows shown per type in the report
     REASON_MAX_CHARS: int = 300  # truncate reason column to this length
 
-    # Email (opt-in: set SEND_EMAIL=true to also send HTML email)
     SENDER: str = "mlg_user_admin@qti.qualcomm.com"
-    RECIPIENT: str = "aisw.qipl.auto.qa@qti.qualcomm.com"
+    RECIPIENT: str = "altaf@qti.qualcomm.com" #"aisw.qipl.auto.qa@qti.qualcomm.com"
     SEND_EMAIL: bool = True # os.getenv("SEND_EMAIL", "false").lower() == "true"
     TEAMS_WEBHOOK_URL: str = os.getenv("TEAMS_WEBHOOK_URL", "")
