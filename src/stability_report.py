@@ -30,7 +30,7 @@ import pandas as pd
 
 from src.constants import StabilityReportConfig
 
-_PRIMARY_TYPES: frozenset[str] = frozenset({"converter", "quantizer", "savecontext"})
+_PRIMARY_TYPES: frozenset[str] = frozenset({"converter", "quantizer", "savecontext", "bm_regression", "verifier"})
 _HOST_COLUMN_CANDIDATES: tuple[str, ...] = ("host", "host_name", "node_name", "node", "machine")
 
 
