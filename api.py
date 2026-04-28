@@ -26,6 +26,7 @@ from src.gerrit_data_fetching_helpers import get_gerrit_info_between_2_runids, g
 from src.get_prev_testplan_id import iterate_db_get_testplan
 from src.logger import AppLogger
 from src.stability_report import RunAnalysis, analyze_type_failures, build_combined_stability_html
+from src.teams_helpers import send_teams_breakdown_card, send_teams_summary_card
 
 logger = AppLogger().get_logger(__name__)
 proc = psutil.Process()
@@ -616,20 +617,23 @@ async def get_running_jobs(
         )
 
     if processed_runs:
-        html_report = build_combined_stability_html(processed_runs)
-        send_email_report(
-            "Hourly Nightly Failure Analysis",
-            StabilityReportConfig.SENDER,
-            StabilityReportConfig.RECIPIENT,
-            html_report,
-        )
-        logger.info(
-            f"Combined stability report sent to {StabilityReportConfig.RECIPIENT} for {len(processed_runs)} run(s)"
-        )
+        if StabilityReportConfig.TEAMS_WEBHOOK_URL:
+            await send_teams_summary_card(StabilityReportConfig.TEAMS_WEBHOOK_URL, processed_runs)
+            await send_teams_breakdown_card(StabilityReportConfig.TEAMS_WEBHOOK_URL, processed_runs)
+        elif not StabilityReportConfig.SEND_EMAIL:
+            logger.warning("TEAMS_WEBHOOK_URL not set and SEND_EMAIL=false — no notification sent")
+
+        if StabilityReportConfig.SEND_EMAIL:
+            html_report = build_combined_stability_html(processed_runs)
+            send_email_report("Hourly Nightly Failure Analysis", StabilityReportConfig.SENDER, StabilityReportConfig.RECIPIENT, html_report)
+            logger.info(f"Stability email sent to {StabilityReportConfig.RECIPIENT} for {len(processed_runs)} run(s)")
 
     return {
         "status": 200,
         "total_running_auto_jobs": len(auto_run_ids),
-        "email_sent_to": StabilityReportConfig.RECIPIENT if processed_runs else None,
+        "email_sent_to": (
+            StabilityReportConfig.RECIPIENT if processed_runs and StabilityReportConfig.SEND_EMAIL else None
+        ),
+        "teams_notified": bool(processed_runs and StabilityReportConfig.TEAMS_WEBHOOK_URL),
         "processed": results_summary,
     }
