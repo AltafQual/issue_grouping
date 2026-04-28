@@ -110,3 +110,21 @@ class CONSOLIDATED_REPORTS:
     prev_run_id_generation_script_path = "/prj/mlgqipl/Satyam/Scripts/get_previous_testplan_id.py"
     qa2_config_file_path = "/prj/qct/webtech_hyd7/qa2_web/config/config-prod.yaml"
     PROCESSING_JSON = "./consolidate_report_assests/processing_ids.json"
+
+
+@dataclass
+class NIGHTLY_EXECUTION:
+    DAG_API_BASE = "https://aisw-hyd.qualcomm.com/dag-api/job-service/v1/jobs/public/jobs"
+    DAG_API_DEFAULT_QUERY = 'status="RUNNING"'
+
+
+@dataclass
+class StabilityReportConfig:
+    # Failure analysis
+    FAILURE_THRESHOLD: float = 0.50  # flag test types with ≥ this failure rate
+    DETAIL_ROW_CAP: int = 100  # max failure rows shown per type in the report
+    REASON_MAX_CHARS: int = 300  # truncate reason column to this length
+
+    # Email
+    SENDER: str = "mlg_user_admin@qti.qualcomm.com"
+    RECIPIENT: str = "altaf@qti.qualcomm.com"

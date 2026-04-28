@@ -762,9 +762,7 @@ def build_html(qairt_id: str, data: dict, llm: dict, obj: dict) -> str:
         sev = (
             "<span class='badge bd'>Critical</span>"
             if cnt > 200
-            else "<span class='badge bw'>High</span>"
-            if cnt > 50
-            else "<span class='badge bi'>Medium</span>"
+            else "<span class='badge bw'>High</span>" if cnt > 50 else "<span class='badge bi'>Medium</span>"
         )
         html += f'<tr><td style="color:var(--muted)">{i}</td><td style="font-family:monospace;font-size:.83em">{escape(model)}</td><td><b>{cnt:,}</b></td><td>{sev}</td><td><div style="background:#8e44ad;height:8px;border-radius:4px;width:{bw}px;display:inline-block"></div></td></tr>'
     html += f"""</table></div>
