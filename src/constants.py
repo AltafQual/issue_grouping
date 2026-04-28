@@ -127,6 +127,6 @@ class StabilityReportConfig:
 
     # Email (opt-in: set SEND_EMAIL=true to also send HTML email)
     SENDER: str = "mlg_user_admin@qti.qualcomm.com"
-    RECIPIENT: str = "altaf@qti.qualcomm.com"
+    RECIPIENT: str = "aisw.qipl.auto.qa@qti.qualcomm.com"
     SEND_EMAIL: bool = True # os.getenv("SEND_EMAIL", "false").lower() == "true"
     TEAMS_WEBHOOK_URL: str = os.getenv("TEAMS_WEBHOOK_URL", "")
