@@ -30,15 +30,20 @@ Does NOT modify any existing file in the pipeline.
 """
 
 import argparse
+import importlib
 import json
 import os
 import re
+import sys
+import types
 from collections import OrderedDict, defaultdict
+from datetime import date
 from html import escape
 
 import joblib
 
 from src.logger import AppLogger
+from src.reports.kpi_calculator import get_cummilative_sumary
 
 logger = AppLogger().get_logger(__name__)
 
@@ -130,9 +135,6 @@ def _load_joblib(qairt_id: str):
     pickled RegressionAnalysisReport objects can be unpickled without
     running the full pipeline environment.
     """
-    import sys
-    import types
-
     # Build a minimal src package so pickle can resolve the classes
     src_pkg = types.ModuleType("src")
     src_pkg.__path__ = [os.path.join(os.path.dirname(__file__))]
@@ -146,7 +148,7 @@ def _load_joblib(qairt_id: str):
     sys.modules["src.regression_api_call"].get_two_run_ids_cluster_info = lambda *a, **kw: {}
 
     # Import the real module to get the actual classes for unpickling
-    import src.consolidated_reports_analysis as cra_real
+    cra_real = importlib.import_module("src.consolidated_reports_analysis")
 
     # Temporarily replace the module entry with a stub that exposes the real
     # classes so joblib can resolve them during unpickling
@@ -366,8 +368,6 @@ def generate_llm_summaries(data: dict, cache_path: str | None = None) -> dict:
         with open(cache_path) as f:
             return json.load(f)
 
-    from src.consolidated_reports_analysis import get_cummilative_sumary
-
     results: dict = {"executive": "", "bu": {}, "cluster_class": {}}
 
     logger.info("Generating executive LLM summary (%d errors)...", len(data["combined_errors"]))
@@ -487,9 +487,7 @@ def heat_class(val: int, max_val: int) -> str:
 
 
 def build_html(qairt_id: str, data: dict, llm: dict, obj: dict) -> str:
-    from datetime import date as _date
-
-    today = _date.today().isoformat()
+    today = date.today().isoformat()
 
     d = data  # shorthand
 

@@ -127,5 +127,5 @@ class StabilityReportConfig:
 
     SENDER: str = "mlg_user_admin@qti.qualcomm.com"
     RECIPIENT: str = "altaf@qti.qualcomm.com" #"aisw.qipl.auto.qa@qti.qualcomm.com"
-    SEND_EMAIL: bool = True # os.getenv("SEND_EMAIL", "false").lower() == "true"
+    SEND_EMAIL: bool = True  # os.getenv("SEND_EMAIL", "false").lower() == "true"
     TEAMS_WEBHOOK_URL: str = os.getenv("TEAMS_WEBHOOK_URL", "")

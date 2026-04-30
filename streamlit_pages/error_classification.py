@@ -1,18 +1,13 @@
 import asyncio
-import json
 import os
-import sys
-from typing import Dict, List
 
-import numpy as np
 import pandas as pd
 import streamlit as st
 
-from src import helpers
 from src.constants import FaissConfigurations
-
 # Import your cluster search functionality
 from src.custom_clustering import CustomEmbeddingCluster
+from src.preprocessing.normalizer import mask_numbers, preprocess_error_log, trim
 
 st.title("Error Classification")
 
@@ -70,9 +65,9 @@ if st.button("Classify"):
         st.error("Please enter at least one query to classify")
     else:
         query = query_input.strip()
-        query = helpers.preprocess_error_log(query)
-        query = helpers.mask_numbers(query)
-        query = helpers.trim(query)
+        query = preprocess_error_log(query)
+        query = mask_numbers(query)
+        query = trim(query)
 
         with st.spinner("Classifying queries..."):
             try:

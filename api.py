@@ -3,7 +3,7 @@ import json
 import threading
 import time
 from contextlib import asynccontextmanager
-from typing import Annotated, Any, Dict, List
+from typing import Annotated, Any, Dict
 
 import pandas as pd
 import psutil
@@ -12,19 +12,22 @@ from fastapi import BackgroundTasks, FastAPI, Query, Request
 from fastapi.responses import ORJSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
-from src import helpers
-from src.consolidated_reports_analysis import CombinedRegressionAnalysis, ConsolidatedReportAnalysis
+from src.clustering.splade_encoder import SPLADEEncoder
 from src.constants import CONSOLIDATED_REPORTS, NIGHTLY_EXECUTION, DataFrameKeys
 from src.custom_clustering import CustomEmbeddingCluster
+from src.data.gerrit_client import get_gerrit_info_between_2_runids, get_regression_gerrits_based_of_type
+from src.data.mysql_client import find_regressions_between_two_tests, get_error_group_id, sql_connection
 from src.failure_analyzer import FailureAnalyzer
-from src.gerrit_data_fetching_helpers import get_gerrit_info_between_2_runids, get_regression_gerrits_based_of_type
-from src.get_prev_testplan_id import iterate_db_get_testplan
 from src.logger import AppLogger
 from src.nightly_stability_job import run_stability_check
+from src.pipeline.cluster_pipeline import ClusteringPipeline, ExecutionMode
+from src.pipeline.workers import BackgroundWorkerManager, tc_id_scheduler
+from src.preprocessing.normalizer import mask_numbers, preprocess_error_log, trim
+from src.reports.consolidated_report import CombinedRegressionAnalysis, ConsolidatedReportAnalysis
+from src.utils.run_id_utils import iterate_db_get_testplan
 
 logger = AppLogger().get_logger(__name__)
 proc = psutil.Process()
-analyzer = FailureAnalyzer()
 TTL_CACHE = TTLCache(maxsize=9000, ttl=(604800 * 604800))
 LOCK = threading.Lock()
 
@@ -169,15 +172,16 @@ def consolidated_report_worker():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    asyncio.create_task(asyncio.to_thread(helpers.tc_id_scheduler))
+    _worker_manager = BackgroundWorkerManager()
+    _worker_manager.start()
+    asyncio.create_task(asyncio.to_thread(tc_id_scheduler))
     asyncio.create_task(asyncio.to_thread(consolidated_report_worker))
     yield
     try:
-        from src.splade_clustering import SPLADEEncoder
-
         SPLADEEncoder.release()
     except Exception:
         pass
+    _worker_manager.stop(timeout=10.0)
 
 
 app = FastAPI(
@@ -224,9 +228,9 @@ async def get_error_cluster_name(
     This API provides the cluster name to which the error belongs to.
     """
     # process query
-    error = helpers.preprocess_error_log(error)
-    error = helpers.mask_numbers(error)
-    error = helpers.trim(error)
+    error = preprocess_error_log(error)
+    error = mask_numbers(error)
+    error = trim(error)
 
     response_metadata = {
         "runtime": runtime,
@@ -236,7 +240,7 @@ async def get_error_cluster_name(
     if cluster_name != -1:
         response_metadata["cluster_name"] = cluster_name
         response_metadata["cluster_class"] = cluster_class
-        error_group_id = helpers.get_error_group_id(_type, runtime, cluster_name)
+        error_group_id = get_error_group_id(_type, runtime, cluster_name)
         return {"id": error_group_id, "metadata": response_metadata}
 
     dataframe = pd.DataFrame(
@@ -248,11 +252,11 @@ async def get_error_cluster_name(
             "soc_name": [""],
         }
     )
-    new_cluster = await helpers.async_sequential_process_by_type(dataframe)
+    new_cluster = await ClusteringPipeline().run(dataframe, mode=ExecutionMode.SEQUENTIAL)
     clustered_df = new_cluster[_type]
     cluster_name = clustered_df.iloc[0][DataFrameKeys.cluster_name]
     class_name = clustered_df.iloc[0][DataFrameKeys.cluster_class]
-    _id = helpers.get_error_group_id(_type, runtime, cluster_name)
+    _id = get_error_group_id(_type, runtime, cluster_name)
     response_metadata["cluster_name"] = cluster_name
     response_metadata["cluster_class"] = class_name
     return {"id": _id, "metadata": response_metadata}
@@ -261,16 +265,12 @@ async def get_error_cluster_name(
 @app.post("/api/initiate_issue_grouping/")
 async def inititate_issue_grouping(tc_id_object: InitiateIssueGrouping, background_tasks: BackgroundTasks) -> Dict:
     run_id = tc_id_object.run_id
-    data = helpers.sql_connection.fetch_result_based_on_runid(run_id)
+    data = sql_connection.fetch_result_based_on_runid(run_id)
     if data.empty:
         return {"status": f"Error: No data found for the Run ID: {run_id}"}
 
-    background_tasks.add_task(
-        helpers.async_sequential_process_by_type,
-        data,
-        update_faiss_and_sql=True,
-        run_id=run_id.strip(),
-    )
+    pipeline = ClusteringPipeline(update_vector_store=True)
+    background_tasks.add_task(pipeline.run, data, run_id=run_id.strip())
     return {"status": f"Successfully Started processing: {run_id}"}
 
 
@@ -294,9 +294,9 @@ async def get_two_run_ids_cluster_info(cluster_info_object: ClusterInfo) -> Dict
         return result
     try:
         backend_type_mapping = {}
-        results = helpers.find_regressions_between_two_tests(cluster_info_object.run_id_a, cluster_info_object.run_id_b)
+        results = find_regressions_between_two_tests(cluster_info_object.run_id_a, cluster_info_object.run_id_b)
         if not results.empty:
-            new_cluster = await helpers.async_sequential_process_by_type(results)
+            new_cluster = await ClusteringPipeline().run(results, mode=ExecutionMode.SEQUENTIAL)
             for test_type, df in new_cluster.items():
                 backend_type_mapping[test_type] = pd.unique(df["runtime"])
                 df = df.drop(
@@ -436,7 +436,7 @@ async def get_run_id_cluster_info(cluster_info_object: OneClusterInfo) -> Dict:
     try:
         # Run clustering and previous run lookup concurrently
         loop = asyncio.get_event_loop()
-        clustering_task = helpers.async_sequential_process_by_type(dataframe)
+        clustering_task = ClusteringPipeline().run(dataframe, mode=ExecutionMode.SEQUENTIAL)
         prev_run_task = loop.run_in_executor(None, iterate_db_get_testplan, cluster_info_object.run_id)
 
         clustered_response, prev_run_data = await asyncio.gather(clustering_task, prev_run_task, return_exceptions=True)

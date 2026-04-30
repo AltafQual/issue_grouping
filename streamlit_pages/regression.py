@@ -10,7 +10,7 @@ import requests
 import streamlit as st
 
 from src.constants import DataFrameKeys
-from src.helpers import get_tc_ids_from_sql
+from src.data.mysql_client import get_tc_ids_from_sql
 
 # Apply nest_asyncio to avoid asyncio loop issues
 nest_asyncio.apply()

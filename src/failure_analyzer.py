@@ -1,26 +1,31 @@
-import threading
-from typing import List, Optional
+from typing import List
 
 import numpy as np
 import pandas as pd
-import streamlit as st
 from sklearn.cluster import HDBSCAN
 
-from src import helpers
+from src.clustering.ranker import (
+    ClusterCohesionAnalyzer,
+    ClusterRanker,
+    merge_similar_clusters,
+    reassign_unclustered_logs,
+    update_labels_with_merged_clusters
+)
 from src.constants import ClusterSpecificKeys, DataFrameKeys, ErrorLogConfigurations
-from src.custom_clustering import CustomEmbeddingCluster
-from src.data_loader import ExcelLoader
+from src.data.excel_loader import ExcelLoader
+from src.data.mysql_client import get_tc_id_df
 from src.embeddings import FallbackEmbeddings
-from src.faiss_db import FaissIVFFlatIndex
-from src.logger import AppLogger
-from src.qgenie_llm_calls import (
+from src.llm.cluster_classifier import assign_cluster_class
+from src.llm.cluster_namer import generate_cluster_name_for_single_rows
+from src.llm.deduplicator import (
     detect_and_merge_near_duplicate_clusters,
     qgenie_post_processing,
     subcluster_verifier_failed
 )
-from src.splade_clustering import ClusterCohesionAnalyzer, ClusterRanker
-
-threading.Thread(target=helpers.faissdb_update_worker, daemon=True).start()
+from src.logger import AppLogger
+from src.pipeline.pregroup_pipeline import check_if_issue_alread_grouped, fuzzy_cluster_grouping, splade_pregroup
+from src.preprocessing.log_extractor import remove_empty_and_misc_rows
+from src.preprocessing.normalizer import preprocess_error_log, trim_error_logs
 
 
 class FailureAnalyzer:
@@ -36,10 +41,10 @@ class FailureAnalyzer:
         if not tc_id:
             dataframe = ExcelLoader.load(path=file_path, st_obj=st_obj)
         else:
-            dataframe = helpers.get_tc_id_df(tc_id)
+            dataframe = get_tc_id_df(tc_id)
 
         if isinstance(dataframe, pd.DataFrame):
-            st.write(f"Total number of test cases: {dataframe.shape[0]}")
+            self.logger.info(f"Total number of test cases: {dataframe.shape[0]}")
             return dataframe[~dataframe["result"].isin({"PASS", "NOT_RUN", "PARENT_NOT_RUN", "PARENT_FAIL"})]
 
     def generate_embeddings(self, texts: List[str]) -> np.ndarray:
@@ -84,18 +89,18 @@ class FailureAnalyzer:
 
         # Preprocess failure texts
         failure_texts = dataframe[failure_column].astype(str).tolist()
-        failure_texts = [helpers.preprocess_error_log(text) for text in failure_texts]
+        failure_texts = [preprocess_error_log(text) for text in failure_texts]
 
         # Apply preprocessing steps
-        failure_df = helpers.remove_empty_and_misc_rows(dataframe, failure_texts, DataFrameKeys.preprocessed_text_key)
-        failure_df = helpers.trim_error_logs(failure_df)
+        failure_df = remove_empty_and_misc_rows(dataframe, failure_texts, DataFrameKeys.preprocessed_text_key)
+        failure_df = trim_error_logs(failure_df)
         failure_df_copy = failure_df.copy()
 
         # dataframe with empty/no logs
         empty_log_df = failure_df[failure_df[DataFrameKeys.cluster_name] != ClusterSpecificKeys.non_grouped_key]
 
         failure_df = failure_df[~failure_df.index.isin(empty_log_df.index)]
-        failure_df = await helpers.check_if_issue_alread_grouped(failure_df)
+        failure_df = await check_if_issue_alread_grouped(failure_df)
         faiss_grouped = failure_df[
             (failure_df[DataFrameKeys.grouped_from_faiss] == True)
             & (failure_df[DataFrameKeys.cluster_name] != ClusterSpecificKeys.non_grouped_key)
@@ -106,7 +111,7 @@ class FailureAnalyzer:
         ].reset_index(drop=True)
         fuzzy_clustered_df = pd.DataFrame()
         if not non_clustered_df.empty:
-            non_clustered_df = await helpers.fuzzy_cluster_grouping(non_clustered_df)
+            non_clustered_df = await fuzzy_cluster_grouping(non_clustered_df)
             fuzzy_clustered_df = non_clustered_df[
                 (non_clustered_df[DataFrameKeys.cluster_name] != ClusterSpecificKeys.non_grouped_key)
                 & (
@@ -131,7 +136,7 @@ class FailureAnalyzer:
         splade_grouped_df = pd.DataFrame()
         if not non_clustered_df.empty:
             # SPLADE pre-grouping pass: catches same-root-cause errors before HDBSCAN
-            non_clustered_df = await helpers.splade_pregroup(non_clustered_df, type_=current_type)
+            non_clustered_df = await splade_pregroup(non_clustered_df, type_=current_type)
 
             # Split SPLADE-grouped rows (have names already) from still-unclustered
             splade_grouped_mask = non_clustered_df[DataFrameKeys.cluster_name] != ClusterSpecificKeys.non_grouped_key
@@ -207,10 +212,10 @@ class FailureAnalyzer:
                 {ClusterSpecificKeys.non_grouped_key, str(ClusterSpecificKeys.non_grouped_key)}
             )
             if not failure_df.loc[mask].empty:
-                cluster_names = await helpers.generate_cluster_name_for_single_rows(failure_df.loc[mask])
+                cluster_names = await generate_cluster_name_for_single_rows(failure_df.loc[mask])
                 failure_df.loc[mask, DataFrameKeys.cluster_name] = cluster_names
 
-            failure_df = await helpers.assign_cluster_class(failure_df)
+            failure_df = await assign_cluster_class(failure_df)
             failure_df = await detect_and_merge_near_duplicate_clusters(failure_df)
             failure_df = ClusterRanker().rank_dataframe(failure_df)
             failure_df = ClusterCohesionAnalyzer().analyze_dataframe(failure_df)
@@ -248,15 +253,15 @@ class FailureAnalyzer:
                 non_clustered_df.loc[:, DataFrameKeys.cluster_type_int] = self.cluster_embeddings(embeddings)
 
                 # Merge similar clusters
-                merged_groups = helpers.merge_similar_clusters(
+                merged_groups = merge_similar_clusters(
                     embeddings, list(non_clustered_df[DataFrameKeys.cluster_type_int].unique())
                 )
-                non_clustered_df = helpers.update_labels_with_merged_clusters(
+                non_clustered_df = update_labels_with_merged_clusters(
                     non_clustered_df, merged_groups, DataFrameKeys.cluster_type_int
                 )
 
                 # Reassign noise points to nearest cluster before LLM post-processing
-                non_clustered_df = helpers.reassign_unclustered_logs(non_clustered_df, threshold=0.82)
+                non_clustered_df = reassign_unclustered_logs(non_clustered_df, threshold=0.82)
 
                 # Log cluster statistics
                 cluster_counts = non_clustered_df[DataFrameKeys.cluster_type_int].value_counts()
@@ -296,26 +301,13 @@ class FailureAnalyzer:
 
         if not final_df.loc[mask].empty:
             # Process rows with semaphore
-            cluster_names = await helpers.generate_cluster_name_for_single_rows(final_df.loc[mask])
+            cluster_names = await generate_cluster_name_for_single_rows(final_df.loc[mask])
             # Update the dataframe with results
             final_df.loc[mask, DataFrameKeys.cluster_name] = cluster_names
 
-        final_df = await helpers.assign_cluster_class(final_df)
+        final_df = await assign_cluster_class(final_df)
         final_df = await detect_and_merge_near_duplicate_clusters(final_df)
         final_df = ClusterRanker().rank_dataframe(final_df)
         final_df = ClusterCohesionAnalyzer().analyze_dataframe(final_df)
         self.logger.info(f"Finished processing: {current_type}")
         return final_df
-
-    def save_results(self, data: pd.DataFrame, output_path: Optional[str] = None) -> None:
-        """Save the analysis results to a file."""
-        if output_path is None:
-            output_path = "failure_analysis_results.xlsx"
-
-        # Create a copy without the embeddings column for saving
-        save_data = data.drop(columns=["embeddings"])
-        save_data.to_excel(output_path, index=False)
-        self.logger.info(f"Results saved to {output_path}")
-
-    def save_as_faiss(self, db: "FaissIVFFlatIndex", data: pd.DataFrame, run_id=None):
-        CustomEmbeddingCluster().save_threaded(data, run_id=run_id)

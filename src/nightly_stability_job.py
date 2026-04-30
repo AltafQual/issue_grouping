@@ -20,10 +20,10 @@ import httpx
 import pandas as pd
 
 from src.constants import NIGHTLY_EXECUTION, StabilityReportConfig
-from src.email_helpers import send_email_report
 from src.logger import AppLogger
-from src.stability_report import RunAnalysis, analyze_type_failures, build_combined_stability_html
-from src.teams_helpers import send_teams_breakdown_card, send_teams_summary_card
+from src.monitoring.email_notifier import send_email_report
+from src.monitoring.hourly_report import RunAnalysis, analyze_type_failures, build_combined_stability_html
+from src.monitoring.teams_notifier import send_teams_breakdown_card, send_teams_summary_card
 
 logger = AppLogger().get_logger(__name__)
 
