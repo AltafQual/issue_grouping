@@ -129,7 +129,7 @@ async def run_stability_check(
 
         if cfg.SEND_EMAIL:
             html_report = build_combined_stability_html(processed_runs)
-            send_email_report("Nightly Stability Analysis", cfg.SENDER, cfg.RECIPIENT, html_report)
+            send_email_report("Hourly Report — AUTO", cfg.SENDER, cfg.RECIPIENT, html_report)
             logger.info(f"Stability email sent to {cfg.RECIPIENT} for {len(processed_runs)} run(s)")
 
     return {

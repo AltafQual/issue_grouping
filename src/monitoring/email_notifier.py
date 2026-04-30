@@ -27,17 +27,17 @@ __all__ = ["EmailNotifier", "send_email_report"]
 _SMTP_HOST = "smtphost.qualcomm.com"
 
 
-def send_email_report(run_id: str, sender_email: str, recipient_email: str, report: str) -> None:
+def send_email_report(subject: str, sender_email: str, recipient_email: str, report: str) -> None:
     """Send an HTML report via SMTP.
 
     Args:
-        run_id: Run ID used in the email subject.
+        subject: Email subject line.
         sender_email: Sender address.
         recipient_email: Recipient address.
         report: Rendered HTML string to send as the email body.
     """
     msg = MIMEMultipart("alternative")
-    msg["Subject"] = f"Stability Report: {run_id}"
+    msg["Subject"] = subject
     msg["From"] = sender_email
     msg["To"] = recipient_email
     msg.attach(MIMEText(report, "html"))
@@ -46,9 +46,9 @@ def send_email_report(run_id: str, sender_email: str, recipient_email: str, repo
         s.starttls()
         s.sendmail(sender_email, recipient_email, msg.as_string())
         s.quit()
-        logger.info(f"Email sent for run_id={run_id} to {recipient_email}")
+        logger.info(f"Email sent to {recipient_email}")
     except Exception as e:
-        logger.exception(f"Failed to send email for run_id={run_id}: {e}")
+        logger.exception(f"Failed to send email to {recipient_email}: {e}")
 
 
 class EmailNotifier(INotifier):
@@ -74,14 +74,11 @@ class EmailNotifier(INotifier):
         Args:
             subject: Email subject line.
             body: HTML-formatted email body.
-            **kwargs:
-                run_id (str): Run identifier for the subject line.
         """
-        run_id: str = kwargs.get("run_id", "unknown")
         send_email_report(
-            run_id=run_id,
+            subject=subject,
             sender_email=self.sender,
             recipient_email=self.recipient,
             report=body,
         )
-        logger.info(f"Email notification sent for run_id={run_id} to {self.recipient}")
+        logger.info(f"Email notification sent to {self.recipient}")

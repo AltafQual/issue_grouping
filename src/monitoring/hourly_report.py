@@ -40,7 +40,7 @@ __all__ = [
 ]
 
 _PRIMARY_TYPES: frozenset[str] = frozenset(
-    {"converter", "quantizer", "savecontext", "bm_regression", "verifier", "unit_test_host"}
+    {"converter", "quantizer", "savecontext","unit_test_host"}
 )
 _HOST_COLUMN_CANDIDATES: tuple[str, ...] = ("host", "host_name", "node_name", "node", "machine")
 
@@ -409,7 +409,7 @@ def _render_run_section(run: RunAnalysis, threshold_pct: int) -> str:
     flagged_count = len(run.flagged_types)
     flag_cls = "text-danger" if flagged_count else "text-success"
     elapsed = _elapsed_label(start_time) if start_time != "N/A" else ""
-    elapsed_part = f' <span class="text-muted">({elapsed} ago)</span>' if elapsed else ""
+    elapsed_part = f' <span class="text-muted">(started {elapsed} ago)</span>' if elapsed else ""
     meta_rows = "\n".join(
         [
             f'<tr><td class="label">Job ID</td><td>{job_id}</td></tr>',
@@ -442,7 +442,7 @@ def build_combined_stability_html(
     """
     threshold_pct = int(threshold * 100)
     run_ids_list = "".join(f"<li>{r.run_id}</li>" for r in runs)
-    run_sections = "\n".join(_render_run_section(r, threshold_pct) for r in runs)
+    run_sections = "\n".join(_render_run_section(r, threshold_pct) for r in runs if r.has_flags)
     return f"""<!DOCTYPE html>
             <html lang="en">
             <head>
@@ -476,7 +476,7 @@ class StabilityMonitor:
     Args:
         notifiers: List of :class:`~src.core.interfaces.INotifier` instances to
             call when a flagged run is detected.
-        failure_threshold: Per-type failure rate (0–1) above which a type is flagged.
+        failure_threshold: Per-type failure rate (0 - 1) above which a type is flagged.
 
     Example::
 
@@ -521,7 +521,7 @@ class StabilityMonitor:
         for notifier in self.notifiers:
             try:
                 notifier.send(
-                    subject=f"Hourly Report — AUTO",
+                    subject="Hourly Report — AUTO",
                     body=html_report,
                     runs=runs,
                 )
