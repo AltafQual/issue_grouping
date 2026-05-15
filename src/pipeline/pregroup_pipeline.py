@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -103,7 +104,7 @@ async def fuzzy_cluster_grouping(
 ) -> pd.DataFrame:
     failures_dataframe.loc[:, DataFrameKeys.error_logs_length] = failures_dataframe[
         DataFrameKeys.preprocessed_text_key
-    ].apply(len)
+    ].str.len()
 
     # Step 1: Create bin column if not already present
     if DataFrameKeys.bins not in failures_dataframe.columns:
@@ -137,16 +138,40 @@ async def fuzzy_cluster_grouping(
 
 
 @execution_timer
-async def check_if_issue_alread_grouped(df: pd.DataFrame) -> pd.DataFrame:
+async def check_if_issue_alread_grouped(
+    df: pd.DataFrame,
+    precomputed_embeddings: Optional[np.ndarray] = None,
+    precomputed_splade_vecs=None,
+) -> pd.DataFrame:
     # Identify rows that are not yet grouped
     mask = df[DataFrameKeys.cluster_name].isin([ClusterSpecificKeys.non_grouped_key, np.nan])
     ungrouped_df = df[mask]
 
     if not ungrouped_df.empty:
+        # Subset pre-computed vectors to only the ungrouped rows
+        subset_embeddings = None
+        subset_splade = None
+        if precomputed_embeddings is not None:
+            ungrouped_positions = df.index[mask].tolist()
+            # Map mask positions to the embedding array positions
+            if "_embed_pos" in df.columns:
+                positions = df.loc[mask, "_embed_pos"].tolist()
+                subset_embeddings = precomputed_embeddings[positions]
+            else:
+                subset_embeddings = precomputed_embeddings[: len(ungrouped_df)]
+        if precomputed_splade_vecs is not None:
+            if "_embed_pos" in df.columns:
+                positions = df.loc[mask, "_embed_pos"].tolist()
+                subset_splade = precomputed_splade_vecs[positions]
+            else:
+                subset_splade = precomputed_splade_vecs[: len(ungrouped_df)]
+
         # Get cluster names using FAISS — use unmasked embedding text for better similarity
         new_cluster_names, class_names, embeddings = await CustomEmbeddingCluster().batch_search(
             type_=ungrouped_df.iloc[0]["type"],  # assuming same type for batch
             queries=ungrouped_df[DataFrameKeys.preprocessed_text_key].tolist(),
+            precomputed_embeddings=subset_embeddings,
+            precomputed_splade_vecs=subset_splade,
         )
         # Update the original DataFrame
         df.loc[mask, DataFrameKeys.cluster_name] = new_cluster_names
@@ -162,7 +187,12 @@ async def check_if_issue_alread_grouped(df: pd.DataFrame) -> pd.DataFrame:
 
 
 @execution_timer
-async def splade_pregroup(df: pd.DataFrame, type_: str = None) -> pd.DataFrame:
+async def splade_pregroup(
+    df: pd.DataFrame,
+    type_: str = None,
+    precomputed_splade_vecs=None,
+    precomputed_embeddings: Optional[np.ndarray] = None,
+) -> pd.DataFrame:
     """
     SPLADE-based pre-grouping pass.
     Groups errors with high SPLADE sparse-vector similarity before HDBSCAN clustering.
@@ -173,6 +203,14 @@ async def splade_pregroup(df: pd.DataFrame, type_: str = None) -> pd.DataFrame:
       2. Searches CustomEmbeddingCluster with that centroid — if an existing cluster
          matches, assigns its name directly with no LLM call.
       3. Only calls the LLM naming API for groups that did not match the DB.
+
+    Args:
+        df: DataFrame with preprocessed error texts.
+        type_: Test-type identifier for DB lookup.
+        precomputed_splade_vecs: Optional pre-computed SPLADE sparse matrix for
+            the unclustered rows.  Skips re-encoding if provided.
+        precomputed_embeddings: Optional pre-computed dense embeddings for
+            the unclustered rows.  Skips QGenie call if provided.
 
     Returns df with cluster_name updated for discovered groups.
     """
@@ -185,6 +223,11 @@ async def splade_pregroup(df: pd.DataFrame, type_: str = None) -> pd.DataFrame:
 
     cluster_col = DataFrameKeys.cluster_name
     text_col = DataFrameKeys.preprocessed_text_key
+
+    # Ensure cluster_name column is object dtype to avoid FutureWarning when
+    # assigning string names into a column initialized with int -1.
+    if df[cluster_col].dtype != object:
+        df[cluster_col] = df[cluster_col].astype(object)
 
     mask = df[cluster_col] == ClusterSpecificKeys.non_grouped_key
     unclustered_count = mask.sum()
@@ -212,8 +255,18 @@ async def splade_pregroup(df: pd.DataFrame, type_: str = None) -> pd.DataFrame:
 
     # Run CPU-bound SPLADE inference in a thread executor so the event loop stays responsive.
     # Without this, the ~6s torch forward pass blocks all pending network I/O (QGenie, etc.).
-    loop = asyncio.get_running_loop()
-    sparse_vecs = await loop.run_in_executor(None, encoder.encode, texts)
+    if precomputed_splade_vecs is not None:
+        # precomputed_splade_vecs is already aligned with df rows (caller subsets before passing).
+        # Map work_df positions to local df positions (not global _embed_pos).
+        local_positions = [df.index.get_loc(idx) for idx in work_df.index]
+        if max(local_positions) < precomputed_splade_vecs.shape[0]:
+            sparse_vecs = precomputed_splade_vecs[local_positions]
+        else:
+            # Fallback: precomputed array matches work_df exactly (all rows unclustered)
+            sparse_vecs = precomputed_splade_vecs
+    else:
+        loop = asyncio.get_running_loop()
+        sparse_vecs = await loop.run_in_executor(None, encoder.encode, texts)
     if sparse_vecs is None:
         logger.warning(f"[SPLADEPregroup] type={type_}: encoding returned None, skipping pre-grouping")
         return df
@@ -272,8 +325,15 @@ async def splade_pregroup(df: pd.DataFrame, type_: str = None) -> pd.DataFrame:
         all_group_texts.extend([texts[pos] for pos in group_positions])
         group_text_ranges.append((range_start, len(group_positions)))
 
-    embeddings_list = await FallbackEmbeddings().aembed(all_group_texts)
-    embeddings_array = np.array(embeddings_list)
+    if precomputed_embeddings is not None:
+        # Use pre-computed embeddings indexed by group member positions
+        all_emb_positions = []
+        for group_positions in groups:
+            all_emb_positions.extend(group_positions)
+        embeddings_array = precomputed_embeddings[all_emb_positions]
+    else:
+        embeddings_list = await FallbackEmbeddings().aembed(all_group_texts)
+        embeddings_array = np.array(embeddings_list)
 
     # --- For each group: try DB lookup first, collect misses for LLM ---
     custom_cluster = CustomEmbeddingCluster()

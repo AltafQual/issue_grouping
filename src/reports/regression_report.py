@@ -43,7 +43,7 @@ __all__ = [
 _ISSUE_GROUPING_API_URL = os.getenv("ISSUE_GROUPING_API_URL", "http://hyd-lablnx904:8010")
 
 
-def get_two_run_ids_cluster_info(run_id_a: str, run_id_b: str, timeout: int = 600, force: bool = False) -> dict:
+def get_two_run_ids_cluster_info(run_id_a: str, run_id_b: str, timeout: int = 6000, force: bool = False) -> dict:
     """Call the API to get regression comparison for two run IDs.
 
     Args:
@@ -69,7 +69,7 @@ def get_two_run_ids_cluster_info(run_id_a: str, run_id_b: str, timeout: int = 60
 
 
 async def get_two_run_ids_cluster_info_async(
-    run_id_a: str, run_id_b: str, timeout: int = 600, force: bool = False
+    run_id_a: str, run_id_b: str, timeout: int = 6000, force: bool = False
 ) -> dict:
     """Async version of :func:`get_two_run_ids_cluster_info`.
 

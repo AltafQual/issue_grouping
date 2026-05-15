@@ -27,7 +27,7 @@ from typing import Optional
 
 import pandas as pd
 
-from src.constants import DataFrameKeys
+from src.constants import ClusterSpecificKeys, DataFrameKeys
 from src.core.exceptions import NormalizationError
 from src.logger import AppLogger
 from src.preprocessing.normalizer import (
@@ -37,8 +37,7 @@ from src.preprocessing.normalizer import (
     is_empty_error_log,
     is_t2t_garbage_output,
     mask_numbers,
-    preprocess_error_log,
-    t2t_garbage_output_class_assign,
+    preprocess_error_log
 )
 from src.utils.timer import execution_timer
 
@@ -389,17 +388,30 @@ def remove_empty_and_misc_rows(df: pd.DataFrame, errors: list, error_column_name
     df[error_column_name] = errors
     df_with_error_reason = df[~df[error_column_name].str.contains("limiting reason", na=False)]
     partial_error_reasons = replace_limiting_reason_with_actual_reason_concurrently(
-        df[df[error_column_name].str.contains("limiting reason", na=False)],
+        df[df[error_column_name].str.contains("limiting reason", na=False)].copy(),
         error_column_name,
     )
     partial_error_reasons.loc[:, DataFrameKeys.extracted_error_log] = partial_error_reasons[
         DataFrameKeys.preprocessed_text_key
     ]
     df = pd.concat([df_with_error_reason, partial_error_reasons], axis=0).reset_index(drop=True)
-    df.loc[:, DataFrameKeys.cluster_name] = df.apply(is_t2t_garbage_output, axis=1)
-    df.loc[:, DataFrameKeys.cluster_class] = df.apply(t2t_garbage_output_class_assign, axis=1)
-    df.loc[:, DataFrameKeys.cluster_name] = df[error_column_name].apply(is_empty_error_log)
-    df.loc[:, DataFrameKeys.preprocessed_text_key] = df[error_column_name]
-    df.loc[:, error_column_name] = df[error_column_name].apply(mask_numbers)
+
+    # Initialize cluster_name and cluster_class columns
+    df[DataFrameKeys.cluster_name] = ClusterSpecificKeys.non_grouped_key
+    df[DataFrameKeys.cluster_class] = None
+
+    # Highest priority: mark empty/no error log rows
+    df[DataFrameKeys.cluster_name] = df[error_column_name].apply(is_empty_error_log)
+
+    # For rows still unassigned (non_grouped_key), check for t2t garbage output
+    ungrouped_mask = df[DataFrameKeys.cluster_name] == ClusterSpecificKeys.non_grouped_key
+    df.loc[ungrouped_mask, DataFrameKeys.cluster_name] = df.loc[ungrouped_mask].apply(is_t2t_garbage_output, axis=1)
+
+    # Assign cluster_class for t2t rows
+    t2t_mask = df[DataFrameKeys.cluster_name] == DataFrameKeys.t2t_garbage_cluster
+    df.loc[t2t_mask, DataFrameKeys.cluster_class] = "sdk_issue"
+
+    df[DataFrameKeys.preprocessed_text_key] = df[error_column_name]
+    df[error_column_name] = df[error_column_name].apply(mask_numbers)
     df = df.reset_index(drop=True)
     return df

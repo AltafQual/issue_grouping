@@ -1,4 +1,5 @@
-from typing import List
+import asyncio
+from typing import List, Optional
 
 import numpy as np
 import pandas as pd
@@ -11,6 +12,7 @@ from src.clustering.ranker import (
     reassign_unclustered_logs,
     update_labels_with_merged_clusters
 )
+from src.clustering.splade_encoder import SPLADEEncoder
 from src.constants import ClusterSpecificKeys, DataFrameKeys, ErrorLogConfigurations
 from src.data.excel_loader import ExcelLoader
 from src.data.mysql_client import get_tc_id_df
@@ -47,14 +49,6 @@ class FailureAnalyzer:
             self.logger.info(f"Total number of test cases: {dataframe.shape[0]}")
             return dataframe[~dataframe["result"].isin({"PASS", "NOT_RUN", "PARENT_NOT_RUN", "PARENT_FAIL"})]
 
-    def generate_embeddings(self, texts: List[str]) -> np.ndarray:
-        """Generate embeddings for the provided texts."""
-        self.logger.info(f"Generating embeddings for {len(texts)} texts")
-        embeddings = self.embedding_model.embed(texts)
-        if isinstance(embeddings, np.ndarray):
-            return list(embeddings)
-        return list(np.array(embeddings))
-
     def cluster_embeddings(self, embeddings: np.ndarray) -> np.ndarray:
         """Cluster the embeddings using HDBSCAN."""
         self.logger.info("Clustering embeddings")
@@ -71,7 +65,13 @@ class FailureAnalyzer:
     async def analyze(
         self, file_path: str = None, st_object=None, dataframe=None, failure_column: str = "reason"
     ) -> pd.DataFrame:
-        """Perform the complete analysis workflow."""
+        """Perform the complete analysis workflow.
+
+        Computes embeddings and SPLADE vectors ONCE at the top, then passes
+        pre-computed arrays to all downstream steps.  This eliminates the
+        3-5x redundant embedding and 2x redundant SPLADE calls that previously
+        made the pipeline take over an hour.
+        """
         if file_path:
             dataframe = self.load_data(file_path)
         elif st_object:
@@ -94,18 +94,48 @@ class FailureAnalyzer:
         # Apply preprocessing steps
         failure_df = remove_empty_and_misc_rows(dataframe, failure_texts, DataFrameKeys.preprocessed_text_key)
         failure_df = trim_error_logs(failure_df)
-        failure_df_copy = failure_df.copy()
 
-        # dataframe with empty/no logs
+        # ====================================================================
+        # COMPUTE EMBEDDINGS + SPLADE ONCE — pass everywhere below
+        # ====================================================================
+        all_texts = failure_df[DataFrameKeys.preprocessed_text_key].astype(str).tolist()
+        failure_df["_embed_pos"] = range(len(failure_df))
+
+        # 1. Embed ALL texts ONCE
+        self.logger.info(f"[OneShot] Computing embeddings for {len(all_texts)} texts")
+        all_embeddings = np.array(await self.embedding_model.aembed(all_texts))
+        failure_df[DataFrameKeys.embeddings_key] = pd.Series(all_embeddings.tolist(), index=failure_df.index)
+
+        # 2. SPLADE encode ALL texts ONCE
+        encoder = SPLADEEncoder()
+        all_splade_vecs = None
+        if encoder.is_available:
+            self.logger.info(f"[OneShot] Computing SPLADE vectors for {len(all_texts)} texts")
+            loop = asyncio.get_running_loop()
+            all_splade_vecs = await loop.run_in_executor(None, encoder.encode, all_texts)
+
+        self.logger.info(f"[OneShot] Embeddings and SPLADE computed for {len(all_texts)} texts")
+
+        # ====================================================================
+        # PIPELINE STEPS — use pre-computed vectors, no re-computation
+        # ====================================================================
+
+        # Separate empty/no-log rows (already assigned a cluster name by preprocessing)
         empty_log_df = failure_df[failure_df[DataFrameKeys.cluster_name] != ClusterSpecificKeys.non_grouped_key]
-
         failure_df = failure_df[~failure_df.index.isin(empty_log_df.index)]
-        failure_df = await check_if_issue_alread_grouped(failure_df)
+
+        # Step 1: Check if errors already exist in vector DB
+        failure_df = await check_if_issue_alread_grouped(
+            failure_df,
+            precomputed_embeddings=all_embeddings,
+            precomputed_splade_vecs=all_splade_vecs,
+        )
         faiss_grouped = failure_df[
             (failure_df[DataFrameKeys.grouped_from_faiss] == True)
             & (failure_df[DataFrameKeys.cluster_name] != ClusterSpecificKeys.non_grouped_key)
         ]
 
+        # Step 2: Fuzzy pre-grouping for remaining unclustered
         non_clustered_df = failure_df[
             failure_df[DataFrameKeys.cluster_name] == ClusterSpecificKeys.non_grouped_key
         ].reset_index(drop=True)
@@ -121,24 +151,33 @@ class FailureAnalyzer:
                     & (non_clustered_df[DataFrameKeys.grouped_from_faiss] != True)
                 )
             ]
-
+            # Embeddings already in DataFrame from one-shot computation — no generate_embeddings() needed
             if not fuzzy_clustered_df.empty:
-                fuzzy_clustered_df[DataFrameKeys.embeddings_key] = pd.Series(
-                    self.generate_embeddings(fuzzy_clustered_df[DataFrameKeys.preprocessed_text_key].tolist()),
-                    index=fuzzy_clustered_df.index,
-                )
-
                 non_clustered_df = non_clustered_df[
                     (~non_clustered_df.index.isin(fuzzy_clustered_df.index))
                     & (non_clustered_df[DataFrameKeys.cluster_name] == ClusterSpecificKeys.non_grouped_key)
                 ]
 
+        # Step 3: SPLADE pre-grouping with pre-computed vectors
         splade_grouped_df = pd.DataFrame()
         if not non_clustered_df.empty:
-            # SPLADE pre-grouping pass: catches same-root-cause errors before HDBSCAN
-            non_clustered_df = await splade_pregroup(non_clustered_df, type_=current_type)
+            # Get subset of pre-computed vectors for unclustered rows
+            if "_embed_pos" in non_clustered_df.columns:
+                positions = non_clustered_df["_embed_pos"].tolist()
+                subset_splade = all_splade_vecs[positions] if all_splade_vecs is not None else None
+                subset_embeddings = all_embeddings[positions]
+            else:
+                subset_splade = None
+                subset_embeddings = None
 
-            # Split SPLADE-grouped rows (have names already) from still-unclustered
+            non_clustered_df = await splade_pregroup(
+                non_clustered_df,
+                type_=current_type,
+                precomputed_splade_vecs=subset_splade,
+                precomputed_embeddings=subset_embeddings,
+            )
+
+            # Split SPLADE-grouped rows from still-unclustered
             splade_grouped_mask = non_clustered_df[DataFrameKeys.cluster_name] != ClusterSpecificKeys.non_grouped_key
             splade_grouped_df = non_clustered_df[splade_grouped_mask].copy()
             non_clustered_df = non_clustered_df[~splade_grouped_mask].reset_index(drop=True)
@@ -148,20 +187,15 @@ class FailureAnalyzer:
                 f"{len(splade_grouped_df)} rows pre-grouped by SPLADE, "
                 f"{len(non_clustered_df)} rows remain for HDBSCAN"
             )
-
-            # Generate embeddings for SPLADE-grouped rows (needed for FAISS DB persistence)
-            if not splade_grouped_df.empty:
-                self.logger.info(
-                    f"[SPLADESplit] type={current_type}: generating embeddings for "
-                    f"{len(splade_grouped_df)} SPLADE-grouped rows"
-                )
-                splade_embs = self.generate_embeddings(splade_grouped_df[DataFrameKeys.preprocessed_text_key].tolist())
-                splade_grouped_df.loc[:, DataFrameKeys.embeddings_key] = pd.Series(
-                    splade_embs, index=splade_grouped_df.index
-                )
+            # Embeddings already in DataFrame — no generate_embeddings() needed
 
         self.logger.info(
-            f"\nType: {current_type} \ntotal errors: {failure_df_copy.shape[0]}, \nEmpty logs grouped: {empty_log_df.shape[0]}, \nFuzzy grouped: {fuzzy_clustered_df.shape[0]}, \nFaiss Grouped: {faiss_grouped.shape[0]}, \nNot grouped: {non_clustered_df.shape[0]} \n Splade Grouped: {splade_grouped_df.shape[0]}"
+            f"\nType: {current_type} \ntotal errors: {len(all_texts)}, "
+            f"\nEmpty logs grouped: {empty_log_df.shape[0]}, "
+            f"\nFuzzy grouped: {fuzzy_clustered_df.shape[0]}, "
+            f"\nFaiss Grouped: {faiss_grouped.shape[0]}, "
+            f"\nNot grouped: {non_clustered_df.shape[0]} "
+            f"\nSplade Grouped: {splade_grouped_df.shape[0]}"
         )
         failure_df = pd.concat(
             [empty_log_df, fuzzy_clustered_df, splade_grouped_df, non_clustered_df, faiss_grouped], axis=0
@@ -178,12 +212,7 @@ class FailureAnalyzer:
                     failure_df[DataFrameKeys.cluster_name] == ClusterSpecificKeys.non_grouped_key
                 ]
                 if not non_clustered_df.empty:
-                    embeddings = self.generate_embeddings(
-                        non_clustered_df[DataFrameKeys.preprocessed_text_key].tolist()
-                    )
-                    non_clustered_df.loc[:, DataFrameKeys.embeddings_key] = pd.Series(
-                        embeddings, index=non_clustered_df.index
-                    )
+                    # Embeddings already in DataFrame
                     non_clustered_df = await qgenie_post_processing(non_clustered_df)
                 else:
                     non_clustered_df = None
@@ -219,6 +248,7 @@ class FailureAnalyzer:
             failure_df = await detect_and_merge_near_duplicate_clusters(failure_df)
             failure_df = ClusterRanker().rank_dataframe(failure_df)
             failure_df = ClusterCohesionAnalyzer().analyze_dataframe(failure_df)
+            failure_df.drop(columns=["_embed_pos"], inplace=True, errors="ignore")
             self.logger.info(f"Finished processing: {current_type}")
             return failure_df
 
@@ -235,16 +265,12 @@ class FailureAnalyzer:
         )
 
         if not non_clustered_df.empty:
-
-            embeddings = (
-                self.generate_embeddings(non_clustered_df[DataFrameKeys.preprocessed_text_key].tolist())
-                if not non_clustered_df.empty
-                else []
-            )
-            if embeddings:
-                non_clustered_df.loc[:, DataFrameKeys.embeddings_key] = pd.Series(
-                    embeddings, index=non_clustered_df.index
-                )
+            # Extract embeddings from DataFrame (already computed in one-shot)
+            embeddings = non_clustered_df[DataFrameKeys.embeddings_key].tolist()
+            # Filter out any NaN values and convert to proper array
+            valid_embeddings = [e for e in embeddings if isinstance(e, (list, np.ndarray))]
+            if valid_embeddings:
+                embeddings = valid_embeddings
 
             # Process non-clustered data
             if not non_clustered_df.empty and non_clustered_df.shape[0] > 10:
@@ -309,5 +335,6 @@ class FailureAnalyzer:
         final_df = await detect_and_merge_near_duplicate_clusters(final_df)
         final_df = ClusterRanker().rank_dataframe(final_df)
         final_df = ClusterCohesionAnalyzer().analyze_dataframe(final_df)
+        final_df.drop(columns=["_embed_pos"], inplace=True, errors="ignore")
         self.logger.info(f"Finished processing: {current_type}")
         return final_df

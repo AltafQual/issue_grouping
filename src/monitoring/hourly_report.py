@@ -39,9 +39,7 @@ __all__ = [
     "build_combined_stability_html",
 ]
 
-_PRIMARY_TYPES: frozenset[str] = frozenset(
-    {"converter", "quantizer", "savecontext","unit_test_host"}
-)
+_PRIMARY_TYPES: frozenset[str] = frozenset({"converter", "quantizer", "savecontext", "unit_test_host"})
 _HOST_COLUMN_CANDIDATES: tuple[str, ...] = ("host", "host_name", "node_name", "node", "machine")
 
 

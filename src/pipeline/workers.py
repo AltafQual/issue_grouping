@@ -59,6 +59,9 @@ __all__ = [
 # source of truth.
 faiss_update_queue: Queue = Queue()
 
+# Sentinel object to signal worker threads to exit.
+_STOP_SENTINEL = object()
+
 # Module-level scheduler and parquet file path used by tc_id_scheduler /
 # process_tc_ids_async_bg_job.
 scheduler = BackgroundScheduler()
@@ -83,6 +86,10 @@ def _faissdb_update_worker() -> None:
             task = faiss_update_queue.get(timeout=5)
         except queue.Empty:
             continue
+
+        if task is _STOP_SENTINEL:
+            faiss_update_queue.task_done()
+            break
 
         clustered_df = run_id = None
         try:
@@ -152,25 +159,20 @@ class BackgroundWorkerManager:
     def stop(self, timeout: float = 10.0) -> None:
         """Signal all worker queues to drain and wait for threads to exit.
 
-        Joins each thread with the given *timeout*.  Threads are daemons so
-        they will be killed when the process exits regardless, but calling
-        ``stop()`` gives in-flight tasks a chance to complete cleanly.
+        Sends a stop sentinel to each worker and joins each thread with the
+        given *timeout*.
 
         Args:
             timeout: Maximum seconds to wait per thread.
         """
-        logger.info("BackgroundWorkerManager stopping — draining queues …")
-        try:
-            faiss_update_queue.join()
-        except Exception as e:
-            logger.warning(f"Error while joining faiss_update_queue: {e}")
+        # Send stop sentinel so the worker breaks out of its loop
+        faiss_update_queue.put(_STOP_SENTINEL)
 
         for thread in self._threads:
             thread.join(timeout=timeout)
-            if thread.is_alive():
-                logger.warning(f"Worker thread '{thread.name}' did not finish within {timeout}s")
 
-        logger.info("BackgroundWorkerManager stopped")
+        self._threads.clear()
+        self._started = False
 
 
 # ---------------------------------------------------------------------------

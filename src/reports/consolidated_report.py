@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import os
 import re
-from collections import defaultdict
 from collections.abc import Mapping
 from copy import deepcopy
 from datetime import date
@@ -34,7 +33,7 @@ from src.reports.kpi_calculator import (
     KPICalculator,
     OrderedDefaultDict,
     generate_executive_summary,
-    get_cummilative_sumary,
+    get_cummilative_sumary
 )
 from src.reports.regression_report import RegressionAnalysisReport, get_two_run_ids_cluster_info
 from src.utils.run_id_utils import iterate_db_get_testplan

@@ -252,7 +252,7 @@ async def get_error_cluster_name(
             "soc_name": [""],
         }
     )
-    new_cluster = await ClusteringPipeline().run(dataframe, mode=ExecutionMode.SEQUENTIAL)
+    new_cluster = await ClusteringPipeline().run(dataframe, mode=ExecutionMode.CONCURRENT)
     clustered_df = new_cluster[_type]
     cluster_name = clustered_df.iloc[0][DataFrameKeys.cluster_name]
     class_name = clustered_df.iloc[0][DataFrameKeys.cluster_class]
@@ -265,7 +265,7 @@ async def get_error_cluster_name(
 @app.post("/api/initiate_issue_grouping/")
 async def inititate_issue_grouping(tc_id_object: InitiateIssueGrouping, background_tasks: BackgroundTasks) -> Dict:
     run_id = tc_id_object.run_id
-    data = sql_connection.fetch_result_based_on_runid(run_id)
+    data = await asyncio.get_running_loop().run_in_executor(None, sql_connection.fetch_result_based_on_runid, run_id)
     if data.empty:
         return {"status": f"Error: No data found for the Run ID: {run_id}"}
 
@@ -294,9 +294,11 @@ async def get_two_run_ids_cluster_info(cluster_info_object: ClusterInfo) -> Dict
         return result
     try:
         backend_type_mapping = {}
-        results = find_regressions_between_two_tests(cluster_info_object.run_id_a, cluster_info_object.run_id_b)
+        results = await asyncio.get_running_loop().run_in_executor(
+            None, find_regressions_between_two_tests, cluster_info_object.run_id_a, cluster_info_object.run_id_b
+        )
         if not results.empty:
-            new_cluster = await ClusteringPipeline().run(results, mode=ExecutionMode.SEQUENTIAL)
+            new_cluster = await ClusteringPipeline().run(results, mode=ExecutionMode.CONCURRENT)
             for test_type, df in new_cluster.items():
                 backend_type_mapping[test_type] = pd.unique(df["runtime"])
                 df = df.drop(
@@ -436,7 +438,7 @@ async def get_run_id_cluster_info(cluster_info_object: OneClusterInfo) -> Dict:
     try:
         # Run clustering and previous run lookup concurrently
         loop = asyncio.get_event_loop()
-        clustering_task = ClusteringPipeline().run(dataframe, mode=ExecutionMode.SEQUENTIAL)
+        clustering_task = ClusteringPipeline().run(dataframe, mode=ExecutionMode.CONCURRENT)
         prev_run_task = loop.run_in_executor(None, iterate_db_get_testplan, cluster_info_object.run_id)
 
         clustered_response, prev_run_data = await asyncio.gather(clustering_task, prev_run_task, return_exceptions=True)

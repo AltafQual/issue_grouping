@@ -13,7 +13,7 @@ from src.core.exceptions import (
     LLMError,
     NormalizationError,
     PipelineError,
-    VectorStoreError,
+    VectorStoreError
 )
 from src.core.interfaces import (
     IClusterSearcher,
@@ -22,7 +22,7 @@ from src.core.interfaces import (
     IMetadataStore,
     INormalizer,
     INotifier,
-    IVectorStore,
+    IVectorStore
 )
 
 __all__ = [

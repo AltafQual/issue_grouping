@@ -20,7 +20,7 @@ __all__ = ["EmbeddingProvider"]
 class EmbeddingProvider(abc.ABC):
     """Abstract interface for generating dense vector embeddings.
 
-    All embedding backends — QGenie API, local BGE-M3, etc. — must implement
+    All embedding backends (e.g. QGenie API) must implement
     this interface.  Consumers depend on :class:`EmbeddingProvider` rather
     than any specific implementation, enabling easy swapping of backends.
 

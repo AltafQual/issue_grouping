@@ -18,7 +18,6 @@ NumPy / sklearn.
 
 from __future__ import annotations
 
-import time
 from typing import List, Optional, Tuple
 
 import numpy as np
@@ -38,7 +37,6 @@ __all__ = ["ClusterSearcher"]
 
 _DEFAULT_THRESHOLD = 0.88
 _LOAD_RETRIES = 3
-_RETRY_DELAY = 5  # seconds
 
 
 class ClusterSearcher(IClusterSearcher):
@@ -171,6 +169,7 @@ class ClusterSearcher(IClusterSearcher):
         queries: List[str],
         embeddings: np.ndarray,
         similarity_threshold: float = _DEFAULT_THRESHOLD,
+        precomputed_query_splade: Optional["scipy.sparse.csr_matrix"] = None,
     ) -> Tuple[List[str | int], List[str | float], List[float], np.ndarray]:
         """Batch search for multiple queries against *cluster_type*.
 
@@ -179,6 +178,8 @@ class ClusterSearcher(IClusterSearcher):
             queries: List of original query texts (for SPLADE scoring).
             embeddings: Pre-normalised embeddings, shape ``[N, dim]``.
             similarity_threshold: Minimum score to count as a match.
+            precomputed_query_splade: Optional pre-computed SPLADE vectors.
+                Skips re-encoding queries if provided.
 
         Returns:
             4-tuple:
@@ -208,6 +209,7 @@ class ClusterSearcher(IClusterSearcher):
                 centroids=centroids,
                 cluster_names=cluster_names,
                 threshold=similarity_threshold,
+                precomputed_query_splade=precomputed_query_splade,
             )
         except Exception as exc:
             logger.warning(f"[Searcher] Hybrid batch search failed ({exc}); falling back to cosine")
@@ -252,8 +254,6 @@ class ClusterSearcher(IClusterSearcher):
                     return metadata, centroids
             except (VectorStoreError, Exception) as exc:
                 logger.error(f"[Searcher] Load attempt {attempt + 1} failed for type={cluster_type}: {exc}")
-            if attempt < _LOAD_RETRIES - 1:
-                time.sleep(_RETRY_DELAY)
 
         logger.error(f"[Searcher] Permanently failed to load index for type={cluster_type}")
         return None, None

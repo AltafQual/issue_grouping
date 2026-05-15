@@ -135,8 +135,6 @@ class ClusterNamer:
                 continue
             cluster_df = df[df[DataFrameKeys.cluster_type_int] == cid]
             results[int(cid)] = await self.analyze_and_name_cluster(cluster_df)
-            if len(unique_ids) > 5:
-                await asyncio.sleep(5)
 
         return results
 
@@ -185,7 +183,7 @@ async def generate_cluster_name_for_single_rows(df_subset):
         result = await generate_cluster_name(row)
         return result["cluster_name"]
 
-    semaphore = asyncio.Semaphore(3)
+    semaphore = asyncio.Semaphore(10)
     results = []
 
     async def process_with_semaphore(row):

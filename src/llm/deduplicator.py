@@ -33,7 +33,7 @@ from src.llm.client import (
     NearDuplicateResultList,
     QgenieModels,
     ReclusterResult,
-    SubClusterVerifierFailed,
+    SubClusterVerifierFailed
 )
 from src.logger import AppLogger
 from src.utils.timer import execution_timer
@@ -435,17 +435,16 @@ async def _async_merge_clusters(
 
 @execution_timer
 async def _get_clusters_name_and_misclassified_errors(df: pd.DataFrame) -> dict:
-    results = {}
-    unique_cluster_ids = df[DataFrameKeys.cluster_type_int].unique()
-    for cluster_id in unique_cluster_ids:
-        if cluster_id == ClusterSpecificKeys.non_grouped_key:
-            continue
+    unique_cluster_ids = [
+        cid for cid in df[DataFrameKeys.cluster_type_int].unique() if cid != ClusterSpecificKeys.non_grouped_key
+    ]
+
+    async def _process(cluster_id):
         cluster_df = df[df[DataFrameKeys.cluster_type_int] == cluster_id]
-        result = await _analyze_cluster(cluster_df)
-        results[int(cluster_id)] = result
-        if len(unique_cluster_ids) > 5:
-            await asyncio.sleep(5)
-    return results
+        return int(cluster_id), await _analyze_cluster(cluster_df)
+
+    pairs = await asyncio.gather(*[_process(cid) for cid in unique_cluster_ids])
+    return dict(pairs)
 
 
 def _get_duplicate_clusters(results: dict) -> dict:
@@ -471,8 +470,6 @@ async def _merge_duplicate_clusters(
             df.loc[outlier_indices, DataFrameKeys.cluster_type_int] = ClusterSpecificKeys.non_grouped_key
             if next_cluster_id in cluster_results:
                 del cluster_results[next_cluster_id]
-            if len(duplicate_clusters) > 3:
-                await asyncio.sleep(5)
     return df, cluster_results
 
 

@@ -22,7 +22,7 @@ from src.data.gerrit_client import (
     get_regression_gerrits_based_of_type,
     get_runs_between_time_limits,
     parse_candidate_datetime,
-    parse_embedded_datetime,
+    parse_embedded_datetime
 )
 from src.data.mysql_client import ConnectToMySql
 

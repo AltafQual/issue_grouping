@@ -131,6 +131,7 @@ class HybridSPLADEMatcher:
         centroids: np.ndarray,
         cluster_names: List[str],
         threshold: float,
+        precomputed_query_splade: Optional[scipy.sparse.csr_matrix] = None,
     ) -> Tuple[List[int], List[float]]:
         """Find the best matching cluster for multiple queries at once.
 
@@ -141,6 +142,8 @@ class HybridSPLADEMatcher:
             centroids: Centroid matrix, shape ``[C, dim]``.
             cluster_names: Ordered list of cluster name strings.
             threshold: Minimum score to count as a match.
+            precomputed_query_splade: Optional pre-computed SPLADE vectors for
+                queries, shape ``(N, vocab_size)``.  Skips re-encoding if provided.
 
         Returns:
             ``(best_indices, best_scores)`` lists of length ``N``.
@@ -152,7 +155,7 @@ class HybridSPLADEMatcher:
 
         enc = self._encoder()
         if enc is not None:
-            query_vecs = enc.encode(queries)
+            query_vecs = precomputed_query_splade if precomputed_query_splade is not None else enc.encode(queries)
             cluster_mat = self._cluster_matrix(type_, cluster_names, enc)
             if query_vecs is not None and cluster_mat is not None:
                 raw_splade = (query_vecs @ cluster_mat.T).toarray()  # (N, C)

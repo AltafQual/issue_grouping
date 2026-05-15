@@ -18,7 +18,7 @@ from src.reports.consolidated_report import (
     CombinedRegressionAnalysis,
     ConsolidatedReportAnalysis,
     run_report_generation_for_all_qairt_ids,
-    should_process_id,
+    should_process_id
 )
 from src.reports.enhanced_report import EnhancedReport
 from src.reports.html_renderer import REPORT_CSS, HTMLRenderer

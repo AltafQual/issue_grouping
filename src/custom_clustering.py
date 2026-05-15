@@ -16,6 +16,7 @@ have not yet been updated.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
@@ -76,7 +77,7 @@ class CustomEmbeddingCluster:
                 used to discover types.
             run_id: Run identifier recorded in ``processed_runids.json``.
         """
-        _EMA_DECAY = 0.9
+        _EMA_DECAY = 0.9  # exponentially moving average
         exclude_labels = {
             str(ClusterSpecificKeys.non_grouped_key),
             ClusterSpecificKeys.non_grouped_key,
@@ -191,14 +192,36 @@ class CustomEmbeddingCluster:
         type_: str,
         queries: Union[str, List[str]],
         similarity_threshold: float = 0.88,
+        precomputed_embeddings: Optional[np.ndarray] = None,
+        precomputed_splade_vecs=None,
     ) -> Tuple[List[str], List[str], np.ndarray]:
-        """Async batch search — delegates to :class:`ClusterSearcher`."""
+        """Async batch search — delegates to :class:`ClusterSearcher`.
+
+        Args:
+            type_: Test-type identifier.
+            queries: Query text(s).
+            similarity_threshold: Minimum cosine score to count as a match.
+            precomputed_embeddings: Optional pre-computed embedding array.
+                Skips QGenie embedding call if provided.
+            precomputed_splade_vecs: Optional pre-computed SPLADE sparse matrix.
+                Skips SPLADE encoding if provided.
+        """
         if isinstance(queries, str):
             queries = [queries]
-        embeddings = await FallbackEmbeddings().aembed(queries)
-        embeddings = self._vs.normalize(np.array(embeddings))
-        names, classes, scores, embs = self._searcher.batch_search_full(
-            type_, queries, embeddings, similarity_threshold
+        if precomputed_embeddings is not None:
+            embeddings = self._vs.normalize(precomputed_embeddings)
+        else:
+            embeddings = await FallbackEmbeddings().aembed(queries)
+            embeddings = self._vs.normalize(np.array(embeddings))
+        names, classes, scores, embs = await asyncio.get_running_loop().run_in_executor(
+            None,
+            lambda: self._searcher.batch_search_full(
+                type_,
+                queries,
+                embeddings,
+                similarity_threshold,
+                precomputed_query_splade=precomputed_splade_vecs,
+            ),
         )
         return names, classes, embs
 

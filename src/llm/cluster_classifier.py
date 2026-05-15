@@ -225,7 +225,7 @@ async def assign_cluster_class(df: pd.DataFrame) -> pd.DataFrame:
             ):
                 unique_clusters.append(c)
         logger.info(f"Found {len(unique_clusters)} clusters that need classification")
-        semaphore = asyncio.Semaphore(6)
+        semaphore = asyncio.Semaphore(15)
 
         async def classify_cluster(cluster_name):
             async with semaphore:

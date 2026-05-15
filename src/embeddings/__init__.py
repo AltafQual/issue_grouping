@@ -3,8 +3,7 @@
 Modules
 -------
 base              — :class:`EmbeddingProvider` abstract base class.
-qgenie_provider   — QGenie-backed embeddings with fallback to local BGE-M3.
-bge_provider      — Standalone local BGE-M3 embedding model.
+qgenie_provider   — QGenie-backed embeddings (fail-fast, no local fallback).
 
 Typical usage::
 
@@ -21,12 +20,10 @@ and ``src.logger``.  It must **not** import from ``src.clustering``,
 """
 
 from src.embeddings.base import EmbeddingProvider
-from src.embeddings.bge_provider import BGEM3Embeddings
 from src.embeddings.qgenie_provider import FallbackEmbeddings, QGenieBGEM3Embedding
 
 __all__ = [
     "EmbeddingProvider",
-    "BGEM3Embeddings",
     "QGenieBGEM3Embedding",
     "FallbackEmbeddings",
 ]

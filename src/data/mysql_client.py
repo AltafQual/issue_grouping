@@ -21,13 +21,13 @@ from __future__ import annotations
 import hashlib
 import os
 import re
-import time
 from contextlib import contextmanager
 from datetime import datetime
 from typing import Generator, Optional
 
 import mysql.connector as msqlconnector
 import pandas as pd
+from mysql.connector.pooling import MySQLConnectionPool
 
 from src.constants import DataFrameKeys
 from src.core.exceptions import DatabaseError
@@ -56,9 +56,9 @@ class ConnectToMySql(IDataLoader):
     the codebase never constructs raw SQL strings or manages connections
     directly.
 
-    All connections are opened on demand via :meth:`connection_context` and
-    closed immediately after each operation — no persistent connection pool is
-    maintained, which avoids stale-connection issues in long-running processes.
+    Connections are managed via a class-level :class:`MySQLConnectionPool`
+    (pool size 5).  :meth:`connection_context` leases a connection from the
+    pool and returns it on exit.
 
     Args:
         user: MySQL username.  Defaults to the shared read-write account.
@@ -71,6 +71,8 @@ class ConnectToMySql(IDataLoader):
         >>> df = client.fetch_result_based_on_runid("QNN-v2.46.0.260319_nightly")
     """
 
+    _pool: Optional[MySQLConnectionPool] = None
+
     def __init__(
         self,
         user: str = "mlg_rw",
@@ -82,6 +84,7 @@ class ConnectToMySql(IDataLoader):
         self.secret = secret
         self.host = host
         self.db = db
+        self._ensure_pool()
 
     # ------------------------------------------------------------------
     # IDataLoader contract
@@ -109,36 +112,49 @@ class ConnectToMySql(IDataLoader):
     # Connection management
     # ------------------------------------------------------------------
 
-    def connect(self):
-        """Open a new MySQL connection.
-
-        Returns:
-            A ``mysql.connector`` connection object.
-
-        Raises:
-            DatabaseError: On authentication or connection failure.
-        """
+    def _ensure_pool(self) -> None:
+        """Initialize the class-level connection pool (singleton, thread-safe)."""
+        if ConnectToMySql._pool is not None:
+            return
         try:
-            return msqlconnector.connect(
+            ConnectToMySql._pool = MySQLConnectionPool(
+                pool_name="issue_grouping_pool",
+                pool_size=5,
+                pool_reset_session=True,
                 user=self.user,
                 password=self.secret,
                 host=self.host,
                 database=self.db,
                 use_pure=True,
             )
+            logger.info("MySQL connection pool created (size=5).")
         except msqlconnector.Error as err:
             if err.errno == msqlconnector.errorcode.ER_ACCESS_DENIED_ERROR:
                 raise DatabaseError("Authentication failed: check username and password", cause=err)
             if err.errno == msqlconnector.errorcode.ER_BAD_DB_ERROR:
                 raise DatabaseError(f"Database '{self.db}' does not exist", cause=err)
-            raise DatabaseError(f"MySQL connection error: {err}", cause=err)
+            raise DatabaseError(f"MySQL pool creation error: {err}", cause=err)
+
+    def connect(self):
+        """Get a connection from the pool.
+
+        Returns:
+            A ``mysql.connector`` connection object from the pool.
+
+        Raises:
+            DatabaseError: On pool exhaustion or connection failure.
+        """
+        try:
+            return ConnectToMySql._pool.get_connection()
+        except msqlconnector.Error as err:
+            raise DatabaseError(f"Failed to get connection from pool: {err}", cause=err)
 
     @contextmanager
     def connection_context(self) -> Generator:
-        """Context manager that opens a connection and ensures it is closed.
+        """Context manager that leases a connection from the pool and returns it.
 
         Yields:
-            An active ``mysql.connector`` connection.
+            An active ``mysql.connector`` pooled connection.
 
         Example:
             >>> with client.connection_context() as cnx:
@@ -202,7 +218,11 @@ class ConnectToMySql(IDataLoader):
                 frames = []
                 for table in tables:
                     query = f"SELECT DISTINCT(testplan_id) FROM {table} " f"{filter_clause} ORDER BY testplan_id DESC"
-                    frames.append(pd.read_sql(query, cnx))
+                    try:
+                        frames.append(pd.read_sql(query, cnx))
+                    except Exception as table_exc:
+                        logger.warning("Skipping table %s: %s", table, table_exc)
+                        continue
         except DatabaseError:
             raise
         except Exception as exc:
@@ -222,6 +242,7 @@ class ConnectToMySql(IDataLoader):
         """Fetch all test records for a given testplan ID.
 
         Searches current and historical result tables until data is found.
+        Uses a single pooled connection for all table checks.
 
         Args:
             runid: Testplan ID to look up (e.g.
@@ -230,16 +251,16 @@ class ConnectToMySql(IDataLoader):
         Returns:
             DataFrame of test records; empty DataFrame if not found in any table.
         """
-        for table in self._get_past_result_table_names(include_result=True):
-            try:
-                with self.connection_context() as cnx:
+        with self.connection_context() as cnx:
+            for table in self._get_past_result_table_names(include_result=True):
+                try:
                     logger.info(f"Checking result table: {table}")
-                    df = pd.read_sql(f'SELECT * FROM {table} WHERE testplan_id = "{runid}";', cnx)
-                if not df.empty:
-                    return df
-                logger.warning(f"No data for run_id={runid} in table={table}")
-            except Exception as exc:
-                logger.warning(f"Error querying {table} for {runid}: {exc}")
+                    df = pd.read_sql(f"SELECT * FROM {table} WHERE testplan_id = %s", cnx, params=[runid])
+                    if not df.empty:
+                        return df
+                    logger.warning(f"No data for run_id={runid} in table={table}")
+                except Exception as exc:
+                    logger.warning(f"Error querying {table} for {runid}: {exc}")
         return pd.DataFrame()
 
     def get_regressions(self, test_id_a: str, test_id_b: str) -> pd.DataFrame:
@@ -362,7 +383,7 @@ class ConnectToMySql(IDataLoader):
 
         try:
             with self.connection_context() as cnx:
-                existing = pd.read_sql("SELECT * FROM error_map_qgenie;", cnx)
+                existing = pd.read_sql("SELECT cluster_name, runtime, test_type FROM error_map_qgenie", cnx)
                 existing_pairs = set(zip(existing["cluster_name"], existing["runtime"], existing["test_type"]))
                 cursor = cnx.cursor()
                 now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -415,35 +436,59 @@ class ConnectToMySql(IDataLoader):
         except Exception as exc:
             raise DatabaseError("Failed to update error_map_qgenie", cause=exc) from exc
 
-        time.sleep(5)  # brief pause to avoid overwhelming the DB on bulk runs
-
     def update_error_group_class(self, df: pd.DataFrame, cluster_class: str) -> None:
         """Update the ``cluster_class`` for rows in *df* that have no class yet.
+
+        Uses a single connection and batch operations to avoid N+1 queries.
 
         Args:
             df: DataFrame with ``type``, ``runtime``, and ``clusters`` columns.
             cluster_class: Class label to assign.
         """
-        update_query = """
-            UPDATE error_map_qgenie SET cluster_class = %s
-            WHERE error_group_id = %s;
-        """
+        if df.empty:
+            return
+
         try:
             with self.connection_context() as cnx:
-                cursor = cnx.cursor()
+                # Build WHERE clause to fetch all relevant rows in one query
+                conditions = []
+                params = []
                 for _, row in df.iterrows():
-                    id_df = self.get_error_id_row(
-                        type=row["type"],
-                        runtime=row["runtime"],
-                        cluster_name=row[DataFrameKeys.cluster_name].lower(),
+                    conditions.append("(test_type = %s AND runtime = %s AND cluster_name = %s)")
+                    params.extend(
+                        [
+                            row["type"].strip().lower(),
+                            row["runtime"].strip().lower(),
+                            row[DataFrameKeys.cluster_name].strip().lower(),
+                        ]
                     )
-                    if id_df.empty:
-                        continue
-                    error_group_id = id_df.iloc[0]["error_group_id"]
-                    existing_class = id_df.iloc[0]["cluster_class"]
+
+                if not conditions:
+                    return
+
+                query = (
+                    "SELECT error_group_id, cluster_class, test_type, runtime, cluster_name "
+                    "FROM error_map_qgenie WHERE " + " OR ".join(conditions)
+                )
+                cursor = cnx.cursor()
+                cursor.execute(query, params)
+                rows = cursor.fetchall()
+
+                # Collect error_group_ids that need updating (cluster_class is NULL)
+                update_params = []
+                for error_group_id, existing_class, *_ in rows:
                     if error_group_id and existing_class is None:
-                        cursor.execute(update_query, (cluster_class, error_group_id))
+                        update_params.append((cluster_class, error_group_id))
+
+                if update_params:
+                    cursor.executemany(
+                        "UPDATE error_map_qgenie SET cluster_class = %s WHERE error_group_id = %s",
+                        update_params,
+                    )
+                    logger.info(f"Batch-updated cluster_class for {len(update_params)} rows.")
+
                 cnx.commit()
+                cursor.close()
         except Exception as exc:
             logger.error(f"update_error_group_class failed: {exc}")
 
@@ -521,21 +566,18 @@ class ConnectToMySql(IDataLoader):
 # ---------------------------------------------------------------------------
 
 parquet_file = "run_ids.parquet"
-
-_sql_connection: ConnectToMySql | None = None
+sql_connection: ConnectToMySql | None = None
 
 
 def get_sql_connection() -> ConnectToMySql:
     """Return the process-level MySQL singleton, creating it on first call."""
-    global _sql_connection
-    if _sql_connection is None:
-        _sql_connection = ConnectToMySql()
-    return _sql_connection
+    global sql_connection
+    if sql_connection is None:
+        sql_connection = ConnectToMySql()
+    return sql_connection
 
 
-# Module-level singleton for backward compatibility (matches helpers.py pattern)
-sql_connection = ConnectToMySql()
-
+get_sql_connection()
 
 # ---------------------------------------------------------------------------
 # Standalone helper functions
