@@ -17,14 +17,17 @@ have not yet been updated.
 from __future__ import annotations
 
 import asyncio
+import os
 from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
+import scipy.sparse
 
 from src.clustering.hybrid_matcher import HybridSPLADEMatcher
 from src.clustering.metadata_store import MetadataStore
 from src.clustering.searcher import ClusterSearcher
+from src.clustering.splade_encoder import SPLADEEncoder
 from src.clustering.vector_store import VectorStore
 from src.constants import ClusterSpecificKeys, DataFrameKeys, FaissConfigurations
 from src.embeddings import FallbackEmbeddings
@@ -120,6 +123,33 @@ class CustomEmbeddingCluster:
                 )
                 new_metadata: dict = dict(existing_metadata)
 
+                # Load existing SPLADE centroids (if any)
+                type_dir = os.path.join(self.base_path, f"{current_type}_custom")
+                splade_path = os.path.join(type_dir, "splade_centroids.npz")
+                existing_splade_list: List[Optional[scipy.sparse.csr_matrix]] = []
+                if os.path.exists(splade_path):
+                    try:
+                        existing_splade_mat = scipy.sparse.load_npz(splade_path)
+                        existing_splade_list = [existing_splade_mat[i] for i in range(existing_splade_mat.shape[0])]
+                    except Exception:
+                        existing_splade_list = [None] * len(existing_names)
+                else:
+                    existing_splade_list = [None] * len(existing_names)
+
+                # Pad to match existing centroids count
+                while len(existing_splade_list) < len(new_centroids_list):
+                    existing_splade_list.append(None)
+
+                # Encode all valid texts once for SPLADE centroid computation
+                encoder = SPLADEEncoder()
+                all_splade_vecs = None
+                if encoder.is_available and DataFrameKeys.preprocessed_text_key in valid_df.columns:
+                    texts = valid_df[DataFrameKeys.preprocessed_text_key].astype(str).tolist()
+                    all_splade_vecs = encoder.encode(texts)
+
+                # Build a mapping from valid_df row index to splade vec index
+                splade_idx_map = {idx: i for i, idx in enumerate(valid_df.index)}
+
                 for cluster_name, cluster_df in valid_df.groupby(DataFrameKeys.cluster_name):
                     cluster_name_str = str(cluster_name)
                     embeddings = np.vstack(cluster_df[DataFrameKeys.embeddings_key].tolist())
@@ -127,6 +157,14 @@ class CustomEmbeddingCluster:
                     norm = np.linalg.norm(centroid)
                     if norm > 0:
                         centroid = centroid / norm
+
+                    # Compute SPLADE centroid for this cluster
+                    splade_centroid = None
+                    if all_splade_vecs is not None:
+                        member_indices = [splade_idx_map[idx] for idx in cluster_df.index if idx in splade_idx_map]
+                        if member_indices:
+                            member_vecs = all_splade_vecs[member_indices]
+                            splade_centroid = scipy.sparse.csr_matrix(member_vecs.mean(axis=0))
 
                     class_val = (
                         cluster_df[DataFrameKeys.cluster_class].iloc[0]
@@ -154,12 +192,21 @@ class CustomEmbeddingCluster:
                         if norm2 > 0:
                             updated = updated / norm2
                         new_centroids_list[idx] = updated
+                        # EMA update SPLADE centroid
+                        if splade_centroid is not None:
+                            old_splade = existing_splade_list[idx]
+                            if old_splade is not None and old_splade.shape[1] == splade_centroid.shape[1]:
+                                updated_splade = _EMA_DECAY * old_splade + (1.0 - _EMA_DECAY) * splade_centroid
+                                existing_splade_list[idx] = scipy.sparse.csr_matrix(updated_splade)
+                            else:
+                                existing_splade_list[idx] = splade_centroid
                         # Merge run_ids into existing metadata
                         if run_id and run_entry:
                             new_metadata[cluster_name_str].setdefault("run_ids", {})[run_id] = run_entry
                     else:
                         # New cluster — append
                         new_centroids_list.append(centroid)
+                        existing_splade_list.append(splade_centroid)
                         new_metadata[cluster_name_str] = {
                             "class": str(class_val) if not pd.isna(class_val) else "sdk_issue",
                             "run_ids": {run_id: run_entry} if run_id else {},
@@ -177,6 +224,25 @@ class CustomEmbeddingCluster:
                 self._vs.save(current_type, updated_centroids)
                 self._ms.save(current_type, new_metadata)
 
+                # Save SPLADE centroids — fill None entries with zero vectors
+                # so the file always gets created once we have at least one SPLADE vector
+                non_none_vecs = [v for v in existing_splade_list if v is not None]
+                if non_none_vecs:
+                    vocab_size = non_none_vecs[0].shape[1]
+                    filled_splade = [
+                        v if v is not None else scipy.sparse.csr_matrix((1, vocab_size)) for v in existing_splade_list
+                    ]
+                    if len(filled_splade) == len(new_metadata):
+                        splade_matrix = scipy.sparse.vstack(filled_splade, format="csr")
+                        os.makedirs(type_dir, exist_ok=True)
+                        scipy.sparse.save_npz(splade_path, splade_matrix)
+                        # Invalidate in-memory cache so searcher picks up new data
+                        HybridSPLADEMatcher._cluster_vec_cache.pop(current_type, None)
+                        logger.info(
+                            f"[save_threaded] type={current_type}: saved SPLADE centroids "
+                            f"({len(non_none_vecs)}/{len(filled_splade)} non-zero)"
+                        )
+
                 if run_id:
                     self._ms.mark_run_processed(current_type, run_id)
 
@@ -191,7 +257,7 @@ class CustomEmbeddingCluster:
         self,
         type_: str,
         queries: Union[str, List[str]],
-        similarity_threshold: float = 0.88,
+        similarity_threshold: float = 0.82,
         precomputed_embeddings: Optional[np.ndarray] = None,
         precomputed_splade_vecs=None,
     ) -> Tuple[List[str], List[str], np.ndarray]:
@@ -233,7 +299,7 @@ class CustomEmbeddingCluster:
         self,
         type_: str,
         embedding: np.ndarray,
-        similarity_threshold: float = 0.88,
+        similarity_threshold: float = 0.82,
     ) -> tuple:
         """Search for a cluster matching *embedding* for *type_*.
 
@@ -257,7 +323,7 @@ class CustomEmbeddingCluster:
         )
         return name, cls
 
-    def search(self, type_: str, text: str, similarity_threshold: float = 0.88) -> tuple:
+    def search(self, type_: str, text: str, similarity_threshold: float = 0.82) -> tuple:
         """Synchronous text search — embeds *text* and delegates to ClusterSearcher.
 
         Args:

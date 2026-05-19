@@ -188,7 +188,7 @@ class ClusterCohesionAnalyzer:
             embeddings = np.vstack(valid[emb_col].values)
             sim_matrix = cosine_similarity(embeddings)  # (n, n)
             off_diag = sim_matrix[~np.eye(n, dtype=bool)]
-            cohesion = float(off_diag.mean()) if len(off_diag) > 0 else 1.0
+            cohesion = float(np.clip(off_diag.mean(), 0.0, 1.0)) if len(off_diag) > 0 else 1.0
             is_loose = cohesion < self.low_cohesion_threshold and n > 5
 
             df.loc[group.index, "cluster_cohesion_score"] = cohesion

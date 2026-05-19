@@ -100,7 +100,10 @@ def group_similar_errors(df: pd.DataFrame, column: str, threshold) -> list:
 
 @execution_timer
 async def fuzzy_cluster_grouping(
-    failures_dataframe: pd.DataFrame, threshold=100, bin_intervals=[[0, 50], [50, 110]]
+    failures_dataframe: pd.DataFrame,
+    threshold=100,
+    bin_intervals=[[0, 50], [50, 110]],
+    precomputed_embeddings: Optional[np.ndarray] = None,
 ) -> pd.DataFrame:
     failures_dataframe.loc[:, DataFrameKeys.error_logs_length] = failures_dataframe[
         DataFrameKeys.preprocessed_text_key
@@ -122,15 +125,36 @@ async def fuzzy_cluster_grouping(
             threshold,
         )
 
-        # Process groups in parallel using asyncio.gather
         if grouped_indices:
-            # Create tasks for each group
-            tasks = [generate_cluster_name(failures_dataframe.iloc[group]) for group in grouped_indices]
-            # Execute all tasks concurrently
-            results = await asyncio.gather(*tasks)
-            # Update the dataframe with results
-            for group, result in zip(grouped_indices, results):
-                failures_dataframe.loc[group, DataFrameKeys.cluster_name] = result["cluster_name"]
+            # Try DB lookup for each group before calling LLM
+            custom_cluster = CustomEmbeddingCluster()
+            type_ = failures_dataframe.iloc[0]["type"] if "type" in failures_dataframe.columns else None
+            groups_needing_llm = []
+
+            for group in grouped_indices:
+                db_matched = False
+                if precomputed_embeddings is not None and type_ and "_embed_pos" in failures_dataframe.columns:
+                    positions = [int(failures_dataframe.iloc[idx]["_embed_pos"]) for idx in group]
+                    valid_positions = [p for p in positions if p < len(precomputed_embeddings)]
+                    if valid_positions:
+                        group_embs = precomputed_embeddings[valid_positions]
+                        centroid = group_embs.mean(axis=0).astype(np.float32)
+                        norm = np.linalg.norm(centroid)
+                        if norm > 0:
+                            centroid = centroid / norm
+                        db_name, _ = custom_cluster._search_with_embedding(type_, centroid)
+                        if db_name != ClusterSpecificKeys.non_grouped_key:
+                            failures_dataframe.loc[group, DataFrameKeys.cluster_name] = db_name
+                            db_matched = True
+                if not db_matched:
+                    groups_needing_llm.append(group)
+
+            # Only call LLM for groups that didn't match DB
+            if groups_needing_llm:
+                tasks = [generate_cluster_name(failures_dataframe.iloc[g]) for g in groups_needing_llm]
+                results = await asyncio.gather(*tasks)
+                for group, result in zip(groups_needing_llm, results):
+                    failures_dataframe.loc[group, DataFrameKeys.cluster_name] = result["cluster_name"]
 
     # regex based common errors mapping
     await update_rows_by_regex_patterns(failures_dataframe)
@@ -174,6 +198,8 @@ async def check_if_issue_alread_grouped(
             precomputed_splade_vecs=subset_splade,
         )
         # Update the original DataFrame
+        if df[DataFrameKeys.cluster_name].dtype != object:
+            df[DataFrameKeys.cluster_name] = df[DataFrameKeys.cluster_name].astype(object)
         df.loc[mask, DataFrameKeys.cluster_name] = new_cluster_names
         df.loc[mask, DataFrameKeys.cluster_class] = class_names
         df.loc[mask, DataFrameKeys.embeddings_key] = pd.Series(embeddings.tolist(), index=df.index[mask])

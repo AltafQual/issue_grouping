@@ -35,7 +35,7 @@ logger = AppLogger().get_logger(__name__)
 
 __all__ = ["ClusterSearcher"]
 
-_DEFAULT_THRESHOLD = 0.88
+_DEFAULT_THRESHOLD = 0.82
 _LOAD_RETRIES = 3
 
 

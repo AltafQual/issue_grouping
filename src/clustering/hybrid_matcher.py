@@ -21,6 +21,7 @@ No imports from ``src.helpers`` or higher-level packages.
 
 from __future__ import annotations
 
+import os
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -28,7 +29,7 @@ import scipy.sparse
 from sklearn.metrics.pairwise import cosine_similarity
 
 from src.clustering.splade_encoder import SPLADEEncoder
-from src.constants import SPLADEConfigurations
+from src.constants import FaissConfigurations, SPLADEConfigurations
 from src.logger import AppLogger
 
 logger = AppLogger().get_logger(__name__)
@@ -55,9 +56,9 @@ class HybridSPLADEMatcher:
         ... )
     """
 
-    # Class-level cache: {type_: {cluster_name: sparse_csr_matrix}}
-    # Populated lazily on first search; entries persist for the process lifetime.
-    _cluster_vec_cache: Dict[str, Dict[str, scipy.sparse.csr_matrix]] = {}
+    # Class-level cache: {type_: csr_matrix}
+    # Populated lazily from splade_centroids.npz; entries persist for process lifetime.
+    _cluster_vec_cache: Dict[str, scipy.sparse.csr_matrix] = {}
 
     def __init__(
         self,
@@ -196,29 +197,42 @@ class HybridSPLADEMatcher:
     ) -> Optional[scipy.sparse.csr_matrix]:
         """Return a ``(C, vocab_size)`` CSR matrix of per-cluster SPLADE vectors.
 
-        Unseen cluster names are encoded on-the-fly and stored in
-        :attr:`_cluster_vec_cache` so subsequent calls are O(1).
+        Loads pre-computed SPLADE centroids from ``splade_centroids.npz`` on
+        disk (computed from actual error texts during ``save_threaded``).
+        Falls back to ``None`` if no stored vectors exist.
 
         Args:
             type_: Cluster type key (namespaces the cache).
-            cluster_names: Names to look up / encode.
-            enc: Active :class:`SPLADEEncoder` instance.
+            cluster_names: Names to look up (used for count validation).
+            enc: Active :class:`SPLADEEncoder` instance (unused, kept for signature compat).
 
         Returns:
-            CSR matrix, or ``None`` if any cluster name could not be encoded.
+            CSR matrix, or ``None`` if stored vectors are unavailable.
         """
-        cache = HybridSPLADEMatcher._cluster_vec_cache.setdefault(type_, {})
-        new_names = [n for n in cluster_names if n not in cache]
-        if new_names:
-            vecs = enc.encode(new_names)
-            if vecs is not None:
-                for i, name in enumerate(new_names):
-                    cache[name] = vecs[i]
+        cached = HybridSPLADEMatcher._cluster_vec_cache.get(type_)
+        if cached is not None:
+            if cached.shape[0] == len(cluster_names):
+                return cached
+            # Stale cache — cluster count changed, reload
+            HybridSPLADEMatcher._cluster_vec_cache.pop(type_, None)
 
-        rows = [cache.get(n) for n in cluster_names]
-        if any(r is None for r in rows):
+        splade_path = os.path.join(FaissConfigurations.base_path, f"{type_}_custom", "splade_centroids.npz")
+        if not os.path.exists(splade_path):
             return None
-        return scipy.sparse.vstack(rows, format="csr")
+
+        try:
+            mat = scipy.sparse.load_npz(splade_path)
+            if mat.shape[0] == len(cluster_names):
+                HybridSPLADEMatcher._cluster_vec_cache[type_] = mat
+                return mat
+            logger.warning(
+                f"[HybridMatcher] splade_centroids.npz row count ({mat.shape[0]}) "
+                f"!= cluster count ({len(cluster_names)}) for type={type_}, skipping SPLADE"
+            )
+            return None
+        except Exception as exc:
+            logger.warning(f"[HybridMatcher] Failed to load splade_centroids.npz for type={type_}: {exc}")
+            return None
 
     @staticmethod
     def _minmax(raw: np.ndarray) -> np.ndarray:

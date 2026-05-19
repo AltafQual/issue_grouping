@@ -129,3 +129,6 @@ class StabilityReportConfig:
     RECIPIENT: str = "aisw.qipl.auto.qa@qti.qualcomm.com"
     SEND_EMAIL: bool = True
     TEAMS_WEBHOOK_URL: str = os.getenv("TEAMS_WEBHOOK_URL", "")
+
+    # Idempotency tracking for the Jenkins-invoked nightly-stability-report job.
+    PROCESSED_STABILITY_RUN_IDS_PATH: str = "stability_assets/processed_stability_runids.json"

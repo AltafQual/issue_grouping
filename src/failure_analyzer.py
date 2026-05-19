@@ -141,7 +141,7 @@ class FailureAnalyzer:
         ].reset_index(drop=True)
         fuzzy_clustered_df = pd.DataFrame()
         if not non_clustered_df.empty:
-            non_clustered_df = await fuzzy_cluster_grouping(non_clustered_df)
+            non_clustered_df = await fuzzy_cluster_grouping(non_clustered_df, precomputed_embeddings=all_embeddings)
             fuzzy_clustered_df = non_clustered_df[
                 (non_clustered_df[DataFrameKeys.cluster_name] != ClusterSpecificKeys.non_grouped_key)
                 & (
