@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 import re
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from urllib.parse import quote_plus
 
 import numpy as np
@@ -46,6 +46,8 @@ __all__ = [
     "get_previous_release_testplan_id_from_df",
     "iterate_db_get_testplan",
     "filter_and_sort_by_embedded_datetime",
+    "extract_embedded_datetime",
+    "filter_run_ids_within_days",
     "get_bu_name",
 ]
 
@@ -576,6 +578,17 @@ def filter_and_sort_by_embedded_datetime(strings: list[str], n_remove: int = 0) 
     Returns:
         List of strings sorted by embedded datetime with earliest *n_remove* removed.
     """
+    dated = [(extract_embedded_datetime(s), s) for s in strings]
+    dated = [t for t in dated if t[0] is not None]
+    dated.sort(key=lambda x: (x[0], x[1]))
+    return [s for _, s in dated[n_remove:]]
+
+
+def extract_embedded_datetime(run_id: str) -> datetime | None:
+    """Return the datetime embedded in *run_id*, or ``None`` if no token parses.
+
+    Supports 12-digit ``yymmddHHMMSS`` and 14-digit ``yyyymmddHHMMSS`` tokens.
+    """
 
     def parse_candidate(token: str):
         if len(token) == 14:
@@ -591,17 +604,21 @@ def filter_and_sort_by_embedded_datetime(strings: list[str], n_remove: int = 0) 
                     continue
         return None
 
-    def extract_datetime(s: str):
-        for token in re.findall(r"\d{12,14}", str(s)):
-            dt = parse_candidate(token)
-            if dt is not None:
-                return dt
-        return None
+    for token in re.findall(r"\d{12,14}", str(run_id)):
+        dt = parse_candidate(token)
+        if dt is not None:
+            return dt
+    return None
 
-    dated = [(extract_datetime(s), s) for s in strings]
-    dated = [t for t in dated if t[0] is not None]
-    dated.sort(key=lambda x: (x[0], x[1]))
-    return [s for _, s in dated[n_remove:]]
+
+def filter_run_ids_within_days(run_ids: list[str], days: int) -> list[str]:
+    """Return run_ids whose embedded datetime is within the last *days* days.
+
+    Run IDs that lack a parseable datetime are dropped (same policy as
+    :func:`filter_and_sort_by_embedded_datetime`).
+    """
+    cutoff = datetime.now() - timedelta(days=days)
+    return [rid for rid in run_ids if (dt := extract_embedded_datetime(rid)) is not None and dt >= cutoff]
 
 
 def get_bu_name(soc_name: str) -> str:
