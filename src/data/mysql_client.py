@@ -27,7 +27,6 @@ from typing import Generator, Optional
 
 import mysql.connector as msqlconnector
 import pandas as pd
-from mysql.connector.pooling import MySQLConnectionPool
 
 from src.constants import DataFrameKeys
 from src.core.exceptions import DatabaseError
@@ -57,9 +56,10 @@ class ConnectToMySql(IDataLoader):
     the codebase never constructs raw SQL strings or manages connections
     directly.
 
-    Connections are managed via a class-level :class:`MySQLConnectionPool`
-    (pool size 5).  :meth:`connection_context` leases a connection from the
-    pool and returns it on exit.
+    Connections are opened fresh on each :meth:`connection_context` entry
+    and closed on exit.  No pooling — pool exhaustion under cursor leaks
+    was causing background-loop hangs, and per-call connect cost is
+    negligible for this workload.
 
     Args:
         user: MySQL username.  Defaults to the shared read-write account.
@@ -72,8 +72,6 @@ class ConnectToMySql(IDataLoader):
         >>> df = client.fetch_result_based_on_runid("QNN-v2.46.0.260319_nightly")
     """
 
-    _pool: Optional[MySQLConnectionPool] = None
-
     def __init__(
         self,
         user: str = "mlg_rw",
@@ -85,7 +83,6 @@ class ConnectToMySql(IDataLoader):
         self.secret = secret
         self.host = host
         self.db = db
-        self._ensure_pool()
 
     # ------------------------------------------------------------------
     # IDataLoader contract
@@ -113,49 +110,36 @@ class ConnectToMySql(IDataLoader):
     # Connection management
     # ------------------------------------------------------------------
 
-    def _ensure_pool(self) -> None:
-        """Initialize the class-level connection pool (singleton, thread-safe)."""
-        if ConnectToMySql._pool is not None:
-            return
+    def connect(self):
+        """Open a fresh MySQL connection.
+
+        Returns:
+            A new ``mysql.connector`` connection object.
+
+        Raises:
+            DatabaseError: On authentication, missing-DB, or other connection failure.
+        """
         try:
-            ConnectToMySql._pool = MySQLConnectionPool(
-                pool_name="issue_grouping_pool",
-                pool_size=20,
-                pool_reset_session=True,
+            return msqlconnector.connect(
                 user=self.user,
                 password=self.secret,
                 host=self.host,
                 database=self.db,
                 use_pure=True,
             )
-            logger.info("MySQL connection pool created (size=20).")
         except msqlconnector.Error as err:
             if err.errno == msqlconnector.errorcode.ER_ACCESS_DENIED_ERROR:
                 raise DatabaseError("Authentication failed: check username and password", cause=err)
             if err.errno == msqlconnector.errorcode.ER_BAD_DB_ERROR:
                 raise DatabaseError(f"Database '{self.db}' does not exist", cause=err)
-            raise DatabaseError(f"MySQL pool creation error: {err}", cause=err)
-
-    def connect(self):
-        """Get a connection from the pool.
-
-        Returns:
-            A ``mysql.connector`` connection object from the pool.
-
-        Raises:
-            DatabaseError: On pool exhaustion or connection failure.
-        """
-        try:
-            return ConnectToMySql._pool.get_connection()
-        except msqlconnector.Error as err:
-            raise DatabaseError(f"Failed to get connection from pool: {err}", cause=err)
+            raise DatabaseError(f"MySQL connection error: {err}", cause=err)
 
     @contextmanager
     def connection_context(self) -> Generator:
-        """Context manager that leases a connection from the pool and returns it.
+        """Context manager that opens a fresh connection and closes it on exit.
 
         Yields:
-            An active ``mysql.connector`` pooled connection.
+            An active ``mysql.connector`` connection.
 
         Example:
             >>> with client.connection_context() as cnx:
@@ -343,9 +327,11 @@ class ConnectToMySql(IDataLoader):
         try:
             with self.connection_context() as cnx:
                 cursor = cnx.cursor()
-                cursor.execute(query, (type.lower(), runtime.lower(), cluster_name.lower()))
-                result = cursor.fetchone()
-                cursor.close()
+                try:
+                    cursor.execute(query, (type.lower(), runtime.lower(), cluster_name.lower()))
+                    result = cursor.fetchone()
+                finally:
+                    cursor.close()
         except Exception as exc:
             logger.error(f"get_error_group_id failed: {exc}")
             return ""
@@ -387,51 +373,54 @@ class ConnectToMySql(IDataLoader):
                 existing = pd.read_sql("SELECT cluster_name, runtime, test_type FROM error_map_qgenie", cnx)
                 existing_pairs = set(zip(existing["cluster_name"], existing["runtime"], existing["test_type"]))
                 cursor = cnx.cursor()
-                now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                try:
+                    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-                new_rows, update_rows = [], []
-                for _, row in unique_rows.iterrows():
-                    cluster_name = row[DataFrameKeys.cluster_name].strip().lower()
-                    runtime = row["runtime"].strip().lower()
-                    reason = row["reason"].lower()
-                    test_type = row["type"].lower()
-                    cluster_class = row[DataFrameKeys.cluster_class].strip().lower()
+                    new_rows, update_rows = [], []
+                    for _, row in unique_rows.iterrows():
+                        cluster_name = row[DataFrameKeys.cluster_name].strip().lower()
+                        runtime = row["runtime"].strip().lower()
+                        reason = row["reason"].lower()
+                        test_type = row["type"].lower()
+                        cluster_class = row[DataFrameKeys.cluster_class].strip().lower()
 
-                    if (cluster_name, runtime, test_type) not in existing_pairs:
-                        new_rows.append(
-                            (
-                                cluster_name,
-                                runtime,
-                                reason,
-                                test_type,
-                                self._generate_key(f"{cluster_name}_{test_type}_{runtime}"),
-                                cluster_class,
-                                now,
-                                now,
+                        if (cluster_name, runtime, test_type) not in existing_pairs:
+                            new_rows.append(
+                                (
+                                    cluster_name,
+                                    runtime,
+                                    reason,
+                                    test_type,
+                                    self._generate_key(f"{cluster_name}_{test_type}_{runtime}"),
+                                    cluster_class,
+                                    now,
+                                    now,
+                                )
                             )
+                        else:
+                            update_rows.append((now, cluster_name, runtime, test_type))
+
+                    if new_rows:
+                        cursor.executemany(
+                            """INSERT INTO error_map_qgenie
+                               (cluster_name, runtime, error_reason, test_type,
+                                error_group_id, cluster_class, createdAt, updatedAt)
+                               VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+                            new_rows,
                         )
-                    else:
-                        update_rows.append((now, cluster_name, runtime, test_type))
+                        logger.info(f"Inserted {len(new_rows)} new error_map_qgenie entries.")
 
-                if new_rows:
-                    cursor.executemany(
-                        """INSERT INTO error_map_qgenie
-                           (cluster_name, runtime, error_reason, test_type,
-                            error_group_id, cluster_class, createdAt, updatedAt)
-                           VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
-                        new_rows,
-                    )
-                    logger.info(f"Inserted {len(new_rows)} new error_map_qgenie entries.")
+                    if update_rows:
+                        cursor.executemany(
+                            """UPDATE error_map_qgenie SET updatedAt = %s
+                               WHERE cluster_name = %s AND runtime = %s AND test_type = %s""",
+                            update_rows,
+                        )
+                        logger.info(f"Updated {len(update_rows)} error_map_qgenie timestamps.")
 
-                if update_rows:
-                    cursor.executemany(
-                        """UPDATE error_map_qgenie SET updatedAt = %s
-                           WHERE cluster_name = %s AND runtime = %s AND test_type = %s""",
-                        update_rows,
-                    )
-                    logger.info(f"Updated {len(update_rows)} error_map_qgenie timestamps.")
-
-                cnx.commit()
+                    cnx.commit()
+                finally:
+                    cursor.close()
         except DatabaseError:
             raise
         except Exception as exc:
@@ -472,24 +461,26 @@ class ConnectToMySql(IDataLoader):
                     "FROM error_map_qgenie WHERE " + " OR ".join(conditions)
                 )
                 cursor = cnx.cursor()
-                cursor.execute(query, params)
-                rows = cursor.fetchall()
+                try:
+                    cursor.execute(query, params)
+                    rows = cursor.fetchall()
 
-                # Collect error_group_ids that need updating (cluster_class is NULL)
-                update_params = []
-                for error_group_id, existing_class, *_ in rows:
-                    if error_group_id and existing_class is None:
-                        update_params.append((cluster_class, error_group_id))
+                    # Collect error_group_ids that need updating (cluster_class is NULL)
+                    update_params = []
+                    for error_group_id, existing_class, *_ in rows:
+                        if error_group_id and existing_class is None:
+                            update_params.append((cluster_class, error_group_id))
 
-                if update_params:
-                    cursor.executemany(
-                        "UPDATE error_map_qgenie SET cluster_class = %s WHERE error_group_id = %s",
-                        update_params,
-                    )
-                    logger.info(f"Batch-updated cluster_class for {len(update_params)} rows.")
+                    if update_params:
+                        cursor.executemany(
+                            "UPDATE error_map_qgenie SET cluster_class = %s WHERE error_group_id = %s",
+                            update_params,
+                        )
+                        logger.info(f"Batch-updated cluster_class for {len(update_params)} rows.")
 
-                cnx.commit()
-                cursor.close()
+                    cnx.commit()
+                finally:
+                    cursor.close()
         except Exception as exc:
             logger.error(f"update_error_group_class failed: {exc}")
 
