@@ -18,6 +18,7 @@ PyTorch / scipy.  No circular imports.
 
 from __future__ import annotations
 
+import asyncio
 import gc
 import os
 import sys
@@ -141,10 +142,9 @@ class SPLADEEncoder:
     def _encode_remote(self, texts: list[str]) -> Optional[scipy.sparse.csr_matrix]:
         """Call the remote SPLADE API and reconstruct a CSR matrix from the response."""
         try:
-            resp = httpx.post(
+            resp = self._get_sync_client().post(
                 f"{self._remote_url}/api/splade/encode/",
                 json={"texts": texts},
-                timeout=30.0,
             )
             resp.raise_for_status()
             data = resp.json()
@@ -155,6 +155,49 @@ class SPLADEEncoder:
             return scipy.sparse.csr_matrix(embeddings)
         except Exception as exc:
             logger.warning(f"[SPLADE] Remote encode failed ({self._remote_url}): {exc}")
+            return None
+
+    def _get_sync_client(self) -> httpx.Client:
+        """Lazy keep-alive sync client — amortizes TCP/SSL setup across encode calls."""
+        client = getattr(self, "_sync_client", None)
+        if client is None:
+            client = httpx.Client(timeout=30.0)
+            self._sync_client = client
+        return client
+
+    async def aencode(self, texts: list[str]) -> Optional[scipy.sparse.csr_matrix]:
+        """Async encode.
+
+        When the encoder is in remote mode (``SPLADE_API_URL`` set), issues a
+        non-blocking ``httpx.AsyncClient`` POST so concurrent callers truly
+        fan out against the remote service.  When local, delegates to the
+        sync :meth:`encode` in the default executor — identical to what the
+        callers used to inline themselves.
+        """
+        if not self._available or not texts:
+            return None
+        if self._remote_url:
+            return await self._aencode_remote(texts)
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self.encode, texts)
+
+    async def _aencode_remote(self, texts: list[str]) -> Optional[scipy.sparse.csr_matrix]:
+        """Async variant of :meth:`_encode_remote` using ``httpx.AsyncClient``."""
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(
+                    f"{self._remote_url}/api/splade/encode/",
+                    json={"texts": texts},
+                )
+            resp.raise_for_status()
+            data = resp.json()
+            if data.get("status") != 200:
+                logger.warning(f"[SPLADE] Remote API error: {data.get('error')}")
+                return None
+            embeddings = np.array(data["embeddings"], dtype=np.float32)
+            return scipy.sparse.csr_matrix(embeddings)
+        except Exception as exc:
+            logger.warning(f"[SPLADE] Async remote encode failed ({self._remote_url}): {exc}")
             return None
 
     def encode_single(self, text: str) -> Optional[scipy.sparse.csr_matrix]:
@@ -187,6 +230,13 @@ class SPLADEEncoder:
         if inst._tokenizer is not None:
             del inst._tokenizer
             inst._tokenizer = None
+        sync_client = getattr(inst, "_sync_client", None)
+        if sync_client is not None:
+            try:
+                sync_client.close()
+            except Exception:
+                pass
+            inst._sync_client = None
         inst._available = False
         inst._initialized = False
         cls._instance = None

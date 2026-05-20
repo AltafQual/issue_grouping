@@ -179,11 +179,16 @@ class ClusterCohesionAnalyzer:
         logger.info(f"[CohesionAnalyzer] Analyzing {len(cluster_groups)} clusters.")
 
         loose: list[str] = []
+        max_sample = 500
         for cluster_name, group in cluster_groups:
             valid = group[group[emb_col].notna()]
             n = len(valid)
             if n < 2:
                 continue  # single-member: cohesion trivially 1.0
+
+            if n > max_sample:
+                valid = valid.sample(n=max_sample, random_state=42)
+                n = max_sample
 
             embeddings = np.vstack(valid[emb_col].values)
             sim_matrix = cosine_similarity(embeddings)  # (n, n)
@@ -324,24 +329,38 @@ def reassign_unclustered_logs(df: pd.DataFrame, threshold: float = 0.88) -> pd.D
     """
     valid_clusters = set(df[DataFrameKeys.cluster_name]) - {-1}
     logger.info(f"Valid clusters for reassigning unclustered logs: {valid_clusters}")
-    if valid_clusters:
-        centroids = {
-            label: np.mean(
-                np.stack(df[df[DataFrameKeys.cluster_name] == label][DataFrameKeys.embeddings_key].values), axis=0
-            )
-            for label in valid_clusters
-        }
-        for idx, row in df[df[DataFrameKeys.cluster_name] == ClusterSpecificKeys.non_grouped_key].iterrows():
-            log_embedding = row[DataFrameKeys.embeddings_key].reshape(1, -1)
-            best_label = None
-            best_similarity = -1
-            for label, centroid in centroids.items():
-                similarity = cosine_similarity(log_embedding, centroid.reshape(1, -1))[0][0]
-                if similarity > best_similarity:
-                    best_similarity = similarity
-                    best_label = label
-            if best_similarity >= threshold:
-                logger.info(f"Best label: {best_label}  Best Similarity: {best_similarity}")
-                df.at[idx, DataFrameKeys.cluster_name] = best_label
+    if not valid_clusters:
+        return df
+
+    unclustered_mask = df[DataFrameKeys.cluster_name] == ClusterSpecificKeys.non_grouped_key
+    unclustered = df[unclustered_mask]
+    if unclustered.empty:
+        return df
+
+    valid_embed_mask = unclustered[DataFrameKeys.embeddings_key].apply(lambda v: isinstance(v, (list, np.ndarray)))
+    unclustered = unclustered[valid_embed_mask]
+    if unclustered.empty:
+        return df
+
+    labels = list(valid_clusters)
+    centroids = np.stack(
+        [
+            np.mean(np.stack(df[df[DataFrameKeys.cluster_name] == label][DataFrameKeys.embeddings_key].values), axis=0)
+            for label in labels
+        ]
+    )
+    log_matrix = np.stack([np.asarray(v) for v in unclustered[DataFrameKeys.embeddings_key].values])
+
+    sims = cosine_similarity(log_matrix, centroids)  # (U, K)
+    best_idx = sims.argmax(axis=1)
+    best_sim = sims.max(axis=1)
+    to_assign = best_sim >= threshold
+
+    if to_assign.any():
+        labels_arr = np.array(labels, dtype=object)
+        target_idx = unclustered.index[to_assign]
+        df.loc[target_idx, DataFrameKeys.cluster_name] = labels_arr[best_idx[to_assign]]
+        for idx, label, sim in zip(target_idx, labels_arr[best_idx[to_assign]], best_sim[to_assign]):
+            logger.info(f"Best label: {label}  Best Similarity: {float(sim)}")
 
     return df

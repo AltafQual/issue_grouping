@@ -29,6 +29,7 @@ from src.utils.run_id_utils import iterate_db_get_testplan
 logger = AppLogger().get_logger(__name__)
 proc = psutil.Process()
 TTL_CACHE = TTLCache(maxsize=9000, ttl=(604800 * 604800))
+NOT_FOUND_CACHE: TTLCache = TTLCache(maxsize=2048, ttl=300)
 LOCK = threading.Lock()
 
 
@@ -235,12 +236,13 @@ async def get_error_cluster_name(
     response_metadata = {
         "runtime": runtime,
     }
-    cluster_name, cluster_class = CustomEmbeddingCluster().search(_type, error)
+    loop = asyncio.get_running_loop()
+    cluster_name, cluster_class = await loop.run_in_executor(None, CustomEmbeddingCluster().search, _type, error)
 
     if cluster_name != -1:
         response_metadata["cluster_name"] = cluster_name
         response_metadata["cluster_class"] = cluster_class
-        error_group_id = get_error_group_id(_type, runtime, cluster_name)
+        error_group_id = await loop.run_in_executor(None, get_error_group_id, _type, runtime, cluster_name)
         return {"id": error_group_id, "metadata": response_metadata}
 
     dataframe = pd.DataFrame(
@@ -256,7 +258,7 @@ async def get_error_cluster_name(
     clustered_df = new_cluster[_type]
     cluster_name = clustered_df.iloc[0][DataFrameKeys.cluster_name]
     class_name = clustered_df.iloc[0][DataFrameKeys.cluster_class]
-    _id = get_error_group_id(_type, runtime, cluster_name)
+    _id = await loop.run_in_executor(None, get_error_group_id, _type, runtime, cluster_name)
     response_metadata["cluster_name"] = cluster_name
     response_metadata["cluster_class"] = class_name
     return {"id": _id, "metadata": response_metadata}
@@ -402,11 +404,22 @@ async def get_run_id_cluster_info(cluster_info_object: OneClusterInfo) -> Dict:
     start_time = time.time()
     response = OneClusterInfoResponse()
     response.run_id = cluster_info_object.run_id
+
+    if cluster_info_object.force != True and cluster_info_object.run_id in NOT_FOUND_CACHE:
+        response.status = 404
+        response.error_message = f"No data Found for runid: {cluster_info_object.run_id}"
+        response.time_taken = round(time.time() - start_time, 2)
+        return response.to_dict()
+
     analyzer = FailureAnalyzer()
-    dataframe = analyzer.load_data(tc_id=cluster_info_object.run_id)
+    dataframe = await asyncio.to_thread(analyzer.load_data, None, None, cluster_info_object.run_id)
 
     if dataframe is None or dataframe.empty:
-        return response
+        NOT_FOUND_CACHE[cluster_info_object.run_id] = True
+        response.status = 404
+        response.error_message = f"No data Found for runid: {cluster_info_object.run_id}"
+        response.time_taken = round(time.time() - start_time, 2)
+        return response.to_dict()
 
     if (cluster_info_object.run_id) in TTL_CACHE and cluster_info_object.force != True:
         result = TTL_CACHE[cluster_info_object.run_id]

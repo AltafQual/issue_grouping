@@ -1,6 +1,3 @@
-import asyncio
-from typing import List, Optional
-
 import numpy as np
 import pandas as pd
 from sklearn.cluster import HDBSCAN
@@ -46,6 +43,8 @@ class FailureAnalyzer:
             dataframe = get_tc_id_df(tc_id)
 
         if isinstance(dataframe, pd.DataFrame):
+            if dataframe.empty:
+                return dataframe
             self.logger.info(f"Total number of test cases: {dataframe.shape[0]}")
             return dataframe[~dataframe["result"].isin({"PASS", "NOT_RUN", "PARENT_NOT_RUN", "PARENT_FAIL"})]
 
@@ -111,8 +110,7 @@ class FailureAnalyzer:
         all_splade_vecs = None
         if encoder.is_available:
             self.logger.info(f"[OneShot] Computing SPLADE vectors for {len(all_texts)} texts")
-            loop = asyncio.get_running_loop()
-            all_splade_vecs = await loop.run_in_executor(None, encoder.encode, all_texts)
+            all_splade_vecs = await encoder.aencode(all_texts)
 
         self.logger.info(f"[OneShot] Embeddings and SPLADE computed for {len(all_texts)} texts")
 
@@ -226,7 +224,7 @@ class FailureAnalyzer:
                     axis=0,
                 )
 
-            verifier_failed_df = subcluster_verifier_failed(
+            verifier_failed_df = await subcluster_verifier_failed(
                 failure_df[
                     (failure_df[DataFrameKeys.cluster_name] == "VerifierFailed")
                     & (failure_df[DataFrameKeys.grouped_from_faiss] != True)
@@ -301,7 +299,7 @@ class FailureAnalyzer:
 
         dfs_to_concat = []
         if not already_clustered_df.empty:
-            verifier_failed_df = subcluster_verifier_failed(
+            verifier_failed_df = await subcluster_verifier_failed(
                 already_clustered_df[
                     (already_clustered_df[DataFrameKeys.cluster_name] == "VerifierFailed")
                     & (already_clustered_df[DataFrameKeys.grouped_from_faiss] != True)

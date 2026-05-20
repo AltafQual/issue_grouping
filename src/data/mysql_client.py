@@ -33,6 +33,7 @@ from src.constants import DataFrameKeys
 from src.core.exceptions import DatabaseError
 from src.core.interfaces import IDataLoader
 from src.logger import AppLogger
+from src.utils.run_id_utils import extract_embedded_datetime
 from src.utils.timer import execution_timer
 
 logger = AppLogger().get_logger(__name__)
@@ -119,7 +120,7 @@ class ConnectToMySql(IDataLoader):
         try:
             ConnectToMySql._pool = MySQLConnectionPool(
                 pool_name="issue_grouping_pool",
-                pool_size=5,
+                pool_size=20,
                 pool_reset_session=True,
                 user=self.user,
                 password=self.secret,
@@ -127,7 +128,7 @@ class ConnectToMySql(IDataLoader):
                 database=self.db,
                 use_pure=True,
             )
-            logger.info("MySQL connection pool created (size=5).")
+            logger.info("MySQL connection pool created (size=20).")
         except msqlconnector.Error as err:
             if err.errno == msqlconnector.errorcode.ER_ACCESS_DENIED_ERROR:
                 raise DatabaseError("Authentication failed: check username and password", cause=err)
@@ -252,7 +253,7 @@ class ConnectToMySql(IDataLoader):
             DataFrame of test records; empty DataFrame if not found in any table.
         """
         with self.connection_context() as cnx:
-            for table in self._get_past_result_table_names(include_result=True):
+            for table in self._tables_for_run_id(runid):
                 try:
                     logger.info(f"Checking result table: {table}")
                     df = pd.read_sql(f"SELECT * FROM {table} WHERE testplan_id = %s", cnx, params=[runid])
@@ -278,7 +279,7 @@ class ConnectToMySql(IDataLoader):
         test_id_a, test_id_b = self.sort_run_ids(test_id_a, test_id_b)
         logger.info(f"Regression query: new={test_id_a}, old={test_id_b}")
 
-        for table in self._get_past_result_table_names(include_result=True):
+        for table in self._tables_for_run_id(test_id_a):
             try:
                 query = f"""
                 SELECT
@@ -559,6 +560,48 @@ class ConnectToMySql(IDataLoader):
                 y -= 1
             tables.append(f"result_{y}_0{m}" if m <= 9 else f"result_{y}_{m}")
         return tables
+
+    @staticmethod
+    def _format_monthly_table(year: int, month: int) -> str:
+        return f"result_{year}_0{month}" if month <= 9 else f"result_{year}_{month}"
+
+    def _tables_for_run_id(self, runid: str) -> list[str]:
+        """Return the candidate result tables for a single run_id, ordered by likelihood.
+
+        Uses the timestamp embedded in the run_id (e.g. ``v2.48.0.260518040339``)
+        to pick the monthly table that should contain the run, plus a 1-month
+        fallback either side. Falls back to the full 5-month sweep if the
+        run_id has no parseable timestamp.
+
+        Args:
+            runid: Testplan ID such as ``"QNN-v2.48.0.260518040339_llm-llm_nightly"``.
+
+        Returns:
+            Ordered list of table names — most-likely first, deduplicated.
+        """
+        dt = extract_embedded_datetime(runid)
+        if dt is None:
+            return self._get_past_result_table_names(include_result=True)
+
+        now = datetime.now()
+        run_year, run_month = dt.year, dt.month
+
+        prev_month, prev_year = (run_month - 1, run_year) if run_month > 1 else (12, run_year - 1)
+        prev_table = self._format_monthly_table(prev_year, prev_month)
+        run_table = self._format_monthly_table(run_year, run_month)
+
+        if run_year == now.year and run_month == now.month:
+            tables = ["result", prev_table]
+        else:
+            tables = [run_table, prev_table, "result"]
+
+        seen: set[str] = set()
+        deduped: list[str] = []
+        for t in tables:
+            if t not in seen:
+                seen.add(t)
+                deduped.append(t)
+        return deduped
 
 
 # ---------------------------------------------------------------------------

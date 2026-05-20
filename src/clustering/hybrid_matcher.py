@@ -99,7 +99,10 @@ class HybridSPLADEMatcher:
         scores = cosine_scores
         mode = "pure cosine"
 
-        enc = self._encoder()
+        # Skip SPLADE encoding when the query is empty/whitespace — embedding-only
+        # callers (e.g. centroid DB lookup in pregroup pipelines) always pass query="",
+        # and encoding "" produces a near-zero sparse vector that only adds noise.
+        enc = self._encoder() if query and query.strip() else None
         if enc is not None:
             query_vec = enc.encode_single(query)
             cluster_mat = self._cluster_matrix(type_, cluster_names, enc)
@@ -154,7 +157,13 @@ class HybridSPLADEMatcher:
         score_matrix = cosine_matrix
         mode = "pure cosine (SPLADE unavailable)"
 
-        enc = self._encoder()
+        # Skip SPLADE when every query is empty/whitespace AND no precomputed SPLADE
+        # vectors were supplied — see search() for rationale.
+        all_queries_empty = all(not q or not q.strip() for q in queries)
+        skip_splade = all_queries_empty and precomputed_query_splade is None
+        enc = None if skip_splade else self._encoder()
+        if skip_splade:
+            mode = "pure cosine (empty queries)"
         if enc is not None:
             query_vecs = precomputed_query_splade if precomputed_query_splade is not None else enc.encode(queries)
             cluster_mat = self._cluster_matrix(type_, cluster_names, enc)

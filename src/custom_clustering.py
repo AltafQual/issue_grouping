@@ -98,18 +98,53 @@ class CustomEmbeddingCluster:
             logger.warning("[CustomEmbeddingCluster] No 'type' column found — skipping save_threaded")
             return
 
+        # Pre-pass: validity filter + concurrent SPLADE encoding across all types.
+        # When SPLADE_API_URL is set, asyncio.gather fans out N httpx.AsyncClient
+        # POSTs in parallel against the SPLADE service; in local mode each aencode
+        # delegates to loop.run_in_executor(None, encode, texts), so torch inference
+        # stays serialized on the single model instance — behaviourally unchanged.
+        encoder = SPLADEEncoder()
+        prepared: List[Tuple[str, pd.DataFrame, bool]] = []
+        texts_by_type: Dict[str, List[str]] = {}
         for current_type, type_df in groups:
-            try:
-                # Filter to valid cluster assignments only
-                valid_mask = ~type_df[DataFrameKeys.cluster_name].isin(exclude_labels)
-                valid_df = type_df[valid_mask].copy()
+            valid_mask = ~type_df[DataFrameKeys.cluster_name].isin(exclude_labels)
+            valid_df = type_df[valid_mask].copy()
+            no_valid_rows = valid_df.empty or DataFrameKeys.embeddings_key not in valid_df.columns
+            if not no_valid_rows:
+                valid_df = valid_df[valid_df[DataFrameKeys.embeddings_key].notna()]
+                if not valid_df.empty and DataFrameKeys.preprocessed_text_key in valid_df.columns:
+                    texts_by_type[current_type] = valid_df[DataFrameKeys.preprocessed_text_key].astype(str).tolist()
+            prepared.append((current_type, valid_df, no_valid_rows))
 
-                if valid_df.empty or DataFrameKeys.embeddings_key not in valid_df.columns:
+        splade_by_type: Dict[str, Optional[scipy.sparse.csr_matrix]] = {}
+        if encoder.is_available and texts_by_type:
+
+            async def _encode_all() -> Dict[str, Optional[scipy.sparse.csr_matrix]]:
+                keys = list(texts_by_type.keys())
+                results = await asyncio.gather(
+                    *[encoder.aencode(texts_by_type[k]) for k in keys],
+                    return_exceptions=True,
+                )
+                out: Dict[str, Optional[scipy.sparse.csr_matrix]] = {}
+                for k, r in zip(keys, results):
+                    if isinstance(r, Exception):
+                        logger.warning(f"[save_threaded] aencode failed for type={k}: {r}")
+                        out[k] = None
+                    else:
+                        out[k] = r
+                return out
+
+            try:
+                splade_by_type = asyncio.run(_encode_all())
+            except Exception as exc:
+                logger.warning(f"[save_threaded] concurrent SPLADE fan-out failed: {exc}")
+                splade_by_type = {}
+
+        for current_type, valid_df, no_valid_rows in prepared:
+            try:
+                if no_valid_rows:
                     logger.info(f"[save_threaded] type={current_type}: no valid rows to save")
                     continue
-
-                # Drop rows with null embeddings
-                valid_df = valid_df[valid_df[DataFrameKeys.embeddings_key].notna()]
                 if valid_df.empty:
                     continue
 
@@ -140,12 +175,8 @@ class CustomEmbeddingCluster:
                 while len(existing_splade_list) < len(new_centroids_list):
                     existing_splade_list.append(None)
 
-                # Encode all valid texts once for SPLADE centroid computation
-                encoder = SPLADEEncoder()
-                all_splade_vecs = None
-                if encoder.is_available and DataFrameKeys.preprocessed_text_key in valid_df.columns:
-                    texts = valid_df[DataFrameKeys.preprocessed_text_key].astype(str).tolist()
-                    all_splade_vecs = encoder.encode(texts)
+                # SPLADE vectors for this type (pre-computed concurrently above).
+                all_splade_vecs = splade_by_type.get(current_type)
 
                 # Build a mapping from valid_df row index to splade vec index
                 splade_idx_map = {idx: i for i, idx in enumerate(valid_df.index)}

@@ -14,18 +14,14 @@ to avoid circular dependencies.
 
 from __future__ import annotations
 
-import asyncio
 import re
 from collections import OrderedDict, defaultdict
 from collections.abc import Callable, Mapping
 from typing import Any
 
 import pandas as pd
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.prompts import ChatPromptTemplate
 
-from src.llm import prompts
-from src.llm.client import QgenieModels
+from src.llm.client import cummilative_summary_generation, error_summary_generation
 from src.logger import AppLogger
 from src.reports.html_renderer import HTMLRenderer
 from src.utils.timer import execution_timer
@@ -685,84 +681,6 @@ class KPICalculator:
 # ---------------------------------------------------------------------------
 # LLM-based summary generation
 # ---------------------------------------------------------------------------
-
-
-@execution_timer
-def error_summary_generation(errors_list: list[str]) -> str:
-    """Generate a concise error summary from a list of error strings via LLM.
-
-    Args:
-        errors_list: Raw error log strings.
-
-    Returns:
-        Summary string produced by the LLM.
-    """
-    prompt_template = ChatPromptTemplate.from_messages(
-        [("system", prompts.ERROR_SUMMARIZATION_PROMPT), ("human", prompts.ERROR_LOGS_LIST)]
-    )
-    model_to_use = QgenieModels.azure_o3_mini
-    if len(errors_list) >= 10:
-        model_to_use = QgenieModels.gemini_2_5_pro
-    chain = prompt_template | model_to_use | StrOutputParser()
-    error_logs = "\n\n".join(f"Error Logs {i}:\n{error}" for i, error in enumerate(errors_list, start=1))
-    return chain.invoke({"logs": error_logs})
-
-
-@execution_timer
-def cummilative_summary_generation(errors_list: list[str], short_final_summary: bool = False) -> str:
-    """Generate a cumulative summary across windows of error logs.
-
-    Args:
-        errors_list: Raw error log strings.
-        short_final_summary: When ``True``, uses a shorter final-summary prompt.
-
-    Returns:
-        Cumulative summary string.
-    """
-
-    def _chunk(iterable, size: int):
-        for i in range(0, len(iterable), size):
-            yield iterable[i : i + size]
-
-    async def _process_windows_concurrently(windows: list) -> list[str]:
-        semaphore = asyncio.Semaphore(5)
-
-        async def _process_window(index: int, error_window: list) -> tuple[int, str]:
-            async with semaphore:
-                logger.info(f"Processing window: {index} with length: {len(error_window)}")
-                pt = ChatPromptTemplate.from_messages(
-                    [("system", prompts.SUMMARY_GENERATION_PROMPT), ("human", prompts.ERROR_LOGS_LIST)]
-                )
-                chain = pt | QgenieModels.azure_gpt_5_4 | StrOutputParser()
-                error_logs = "\n\n".join(f"Error Logs {i}:\n{e}" for i, e in enumerate(error_window, start=1))
-                summary = await chain.ainvoke({"logs": error_logs})
-                return index, summary
-
-        tasks = [_process_window(i, window) for i, window in enumerate(windows, start=1)]
-        results = await asyncio.gather(*tasks)
-        return [summary for _, summary in sorted(results, key=lambda x: x[0])]
-
-    error_windows = list(_chunk(errors_list, 10))
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_closed():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-    summaries_list = loop.run_until_complete(_process_windows_concurrently(error_windows))
-    logger.info(f"Total summaries generated: {len(summaries_list)}. Generating final summary")
-    if short_final_summary:
-        final_pt = ChatPromptTemplate.from_messages(
-            [("system", prompts.SHORT_PARENT_SUMMARY_GENERATION_PROMPT), ("human", prompts.ERROR_LOGS_LIST)]
-        )
-    else:
-        final_pt = ChatPromptTemplate.from_messages(
-            [("system", prompts.PARENT_SUMMARY_GENERATION_PROMPT), ("human", prompts.ERROR_LOGS_LIST)]
-        )
-    chain = final_pt | QgenieModels.gemini_2_5_pro | StrOutputParser()
-    all_summaries_combined = "\n\n".join(
-        f"Error Logs Summary {i}:\n{error}" for i, error in enumerate(errors_list, start=1)
-    )
-    return chain.invoke({"logs": all_summaries_combined})
+# `error_summary_generation` and `cummilative_summary_generation` are imported
+# from `src.llm.client` (the canonical implementations).  They are re-exported
+# below for backward compatibility with existing callers of this module.

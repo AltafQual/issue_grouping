@@ -54,10 +54,10 @@ __all__ = [
     "cummilative_summary_generation",
 ]
 
-_MAX_RETRIES = 10
+_MAX_RETRIES = 4
 
 
-def get_exponential_backoff_delay(attempt: int, base_delay: int = 5, max_delay: int = 200) -> int:
+def get_exponential_backoff_delay(attempt: int, base_delay: int = 5, max_delay: int = 30) -> int:
     """Return exponential back-off delay in seconds for *attempt*.
 
     Args:
@@ -122,7 +122,9 @@ class CustomQGenieChat(QGenieChat):
                 logger.error(f"LLM error (attempt {attempt}): {traceback.format_exc()}")
 
             if attempt < _MAX_RETRIES:
-                time.sleep(get_exponential_backoff_delay(attempt))
+                delay = get_exponential_backoff_delay(attempt)
+                logger.warning(f"LLM retry {attempt}/{_MAX_RETRIES} after {delay}s")
+                time.sleep(delay)
 
         return self._create_chat_result({})
 
@@ -163,7 +165,9 @@ class CustomQGenieChat(QGenieChat):
                 logger.error(f"LLM async error (attempt {attempt}): {traceback.format_exc()}")
 
             if attempt < _MAX_RETRIES:
-                await asyncio.sleep(get_exponential_backoff_delay(attempt))
+                delay = get_exponential_backoff_delay(attempt)
+                logger.warning(f"LLM async retry {attempt}/{_MAX_RETRIES} after {delay}s")
+                await asyncio.sleep(delay)
 
         return self._create_chat_result({})
 
@@ -278,7 +282,7 @@ class NearDuplicateResult(BaseModel):
 class NearDuplicateResultList(BaseModel):
     """LLM response schema for a batch of near-duplicate pair assessments."""
 
-    results: list = list[NearDuplicateResult]
+    results: list[NearDuplicateResult] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

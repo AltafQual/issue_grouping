@@ -217,15 +217,16 @@ class ClusterSearcher(IClusterSearcher):
 
         result_names, result_classes = [], []
         for q, idx, score in zip(queries, best_indices, best_scores):
+            q_display = f"'{q[:40]}'" if q and q.strip() else "<matching embeddings>"
             if idx >= 0:
                 name = cluster_names[idx]
                 result_names.append(name)
                 result_classes.append(metadata[name].get("class", float("nan")))
-                logger.info(f"[Searcher] Batch match: '{q[:40]}' → '{name}' (score={score:.3f})")
+                logger.info(f"[Searcher] Batch match: {q_display} → '{name}' (score={score:.3f})")
             else:
                 result_names.append(ClusterSpecificKeys.non_grouped_key)
                 result_classes.append(float("nan"))
-                logger.debug(f"[Searcher] Batch no match: '{q[:40]}' (best={score:.3f})")
+                logger.debug(f"[Searcher] Batch no match: {q_display} (best={score:.3f})")
 
         return result_names, result_classes, best_scores, embeddings
 

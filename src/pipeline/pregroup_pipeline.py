@@ -126,27 +126,40 @@ async def fuzzy_cluster_grouping(
         )
 
         if grouped_indices:
-            # Try DB lookup for each group before calling LLM
-            custom_cluster = CustomEmbeddingCluster()
+            # Batch DB lookup: stack all eligible group centroids into one matrix and
+            # look them up in a single async call (replaces a serial sync loop).
             type_ = failures_dataframe.iloc[0]["type"] if "type" in failures_dataframe.columns else None
             groups_needing_llm = []
+            db_eligible: list[tuple[int, np.ndarray]] = []  # (orig_index, centroid)
 
-            for group in grouped_indices:
-                db_matched = False
+            for i, group in enumerate(grouped_indices):
                 if precomputed_embeddings is not None and type_ and "_embed_pos" in failures_dataframe.columns:
                     positions = [int(failures_dataframe.iloc[idx]["_embed_pos"]) for idx in group]
                     valid_positions = [p for p in positions if p < len(precomputed_embeddings)]
                     if valid_positions:
                         group_embs = precomputed_embeddings[valid_positions]
                         centroid = group_embs.mean(axis=0).astype(np.float32)
-                        norm = np.linalg.norm(centroid)
-                        if norm > 0:
-                            centroid = centroid / norm
-                        db_name, _ = custom_cluster._search_with_embedding(type_, centroid)
-                        if db_name != ClusterSpecificKeys.non_grouped_key:
-                            failures_dataframe.loc[group, DataFrameKeys.cluster_name] = db_name
-                            db_matched = True
-                if not db_matched:
+                        db_eligible.append((i, centroid))
+                        continue
+                groups_needing_llm.append(group)
+
+            db_assigned: dict[int, str] = {}
+            if db_eligible:
+                centroid_matrix = np.stack([c for _, c in db_eligible])
+                db_names, _, _ = await CustomEmbeddingCluster().batch_search(
+                    type_=type_,
+                    queries=[""] * len(db_eligible),
+                    precomputed_embeddings=centroid_matrix,
+                )
+                for (orig_idx, _), db_name in zip(db_eligible, db_names):
+                    if db_name != ClusterSpecificKeys.non_grouped_key:
+                        db_assigned[orig_idx] = db_name
+
+            for orig_idx, _ in db_eligible:
+                group = grouped_indices[orig_idx]
+                if orig_idx in db_assigned:
+                    failures_dataframe.loc[group, DataFrameKeys.cluster_name] = db_assigned[orig_idx]
+                else:
                     groups_needing_llm.append(group)
 
             # Only call LLM for groups that didn't match DB
@@ -291,8 +304,7 @@ async def splade_pregroup(
             # Fallback: precomputed array matches work_df exactly (all rows unclustered)
             sparse_vecs = precomputed_splade_vecs
     else:
-        loop = asyncio.get_running_loop()
-        sparse_vecs = await loop.run_in_executor(None, encoder.encode, texts)
+        sparse_vecs = await encoder.aencode(texts)
     if sparse_vecs is None:
         logger.warning(f"[SPLADEPregroup] type={type_}: encoding returned None, skipping pre-grouping")
         return df
@@ -361,22 +373,31 @@ async def splade_pregroup(
         embeddings_list = await FallbackEmbeddings().aembed(all_group_texts)
         embeddings_array = np.array(embeddings_list)
 
-    # --- For each group: try DB lookup first, collect misses for LLM ---
-    custom_cluster = CustomEmbeddingCluster()
+    # --- Batch DB lookup: stack all group centroids into one matrix and look them up in
+    # a single async call.  This collapses what used to be G sequential sync HTTP calls
+    # (one per group, each ~10 s when SPLADE_API_URL is set) into one batch.
     groups_needing_llm: list[list[int]] = []
+    db_assigned: list[Optional[str]] = [None] * len(groups)
 
-    for group_positions, (emb_start, emb_count) in zip(groups, group_text_ranges):
-        group_embeddings = embeddings_array[emb_start : emb_start + emb_count]
-        centroid = group_embeddings.mean(axis=0)
-        norm = np.linalg.norm(centroid)
-        if norm > 0:
-            centroid = centroid / norm
+    if type_:
+        centroid_matrix = np.stack(
+            [
+                embeddings_array[emb_start : emb_start + emb_count].mean(axis=0)
+                for (emb_start, emb_count) in group_text_ranges
+            ]
+        ).astype(np.float32)
+        db_names, _, _ = await CustomEmbeddingCluster().batch_search(
+            type_=type_,
+            queries=[""] * len(groups),
+            precomputed_embeddings=centroid_matrix,
+        )
+        for i, db_cluster_name in enumerate(db_names):
+            if db_cluster_name != ClusterSpecificKeys.non_grouped_key:
+                db_assigned[i] = db_cluster_name
 
-        db_cluster_name = ClusterSpecificKeys.non_grouped_key
-        if type_:
-            db_cluster_name, _ = custom_cluster._search_with_embedding(type_, centroid)
-
-        if db_cluster_name != ClusterSpecificKeys.non_grouped_key:
+    for i, group_positions in enumerate(groups):
+        db_cluster_name = db_assigned[i]
+        if db_cluster_name is not None:
             group_df_indices = [indices[pos] for pos in group_positions]
             df.loc[group_df_indices, cluster_col] = db_cluster_name
             logger.debug(f"[SPLADEPregroup] DB hit: group of {len(group_positions)} rows → '{db_cluster_name}'")

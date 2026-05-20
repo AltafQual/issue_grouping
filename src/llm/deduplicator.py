@@ -271,28 +271,47 @@ class Deduplicator:
         rename_map: dict[str, str] = {}
 
         def resolve(name: str) -> str:
-            while name in rename_map:
+            seen: set[str] = set()
+            while name in rename_map and name not in seen:
+                seen.add(name)
                 name = rename_map[name]
             return name
 
-        for batch in self._chunked(candidate_pairs, self.pairs_per_batch):
+        batches = list(self._chunked(candidate_pairs, self.pairs_per_batch))
+        concurrency = 8
+        sem = asyncio.Semaphore(concurrency)
+        progress = {"done": 0}
+
+        async def _process_batch(batch: list[tuple[str, str, float]]):
             pairs_block = self._build_pairs_block(batch, representative_logs)
-            try:
-                response = await chain.ainvoke({"pairs_block": pairs_block})
-                for item in response:
-                    if not isinstance(item, dict):
-                        continue
-                    if not item.get("is_duplicate"):
-                        continue
-                    a = resolve(item.get("cluster_a", ""))
-                    b = resolve(item.get("cluster_b", ""))
-                    keep = item.get("keep_name") or a
-                    drop = b if keep == a else a
-                    if drop and keep and drop != keep:
-                        rename_map[drop] = keep
-                        logger.info(f"[Deduplicator] LLM confirmed: '{drop}' → '{keep}'")
-            except Exception as exc:
-                logger.warning(f"[Deduplicator] LLM batch failed: {exc}")
+            async with sem:
+                try:
+                    result = await chain.ainvoke({"pairs_block": pairs_block})
+                except Exception as exc:
+                    logger.warning(f"[Deduplicator] LLM batch failed: {exc}")
+                    result = []
+                progress["done"] += 1
+                if progress["done"] % 10 == 0 or progress["done"] == len(batches):
+                    logger.info(f"[Deduplicator] {progress['done']}/{len(batches)} batches done")
+                return result
+
+        logger.info(f"[Deduplicator] Submitting {len(batches)} batches with concurrency={concurrency}")
+        responses = await asyncio.gather(*[_process_batch(b) for b in batches])
+
+        for response in responses:
+            items = response.get("results") if isinstance(response, dict) else response
+            for item in items or []:
+                if not isinstance(item, dict):
+                    continue
+                if not item.get("is_duplicate"):
+                    continue
+                a = resolve(item.get("cluster_a", ""))
+                b = resolve(item.get("cluster_b", ""))
+                keep = item.get("keep_name") or a
+                drop = b if keep == a else a
+                if drop and keep and drop != keep:
+                    rename_map[drop] = keep
+                    logger.info(f"[Deduplicator] LLM confirmed: '{drop}' → '{keep}'")
 
         return rename_map
 
@@ -488,14 +507,14 @@ def _give_cluster_names_and_reassign_misc_clusters(df: pd.DataFrame, cluster_res
 
 
 @execution_timer
-def _recluster_with_context(df: pd.DataFrame) -> pd.DataFrame:
+async def _recluster_with_context(df: pd.DataFrame) -> pd.DataFrame:
     unclustered_df = df[df[DataFrameKeys.cluster_type_int] == ClusterSpecificKeys.non_grouped_key]
     error_logs = [
         {"index": int(idx), "error log": row[DataFrameKeys.preprocessed_text_key]}
         for idx, row in unclustered_df.iterrows()
     ]
     chain = ChatPromptTemplate.from_template(prompts.RECLUSTERING_PROMPT) | QgenieModels.azure_o3 | _recluster_parser
-    outliers_recluster_results = chain.invoke({"error_logs": error_logs})
+    outliers_recluster_results = await chain.ainvoke({"error_logs": error_logs})
     df_index_set = set(df.index)
     for result in outliers_recluster_results:
         name, indices = result.get("cluster_name"), result.get("log_indices")
@@ -515,7 +534,7 @@ def _recluster_with_context(df: pd.DataFrame) -> pd.DataFrame:
 
 
 @execution_timer
-def subcluster_verifier_failed(df: pd.DataFrame) -> pd.DataFrame:
+async def subcluster_verifier_failed(df: pd.DataFrame) -> pd.DataFrame:
     """Sub-cluster VerifierFailed logs using the LLM in batches.
 
     Args:
@@ -560,7 +579,7 @@ def subcluster_verifier_failed(df: pd.DataFrame) -> pd.DataFrame:
             if not unassigned_in_batch:
                 break
             try:
-                response = chain.invoke(
+                response = await chain.ainvoke(
                     {
                         "logs": unassigned_in_batch,
                         "previous_clusters": {k: list(v) for k, v in previous_clusters_agg.items()},
@@ -629,7 +648,7 @@ async def qgenie_post_processing(df: pd.DataFrame) -> pd.DataFrame:
             df = _give_cluster_names_and_reassign_misc_clusters(df, analyzed_results)
         df = detect_cluster_outlier(df)
         df = reassign_unclustered_logs(df)
-        df = _recluster_with_context(df)
+        df = await _recluster_with_context(df)
     except Exception as e:
         logger.error(f"Exception in qgenie_post_processing: {e}")
         traceback.print_exc()
