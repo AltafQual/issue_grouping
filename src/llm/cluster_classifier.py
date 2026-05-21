@@ -113,12 +113,16 @@ async def assign_cluster_class(df: pd.DataFrame) -> pd.DataFrame:
 
         tasks = [classify_cluster(cluster_name) for cluster_name in unique_clusters]
         results = await asyncio.gather(*tasks)
+        failure_count = 0
         for result in results:
-            if not result:
+            if result is None or result[0] is None:
+                failure_count += 1
                 continue
             indices, class_str = result
             df.loc[indices, DataFrameKeys.cluster_class] = class_str
             logger.info(f"Updated {len(indices)} rows with class '{class_str}'")
+        if failure_count == len(unique_clusters) and unique_clusters:
+            raise RuntimeError(f"All {failure_count} cluster classification requests failed")
     except Exception as e:
         logger.error(f"assign_cluster_class error: {e}")
         logger.error(traceback.format_exc())

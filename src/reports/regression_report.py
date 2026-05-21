@@ -15,6 +15,7 @@ or ``src.regression_api_call``.
 
 from __future__ import annotations
 
+import html as _html
 import os
 
 import requests
@@ -289,11 +290,24 @@ class RegressionAnalysisReport:
             for issue_grouped_cluster_dict in cluster_data:
                 log_path = issue_grouped_cluster_dict.get("log_path", "N/A")
                 log_link = (
-                    f"<a href='https://aisw-hyd.qualcomm.com/fs/{log_path}'>Log</a>" if log_path != "N/A" else "N/A"
+                    f"<a href='https://aisw-hyd.qualcomm.com/fs/{_html.escape(str(log_path))}'>Log</a>"
+                    if log_path != "N/A"
+                    else "N/A"
                 )
-                inner_html_content += f"<tr><td>{issue_grouped_cluster_dict.get('tc_uuid', 'N/A')}</td><td>{issue_grouped_cluster_dict.get('name', 'N/A')}</td><td>{issue_grouped_cluster_dict.get('soc_name', 'N/A')}</td><td>{issue_grouped_cluster_dict.get('runtime', 'N/A')}</td><td>{issue_grouped_cluster_dict.get('reason', 'N/A')}</td><td>{log_link}</td></tr>"
+                inner_html_content += (
+                    f"<tr>"
+                    f"<td>{_html.escape(str(issue_grouped_cluster_dict.get('tc_uuid', 'N/A')))}</td>"
+                    f"<td>{_html.escape(str(issue_grouped_cluster_dict.get('name', 'N/A')))}</td>"
+                    f"<td>{_html.escape(str(issue_grouped_cluster_dict.get('soc_name', 'N/A')))}</td>"
+                    f"<td>{_html.escape(str(issue_grouped_cluster_dict.get('runtime', 'N/A')))}</td>"
+                    f"<td>{_html.escape(str(issue_grouped_cluster_dict.get('reason', 'N/A')))}</td>"
+                    f"<td>{log_link}</td>"
+                    f"</tr>"
+                )
 
-            html_content += f"<h2>{cluster_name} Details -- Total Occurences {len(cluster_data)}</h2>"
+            html_content += (
+                f"<h2>{_html.escape(str(cluster_name))} Details -- Total Occurences {len(cluster_data)}</h2>"
+            )
             html_content += inner_html_content
             html_content += "</table></body></html>"
 
@@ -327,8 +341,21 @@ class RegressionAnalysisReport:
         html_content += "<table border='1'><tr><th>TC UUID</th><th>Name</th><th>Cluster Name</th><th>Runtime</th><th>Reason</th><th>Log</th></tr>"
         for soc_data in soc_regression_data:
             log_path = soc_data.get("log_path", "N/A")
-            log_link = f"<a href='https://aisw-hyd.qualcomm.com/fs/{log_path}'>Log</a>" if log_path != "N/A" else "N/A"
-            html_content += f"<tr><td>{soc_data.get('tc_uuid', 'N/A')}</td><td>{soc_data.get('name', 'N/A')}</td><td>{soc_data.get('clusters', 'N/A')}</td><td>{soc_data.get('runtime', 'N/A')}</td><td>{soc_data.get('reason', 'N/A')}</td><td>{log_link}</td></tr>"
+            log_link = (
+                f"<a href='https://aisw-hyd.qualcomm.com/fs/{_html.escape(str(log_path))}'>Log</a>"
+                if log_path != "N/A"
+                else "N/A"
+            )
+            html_content += (
+                f"<tr>"
+                f"<td>{_html.escape(str(soc_data.get('tc_uuid', 'N/A')))}</td>"
+                f"<td>{_html.escape(str(soc_data.get('name', 'N/A')))}</td>"
+                f"<td>{_html.escape(str(soc_data.get('clusters', 'N/A')))}</td>"
+                f"<td>{_html.escape(str(soc_data.get('runtime', 'N/A')))}</td>"
+                f"<td>{_html.escape(str(soc_data.get('reason', 'N/A')))}</td>"
+                f"<td>{log_link}</td>"
+                f"</tr>"
+            )
 
         html_content += "</table></body></html>"
         with open(file_path, "w") as f:
@@ -348,8 +375,22 @@ class RegressionAnalysisReport:
         html_content += "<table border='1'><tr><th>TC UUID</th><th>Name</th><th>Cluster Name</th><th>Type</th><th>SOC Name</th><th>Reason</th><th>Log</th></tr>"
         for runtime_data in runtime_regression_data:
             log_path = runtime_data.get("log_path", "N/A")
-            log_link = f"<a href='https://aisw-hyd.qualcomm.com/fs/{log_path}'>Log</a>" if log_path != "N/A" else "N/A"
-            html_content += f"<tr><td>{runtime_data.get('tc_uuid', 'N/A')}</td><td>{runtime_data.get('name', 'N/A')}</td><td>{runtime_data.get('clusters', 'N/A')}</td><td>{runtime_data.get('type', 'N/A')}</td><td>{runtime_data.get('soc_name', 'N/A')}</td><td>{runtime_data.get('reason', 'N/A')}</td><td>{log_link}</td></tr>"
+            log_link = (
+                f"<a href='https://aisw-hyd.qualcomm.com/fs/{_html.escape(str(log_path))}'>Log</a>"
+                if log_path != "N/A"
+                else "N/A"
+            )
+            html_content += (
+                f"<tr>"
+                f"<td>{_html.escape(str(runtime_data.get('tc_uuid', 'N/A')))}</td>"
+                f"<td>{_html.escape(str(runtime_data.get('name', 'N/A')))}</td>"
+                f"<td>{_html.escape(str(runtime_data.get('clusters', 'N/A')))}</td>"
+                f"<td>{_html.escape(str(runtime_data.get('type', 'N/A')))}</td>"
+                f"<td>{_html.escape(str(runtime_data.get('soc_name', 'N/A')))}</td>"
+                f"<td>{_html.escape(str(runtime_data.get('reason', 'N/A')))}</td>"
+                f"<td>{log_link}</td>"
+                f"</tr>"
+            )
 
         html_content += "</table></body></html>"
         with open(file_path, "w") as f:
@@ -369,16 +410,30 @@ class RegressionAnalysisReport:
         html_content = f"<html><head><title>Model Level Failure Details</title>{REPORT_CSS}</head><body><div class='container'><h1>Model Level Failure Details</h1>"
 
         for model_name, model_data in model_regression_data.items():
-            html_content += f"<h2>{model_name}</h2>"
+            html_content += f"<h2>{_html.escape(str(model_name))}</h2>"
 
             html_content += "<table border='1'><tr><th>TC UUID</th><th>Name</th><th>Type</th><th>Cluster Name</th><th>Type</th><th>SOC Name</th><th>Run Time</th><th>Error</th><th>Log</th></tr>"
             for data in model_data:
                 cluster_name = data.get("clusters", "")
                 log_path = data.get("log_path", "N/A")
                 log_link = (
-                    f"<a href='https://aisw-hyd.qualcomm.com/fs/{log_path}'>Log</a>" if log_path != "N/A" else "N/A"
+                    f"<a href='https://aisw-hyd.qualcomm.com/fs/{_html.escape(str(log_path))}'>Log</a>"
+                    if log_path != "N/A"
+                    else "N/A"
                 )
-                html_content += f"<tr><td>{data.get('tc_uuid', 'N/A')}</td><td>{data.get('name', 'N/A')}</td><td>{data.get('type', 'N/A')}</td><td>{data.get('clusters', 'N/A')}</td><td>{data.get('type', 'N/A')}</td><td>{data.get('soc_name', 'N/A')}</td><td>{data.get('runtime', 'N/A')}</td><td>{data.get('reason', 'N/A')}</td><td>{log_link}</td></tr>"
+                html_content += (
+                    f"<tr>"
+                    f"<td>{_html.escape(str(data.get('tc_uuid', 'N/A')))}</td>"
+                    f"<td>{_html.escape(str(data.get('name', 'N/A')))}</td>"
+                    f"<td>{_html.escape(str(data.get('type', 'N/A')))}</td>"
+                    f"<td>{_html.escape(str(data.get('clusters', 'N/A')))}</td>"
+                    f"<td>{_html.escape(str(data.get('type', 'N/A')))}</td>"
+                    f"<td>{_html.escape(str(data.get('soc_name', 'N/A')))}</td>"
+                    f"<td>{_html.escape(str(data.get('runtime', 'N/A')))}</td>"
+                    f"<td>{_html.escape(str(data.get('reason', 'N/A')))}</td>"
+                    f"<td>{log_link}</td>"
+                    f"</tr>"
+                )
 
                 # store the errors for summary generation
                 if cluster_name not in cluster_names_seen:

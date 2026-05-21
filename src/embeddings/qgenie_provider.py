@@ -168,6 +168,7 @@ class FallbackEmbeddings(Embeddings, EmbeddingProvider):
         self.qgenie_embeddings = QGenieBGEM3Embedding()
         self.timeout = timeout
         self._batch_sem: asyncio.Semaphore | None = None
+        self._batch_sem_lock = threading.Lock()
         super().__init__()
 
     def _try_embed_sub_batch(self, sub_batch: list) -> list:
@@ -232,7 +233,11 @@ class FallbackEmbeddings(Embeddings, EmbeddingProvider):
                     sub_results.extend(self._try_embed_sub_batch(sub_batch))
                 except Exception as e:
                     err_str = str(e)
-                    if "500" in err_str or "internal server error" in err_str.lower():
+                    status_code = getattr(getattr(e, "response", None), "status_code", None)
+                    is_server_error = (status_code is not None and status_code >= 500) or (
+                        "500" in err_str or "internal server error" in err_str.lower()
+                    )
+                    if is_server_error:
                         if current_batch_size == 1:
                             raise RuntimeError(f"Failed to generate embeddings even with batch size 1: {e}") from e
                         logger.warning(
@@ -318,7 +323,11 @@ class FallbackEmbeddings(Embeddings, EmbeddingProvider):
                     sub_results.extend(await self._try_aembed_sub_batch(sub_batch))
                 except Exception as e:
                     err_str = str(e)
-                    if "500" in err_str or "internal server error" in err_str.lower():
+                    status_code = getattr(getattr(e, "response", None), "status_code", None)
+                    is_server_error = (status_code is not None and status_code >= 500) or (
+                        "500" in err_str or "internal server error" in err_str.lower()
+                    )
+                    if is_server_error:
                         if current_batch_size == 1:
                             raise RuntimeError(f"Failed to generate embeddings even with batch size 1: {e}") from e
                         logger.warning(
@@ -358,7 +367,9 @@ class FallbackEmbeddings(Embeddings, EmbeddingProvider):
         batches = [data[i : i + batch_size] for i in range(0, len(data), batch_size)]
 
         if self._batch_sem is None:
-            self._batch_sem = asyncio.Semaphore(EmbeddingConfigurations.MAX_CONCURRENT_BATCHES)
+            with self._batch_sem_lock:
+                if self._batch_sem is None:
+                    self._batch_sem = asyncio.Semaphore(EmbeddingConfigurations.MAX_CONCURRENT_BATCHES)
 
         async def process_batch(batch: list, index: int) -> list:
             async with self._batch_sem:

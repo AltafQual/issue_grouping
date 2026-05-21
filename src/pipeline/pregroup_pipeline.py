@@ -297,7 +297,8 @@ async def splade_pregroup(
     if precomputed_splade_vecs is not None:
         # precomputed_splade_vecs is already aligned with df rows (caller subsets before passing).
         # Map work_df positions to local df positions (not global _embed_pos).
-        local_positions = [df.index.get_loc(idx) for idx in work_df.index]
+        idx_to_pos = {idx: pos for pos, idx in enumerate(df.index)}
+        local_positions = [idx_to_pos[idx] for idx in work_df.index]
         if max(local_positions) < precomputed_splade_vecs.shape[0]:
             sparse_vecs = precomputed_splade_vecs[local_positions]
         else:
@@ -309,8 +310,15 @@ async def splade_pregroup(
         logger.warning(f"[SPLADEPregroup] type={type_}: encoding returned None, skipping pre-grouping")
         return df
 
-    # Pairwise SPLADE dot products → (N, N) dense matrix
-    sim_matrix = (sparse_vecs @ sparse_vecs.T).toarray()
+    # Pairwise SPLADE dot products → (N, N) dense matrix, computed in chunks to
+    # avoid materialising the full dense array (O(n²) memory) at once.
+    _SPLADE_CHUNK = 256
+    n = sparse_vecs.shape[0]
+    sim_rows = []
+    for _start in range(0, n, _SPLADE_CHUNK):
+        _chunk = sparse_vecs[_start : _start + _SPLADE_CHUNK]
+        sim_rows.append((_chunk @ sparse_vecs.T).toarray())
+    sim_matrix = np.vstack(sim_rows)
 
     assigned = [False] * len(indices)
     groups = []

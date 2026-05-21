@@ -361,18 +361,7 @@ class ErrorNormalizer(INormalizer):
 
 @execution_timer
 def preprocess_error_log(log: str) -> str:
-    # Truncate early to avoid O(n) regex cost on multi-MB raw logs.
-    if len(log) > 20000:
-        log = log[:6000] + " ... " + log[-14000:]
-    log = re.sub(r"\b\d{1,4}(\.\d+)?ms\b", "", log)
-    log = re.sub(r"^\d+[:\-]\s*", "", log, flags=re.MULTILINE)
-    log = re.sub(r"(?<=\S)\n(?=\S)", " ", log)
-    log = re.sub(r"build version:.*?(,|$)", "", log, flags=re.IGNORECASE)
-    log = re.sub(r"version:.*?\\b", "", log, flags=re.IGNORECASE)
-    log = re.sub(r"[\[\]\'\"`]", " ", log)
-    log = re.sub(r"^[^a-zA-Z]+", "", log)
-    log = re.sub(r"\s+", " ", log).strip()
-    return log.lower()
+    return ErrorNormalizer().normalize_for_embedding(log)
 
 
 def is_empty_error_log(s):

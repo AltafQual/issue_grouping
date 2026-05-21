@@ -28,7 +28,7 @@ from src.utils.run_id_utils import iterate_db_get_testplan
 
 logger = AppLogger().get_logger(__name__)
 proc = psutil.Process()
-TTL_CACHE = TTLCache(maxsize=9000, ttl=(604800 * 604800))
+TTL_CACHE = TTLCache(maxsize=9000, ttl=604800)
 NOT_FOUND_CACHE: TTLCache = TTLCache(maxsize=2048, ttl=300)
 LOCK = threading.Lock()
 
@@ -44,6 +44,7 @@ class InitiateConsolidatedReportGeneration(BaseModel):
 
 
 class ModelOps(BaseModel):
+    model_config = {"protected_namespaces": ()}
     model_names: list = Field(description="list of all the model Names")
 
 
@@ -324,7 +325,8 @@ async def get_two_run_ids_cluster_info(cluster_info_object: ClusterInfo) -> Dict
                         cluster_entries = cluster_df.to_dict(orient="records")
                         response.type[test_type][runtime][cluster_name] = cluster_entries
 
-                for model_name, model_df in df.groupby("name"):
+                _name_col = "name" if "name" in df.columns else ("model_name" if "model_name" in df.columns else None)
+                for model_name, model_df in (df.groupby(_name_col) if _name_col else []):
                     model_cluster_details = model_df.to_dict(orient="records")
                     if model_name not in response.model:
                         response.model[model_name] = []
@@ -409,7 +411,7 @@ async def get_run_id_cluster_info(cluster_info_object: OneClusterInfo) -> Dict:
         result = TTL_CACHE[cluster_info_object.run_id]
         result.time_taken = round(time.time() - start_time)
         return result.to_dict()
-    
+
     analyzer = FailureAnalyzer()
     dataframe = await asyncio.to_thread(analyzer.load_data, None, None, cluster_info_object.run_id)
 
@@ -440,7 +442,7 @@ async def get_run_id_cluster_info(cluster_info_object: OneClusterInfo) -> Dict:
         DataFrameKeys.cluster_name,
         DataFrameKeys.cluster_class,
     ]
-    column_names_to_rename = {"model_name": "name", "log": "log_path"}
+    column_names_to_rename = { "log": "log_path"}
 
     try:
         # Run clustering and previous run lookup concurrently
@@ -466,10 +468,8 @@ async def get_run_id_cluster_info(cluster_info_object: OneClusterInfo) -> Dict:
             raise clustered_response
 
         for test_type, df in clustered_response.items():
-            df = df[df.columns.intersection(cols_to_keep)]
-            for col_name in column_names_to_rename:
-                if col_name in df.columns:
-                    df.rename(columns={col_name: column_names_to_rename[col_name]}, inplace=True)
+            df = df[df.columns.intersection(cols_to_keep)].copy()
+            df = df.rename(columns={k: v for k, v in column_names_to_rename.items() if k in df.columns})
 
             if "tc_uuid" in df.columns:
                 df["previous_regression"] = df["tc_uuid"].isin(prev_failed_uuids)
@@ -481,7 +481,8 @@ async def get_run_id_cluster_info(cluster_info_object: OneClusterInfo) -> Dict:
                     cluster_entries = cluster_df.to_dict(orient="records")
                     response.type[test_type][runtime][cluster_name] = cluster_entries
 
-            for model_name, model_df in df.groupby("name"):
+            _name_col = "name" if "name" in df.columns else ("model_name" if "model_name" in df.columns else None)
+            for model_name, model_df in (df.groupby(_name_col) if _name_col else []):
                 model_cluster_details = model_df.to_dict(orient="records")
                 if model_name not in response.model:
                     response.model[model_name] = []

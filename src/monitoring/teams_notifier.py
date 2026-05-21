@@ -302,7 +302,18 @@ class TeamsNotifier(INotifier):
         if not self.webhook_url:
             logger.warning("TEAMS_WEBHOOK_URL is not set — skipping Teams notification")
             return
-        asyncio.run(self._send_async(runs))
+        try:
+            _loop = asyncio.get_running_loop()
+        except RuntimeError:
+            _loop = None
+
+        if _loop and _loop.is_running():
+            import concurrent.futures
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as _ex:
+                _ex.submit(asyncio.run, self._send_async(runs)).result()
+        else:
+            asyncio.run(self._send_async(runs))
 
     async def _send_async(self, runs: list) -> None:
         try:

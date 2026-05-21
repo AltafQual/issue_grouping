@@ -33,7 +33,7 @@ from src.reports.kpi_calculator import (
     KPICalculator,
     OrderedDefaultDict,
     generate_executive_summary,
-    get_cummilative_sumary
+    get_cummilative_sumary,
 )
 from src.reports.regression_report import RegressionAnalysisReport, get_two_run_ids_cluster_info
 from src.utils.run_id_utils import iterate_db_get_testplan
@@ -129,7 +129,7 @@ class CombinedRegressionAnalysis:
         self._regression_html_paths = OrderedDefaultDict(str)
         self.__processed_run_id = False
         self.combined_soc_errors_list = []
-        self.combined_model_errros_list = []
+        self.combined_model_errors_list = []
         self.combined_type_runtime_wise_errors_dict = {}
         self._qairt_id = None
         self.list_of_summay_to_avoid = ["no logs to provide", "no logs"]
@@ -311,7 +311,7 @@ class CombinedRegressionAnalysis:
 
             prev_id = self.consolidated_report_analysis.build_prev_run_id(_id)
             logger.info(f"Processing: {_id}: {prev_id}")
-            regression_json = get_two_run_ids_cluster_info(_id, prev_id, force=True)
+            regression_json = get_two_run_ids_cluster_info(_id, prev_id)
             regression_analysis = RegressionAnalysisReport(qairt_id)
             html_path = regression_analysis.generate_regression_analysis_report(_id, prev_id, regression_json)
             logger.info(f"HTML for {_id}: {html_path}")
@@ -353,6 +353,7 @@ class CombinedRegressionAnalysis:
         for repo_name, gerrits_data in project_wise_gerrits.items():
             html_content += f"<h3>Repository Name: {repo_name}</h3>"
             html_content += "<table border='1'><tr><th>Gerrit Raised By</th><th>Email</th><th>Commit Message</th><th>Gerrit Link</th></tr>"
+            rows = []
             for data in gerrits_data:
                 commit_url_val = data.get("commit_url") or ""
                 commit_url = f"<a href='{commit_url_val}' target='_blank'>Gerrit</a>" if commit_url_val else "-"
@@ -360,7 +361,10 @@ class CombinedRegressionAnalysis:
                 raised_by_name = raised_by[0].get("name", "-") if raised_by else "-"
                 raised_by_email = raised_by[0].get("email", "-") if raised_by else "-"
                 commit_message = data.get("commit_message") or "-"
-                html_content += f"<tr><td>{raised_by_name}</td><td>{raised_by_email}</td><td>{commit_message}</td><td>{commit_url}</td></tr>"
+                rows.append(
+                    f"<tr><td>{raised_by_name}</td><td>{raised_by_email}</td><td>{commit_message}</td><td>{commit_url}</td></tr>"
+                )
+            html_content += "".join(rows)
             html_content += "</table>"
 
         html_content += "</body></html>"

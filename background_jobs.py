@@ -67,6 +67,7 @@ def nightly_stability_monitor_job():
 if __name__ == "__main__":
     worker_manager = BackgroundWorkerManager()
     worker_manager.start()
+    _now = datetime.now(IST)
     try:
         scheduler.add_job(
             consolidated_report_processing_job,
@@ -74,7 +75,7 @@ if __name__ == "__main__":
             id="qairt_reports",
             max_instances=1,
             coalesce=True,
-            next_run_time=datetime.now(IST),
+            next_run_time=_now,
         )
         scheduler.add_job(
             run_ids_issue_grouping_processing,
@@ -83,7 +84,7 @@ if __name__ == "__main__":
             max_instances=1,
             coalesce=True,
             misfire_grace_time=3600,
-            next_run_time=datetime.now(IST),
+            next_run_time=_now + timedelta(minutes=3),
         )
         scheduler.add_job(
             nightly_stability_monitor_job,
@@ -93,7 +94,7 @@ if __name__ == "__main__":
             max_instances=1,
             coalesce=True,
             misfire_grace_time=3600,
-            next_run_time=datetime.now(IST),
+            next_run_time=_now + timedelta(minutes=6),
         )
         scheduler.start()
     finally:

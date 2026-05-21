@@ -79,7 +79,7 @@ def create_excel_with_clusters(
                 if col in cluster_df.columns:
                     cluster_df[col] = cluster_df[col].apply(_clean_excel_string)
 
-            cluster_df = cluster_df.applymap(_clean_excel_string)
+            cluster_df = cluster_df.map(_clean_excel_string)
             cluster_df.to_excel(writer, sheet_name=sheet_name, index=False)
             sheet_created = True
 

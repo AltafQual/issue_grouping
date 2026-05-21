@@ -356,14 +356,17 @@ def cummilative_summary_generation(errors_list: list[str], short_final_summary: 
 
     error_windows = list(_chunk(errors_list, 10))
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_closed():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+        _loop = asyncio.get_running_loop()
     except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-    summaries_list = loop.run_until_complete(_process_windows_concurrently(error_windows))
+        _loop = None
+
+    if _loop and _loop.is_running():
+        import concurrent.futures
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as _ex:
+            summaries_list = _ex.submit(asyncio.run, _process_windows_concurrently(error_windows)).result()
+    else:
+        summaries_list = asyncio.run(_process_windows_concurrently(error_windows))
 
     logger.info(f"Total summaries generated: {len(summaries_list)}. Generating final summary.")
     final_sys = (

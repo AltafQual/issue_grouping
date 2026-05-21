@@ -18,6 +18,7 @@ This module sits in the **data** layer.  It imports only from:
 from __future__ import annotations
 
 import os
+import time
 from typing import Optional
 
 import httpx
@@ -31,6 +32,7 @@ logger = AppLogger().get_logger(__name__)
 __all__ = ["load_run_id_via_dag_api"]
 
 _DAG_API_TIMEOUT_S = 30.0
+_DAG_API_MAX_RETRIES = 3
 
 
 def _fetch_excel_report_path(run_id: str) -> Optional[str]:
@@ -50,43 +52,58 @@ def _fetch_excel_report_path(run_id: str) -> Optional[str]:
         return None
 
     query = f'run_id="{run_id}"'
-    try:
-        with httpx.Client(timeout=_DAG_API_TIMEOUT_S, verify=False) as client:
-            resp = client.get(
-                NIGHTLY_EXECUTION.DAG_API_BASE,
-                params={"query": query},
-                headers={
-                    "accept": "application/json",
-                    "Authorization": f"Bearer {token}",
-                },
-            )
-        resp.raise_for_status()
-        body = resp.json()
-    except httpx.HTTPStatusError as exc:
-        logger.warning(
-            "DAG API returned HTTP %s for run_id=%s: %s",
-            exc.response.status_code,
-            run_id,
-            exc.response.text,
-        )
-        return None
-    except Exception as exc:
-        logger.warning("DAG API request failed for run_id=%s: %s", run_id, exc)
-        return None
+    last_exc: Exception | None = None
+    for attempt in range(_DAG_API_MAX_RETRIES):
+        try:
+            with httpx.Client(timeout=_DAG_API_TIMEOUT_S, verify=False) as client:
+                resp = client.get(
+                    NIGHTLY_EXECUTION.DAG_API_BASE,
+                    params={"query": query},
+                    headers={
+                        "accept": "application/json",
+                        "Authorization": f"Bearer {token}",
+                    },
+                )
+            resp.raise_for_status()
+            body = resp.json()
 
-    jobs = body.get("data") or []
-    if not jobs:
-        logger.info("DAG API returned no jobs for run_id=%s", run_id)
-        return None
+            jobs = body.get("data") or []
+            if not jobs:
+                logger.info("DAG API returned no jobs for run_id=%s", run_id)
+                return None
 
-    for job in jobs:
-        if job.get("run_id") == run_id:
-            path = (job.get("excel_report_path") or "").strip()
-            if path:
-                return path
+            for job in jobs:
+                if job.get("run_id") == run_id:
+                    path = (job.get("excel_report_path") or "").strip()
+                    if path:
+                        return path
 
-    path = (jobs[0].get("excel_report_path") or "").strip()
-    return path or None
+            path = (jobs[0].get("excel_report_path") or "").strip()
+            return path or None
+
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code < 500:
+                logger.warning(
+                    "DAG API returned HTTP %s for run_id=%s: %s",
+                    exc.response.status_code,
+                    run_id,
+                    exc.response.text,
+                )
+                return None  # 4xx — client error, no retry
+            last_exc = exc
+        except Exception as exc:
+            last_exc = exc
+
+        if attempt < _DAG_API_MAX_RETRIES - 1:
+            time.sleep(2.0**attempt)
+
+    logger.warning(
+        "DAG API request failed after %d attempts for run_id=%s: %s",
+        _DAG_API_MAX_RETRIES,
+        run_id,
+        last_exc,
+    )
+    return None
 
 
 def load_run_id_via_dag_api(run_id: str) -> Optional[pd.DataFrame]:

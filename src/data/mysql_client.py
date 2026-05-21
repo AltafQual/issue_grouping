@@ -75,15 +75,15 @@ class ConnectToMySql(IDataLoader):
 
     def __init__(
         self,
-        user: str = "mlg_rw",
-        secret: str = "gH@d8Jk9@1",
-        host: str = "hydcrpmysqlprd10",
-        db: str = "mlg-qa",
+        user: str | None = None,
+        secret: str | None = None,
+        host: str | None = None,
+        db: str | None = None,
     ) -> None:
-        self.user = user
-        self.secret = secret
-        self.host = host
-        self.db = db
+        self.user = user or os.environ.get("MYSQL_USER", "mlg_rw")
+        self.secret = secret or os.environ.get("MYSQL_PASSWORD")
+        self.host = host or os.environ.get("MYSQL_HOST", "hydcrpmysqlprd10")
+        self.db = db or os.environ.get("MYSQL_DB", "mlg-qa")
 
     # ------------------------------------------------------------------
     # IDataLoader contract
@@ -120,6 +120,8 @@ class ConnectToMySql(IDataLoader):
         Raises:
             DatabaseError: On authentication, missing-DB, or other connection failure.
         """
+        if not self.secret:
+            raise DatabaseError("MYSQL_PASSWORD is not set — cannot connect to MySQL")
         try:
             return msqlconnector.connect(
                 user=self.user,
@@ -127,6 +129,7 @@ class ConnectToMySql(IDataLoader):
                 host=self.host,
                 database=self.db,
                 use_pure=True,
+                connection_timeout=10,
             )
         except msqlconnector.Error as err:
             if err.errno == msqlconnector.errorcode.ER_ACCESS_DENIED_ERROR:
@@ -200,24 +203,30 @@ class ConnectToMySql(IDataLoader):
         try:
             with self.connection_context() as cnx:
                 tables = self._get_past_result_table_names(include_result=True) if fetch_all else ["result"]
-                filter_clause = f"WHERE testplan_id LIKE '%{filters}%'" if filters else ""
-                frames = []
-                for table in tables:
-                    query = f"SELECT DISTINCT(testplan_id) FROM {table} " f"{filter_clause} ORDER BY testplan_id DESC"
-                    try:
-                        frames.append(pd.read_sql(query, cnx))
-                    except Exception as table_exc:
-                        logger.warning("Skipping table %s: %s", table, table_exc)
-                        continue
+                # Build a single UNION query across all tables (one round-trip instead of N).
+                # Table names come from internal year/month arithmetic — not user input — so
+                # f-string interpolation of the table name is safe here.
+                filter_clause = "WHERE testplan_id LIKE %s" if filters else ""
+                params = [f"%{filters}%"] * len(tables) if filters else []
+                union_parts = [f"SELECT DISTINCT testplan_id FROM {t} {filter_clause}" for t in tables]
+                union_query = " UNION ".join(union_parts) + " ORDER BY testplan_id DESC"
+                try:
+                    overall = pd.read_sql(union_query, cnx, params=params if params else None)
+                except Exception as exc:
+                    logger.warning("UNION fetch_runids failed (%s); retrying per-table", exc)
+                    frames = []
+                    for table in tables:
+                        try:
+                            q = f"SELECT DISTINCT testplan_id FROM {table} {filter_clause} ORDER BY testplan_id DESC"
+                            frames.append(pd.read_sql(q, cnx, params=[f"%{filters}%"] if filters else None))
+                        except Exception as table_exc:
+                            logger.warning("Skipping table %s: %s", table, table_exc)
+                    overall = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
         except DatabaseError:
             raise
         except Exception as exc:
             raise DatabaseError("Failed to fetch run IDs", cause=exc) from exc
 
-        if not frames:
-            return pd.DataFrame()
-
-        overall = pd.concat(frames, ignore_index=True)
         if overall.empty:
             return pd.DataFrame()
 
@@ -275,13 +284,13 @@ class ConnectToMySql(IDataLoader):
                     r1.log AS log_path, r1.dsp_type
                 FROM {table} r1
                 JOIN {table} r2 ON r1.tc_uuid = r2.tc_uuid
-                WHERE r1.testplan_id = "{test_id_a}"
-                  AND r2.testplan_id = "{test_id_b}"
+                WHERE r1.testplan_id = %s
+                  AND r2.testplan_id = %s
                   AND r1.result = 'FAIL'
                   AND r2.result = 'PASS'
                 """
                 with self.connection_context() as cnx:
-                    df = pd.read_sql(query, cnx)
+                    df = pd.read_sql(query, cnx, params=[test_id_a, test_id_b])
                 if not df.empty:
                     return df
             except Exception as exc:
@@ -300,12 +309,12 @@ class ConnectToMySql(IDataLoader):
         Returns:
             Single-row DataFrame, or empty DataFrame if not found.
         """
-        query = (
-            f"SELECT * FROM error_map_qgenie "
-            f'WHERE test_type = "{type}" AND runtime = "{runtime}" '
-            f'AND cluster_name = "{cluster_name}";'
-        )
-        df = self.fetch_data(query)
+        with self.connection_context() as cnx:
+            df = pd.read_sql(
+                "SELECT * FROM error_map_qgenie WHERE test_type = %s AND runtime = %s AND cluster_name = %s",
+                cnx,
+                params=[type, runtime, cluster_name],
+            )
         if df.empty:
             logger.warning(f"No error_map_qgenie row for type={type}, runtime={runtime}, cluster={cluster_name}")
         return df

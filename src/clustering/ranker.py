@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+from scipy.stats import rankdata
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.neighbors import LocalOutlierFactor
 
@@ -105,9 +106,9 @@ class ClusterRanker:
             lo, hi = sims.min(), sims.max()
             norm_scores = (sims - lo) / (hi - lo) if hi - lo > 1e-9 else np.ones(len(sims))
 
-            # Rank descending (1 = highest similarity)
+            # Rank descending (1 = highest similarity); single O(n log n) pass
             n = len(sims)
-            ranks = n - np.argsort(np.argsort(sims))
+            ranks = (n + 1 - rankdata(sims, method="ordinal")).astype(int)
 
             core_threshold = np.percentile(norm_scores, (1 - self.core_percentile) * 100)
 

@@ -169,7 +169,10 @@ class HybridSPLADEMatcher:
             cluster_mat = self._cluster_matrix(type_, cluster_names, enc)
             if query_vecs is not None and cluster_mat is not None:
                 raw_splade = (query_vecs @ cluster_mat.T).toarray()  # (N, C)
-                splade_matrix = np.vstack([self._minmax(row) for row in raw_splade])
+                lo = raw_splade.min(axis=1, keepdims=True)
+                hi = raw_splade.max(axis=1, keepdims=True)
+                denom = np.where(hi - lo > 1e-9, hi - lo, 1.0)
+                splade_matrix = (raw_splade - lo) / denom
                 score_matrix = self.alpha * cosine_matrix + self.beta * splade_matrix
                 mode = f"hybrid(α={self.alpha},β={self.beta})"
 
