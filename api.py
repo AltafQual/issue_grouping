@@ -405,12 +405,11 @@ async def get_run_id_cluster_info(cluster_info_object: OneClusterInfo) -> Dict:
     response = OneClusterInfoResponse()
     response.run_id = cluster_info_object.run_id
 
-    if cluster_info_object.force != True and cluster_info_object.run_id in NOT_FOUND_CACHE:
-        response.status = 404
-        response.error_message = f"No data Found for runid: {cluster_info_object.run_id}"
-        response.time_taken = round(time.time() - start_time, 2)
-        return response.to_dict()
-
+    if (cluster_info_object.run_id) in TTL_CACHE and cluster_info_object.force != True:
+        result = TTL_CACHE[cluster_info_object.run_id]
+        result.time_taken = round(time.time() - start_time)
+        return result.to_dict()
+    
     analyzer = FailureAnalyzer()
     dataframe = await asyncio.to_thread(analyzer.load_data, None, None, cluster_info_object.run_id)
 
@@ -420,11 +419,6 @@ async def get_run_id_cluster_info(cluster_info_object: OneClusterInfo) -> Dict:
         response.error_message = f"No data Found for runid: {cluster_info_object.run_id}"
         response.time_taken = round(time.time() - start_time, 2)
         return response.to_dict()
-
-    if (cluster_info_object.run_id) in TTL_CACHE and cluster_info_object.force != True:
-        result = TTL_CACHE[cluster_info_object.run_id]
-        result.time_taken = round(time.time() - start_time)
-        return result.to_dict()
 
     cols_to_keep = [
         "tc_uuid",

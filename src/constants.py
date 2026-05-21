@@ -132,3 +132,11 @@ class StabilityReportConfig:
 
     # Idempotency tracking for the Jenkins-invoked nightly-stability-report job.
     PROCESSED_STABILITY_RUN_IDS_PATH: str = "stability_assets/processed_stability_runids.json"
+
+
+@dataclass
+class EmbeddingConfigurations:
+    ASYNC_BATCH_TIMEOUT_S: int = 300
+    ASYNC_TIMEOUT_RETRIES: int = 1
+    ASYNC_TIMEOUT_BACKOFF_S: int = 5
+    MAX_CONCURRENT_BATCHES: int = 2

@@ -27,7 +27,7 @@ import time
 from langchain.embeddings.base import Embeddings
 from qgenie.integrations.langchain import QGenieEmbeddings
 
-from src.constants import QGENEIE_API_KEY
+from src.constants import QGENEIE_API_KEY, EmbeddingConfigurations
 from src.embeddings.base import EmbeddingProvider
 from src.logger import AppLogger
 from src.utils.timer import execution_timer
@@ -167,6 +167,7 @@ class FallbackEmbeddings(Embeddings, EmbeddingProvider):
     def __init__(self, timeout: int = 600) -> None:
         self.qgenie_embeddings = QGenieBGEM3Embedding()
         self.timeout = timeout
+        self._batch_sem: asyncio.Semaphore | None = None
         super().__init__()
 
     def _try_embed_sub_batch(self, sub_batch: list) -> list:
@@ -280,10 +281,26 @@ class FallbackEmbeddings(Embeddings, EmbeddingProvider):
         return results
 
     async def _try_aembed_sub_batch(self, sub_batch: list) -> list:
-        return await asyncio.wait_for(
-            self.qgenie_embeddings.aembed_without_retry(sub_batch),
-            timeout=120,
-        )
+        last_exc: Exception | None = None
+        for attempt in range(EmbeddingConfigurations.ASYNC_TIMEOUT_RETRIES + 1):
+            try:
+                return await asyncio.wait_for(
+                    self.qgenie_embeddings.aembed_without_retry(sub_batch),
+                    timeout=EmbeddingConfigurations.ASYNC_BATCH_TIMEOUT_S,
+                )
+            except asyncio.TimeoutError as e:
+                last_exc = e
+                if attempt < EmbeddingConfigurations.ASYNC_TIMEOUT_RETRIES:
+                    logger.warning(
+                        "embedding sub-batch timeout (size=%d, attempt=%d/%d), retrying after %ds",
+                        len(sub_batch),
+                        attempt + 1,
+                        EmbeddingConfigurations.ASYNC_TIMEOUT_RETRIES + 1,
+                        EmbeddingConfigurations.ASYNC_TIMEOUT_BACKOFF_S,
+                    )
+                    await asyncio.sleep(EmbeddingConfigurations.ASYNC_TIMEOUT_BACKOFF_S)
+        assert last_exc is not None
+        raise last_exc
 
     async def _aembed_batch_with_size_reduction(self, batch: list, batch_start: int) -> list:
         """Async embed a batch, halving sub-batch size on HTTP 500 errors.
@@ -340,16 +357,24 @@ class FallbackEmbeddings(Embeddings, EmbeddingProvider):
         batch_size = 500
         batches = [data[i : i + batch_size] for i in range(0, len(data), batch_size)]
 
+        if self._batch_sem is None:
+            self._batch_sem = asyncio.Semaphore(EmbeddingConfigurations.MAX_CONCURRENT_BATCHES)
+
         async def process_batch(batch: list, index: int) -> list:
-            batch_start = index * batch_size
-            batch_end = min(batch_start + batch_size, len(data))
-            logger.info(f"Processing batch: documents {batch_start} to {batch_end - 1}")
-            result = await self._aembed_batch_with_size_reduction(batch, batch_start)
-            logger.info(f"Completed batch with {len(batch)} documents")
-            return result
+            async with self._batch_sem:
+                batch_start = index * batch_size
+                batch_end = min(batch_start + batch_size, len(data))
+                logger.info(f"Processing batch: documents {batch_start} to {batch_end - 1}")
+                result = await self._aembed_batch_with_size_reduction(batch, batch_start)
+                logger.info(f"Completed batch with {len(batch)} documents")
+                return result
 
         batch_tasks = [process_batch(batch, i) for i, batch in enumerate(batches)]
-        batch_results = await asyncio.gather(*batch_tasks)
+        batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
+
+        for r in batch_results:
+            if isinstance(r, BaseException):
+                raise r
 
         results = []
         for batch_result in batch_results:

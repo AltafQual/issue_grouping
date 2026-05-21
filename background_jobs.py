@@ -39,7 +39,10 @@ def run_ids_issue_grouping_processing():
             pipeline = ClusteringPipeline(update_vector_store=True)
             for run_id in recent_ids:
                 if run_id and any(run_id.startswith(tag) for tag in ["QNN", "SNPE"]):
-                    await pipeline.process_run_id(run_id, mode=ExecutionMode.SEQUENTIAL)
+                    try:
+                        await pipeline.process_run_id(run_id, mode=ExecutionMode.SEQUENTIAL)
+                    except Exception:
+                        logger.exception("process_run_id failed for run_id=%s", run_id)
 
         asyncio.run(_process())
         logger.info("run_ids_issue_grouping_processing finished")
