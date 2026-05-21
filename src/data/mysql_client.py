@@ -31,6 +31,7 @@ import pandas as pd
 from src.constants import DataFrameKeys
 from src.core.exceptions import DatabaseError
 from src.core.interfaces import IDataLoader
+from src.data.dag_api_loader import load_run_id_via_dag_api
 from src.logger import AppLogger
 from src.utils.run_id_utils import extract_embedded_datetime
 from src.utils.timer import execution_timer
@@ -649,4 +650,12 @@ def find_regressions_between_two_tests(tc_id_a: str, tc_id_b: str) -> pd.DataFra
 
 @execution_timer
 def get_tc_id_df(tc_id: str):
+    try:
+        df = load_run_id_via_dag_api(tc_id)
+        if df is not None and not df.empty:
+            return df
+    except Exception as exc:
+        logger.warning("DAG API loader raised for run_id=%s; falling back to SQL: %s", tc_id, exc)
+
+    logger.info("Falling back to MySQL fetch for run_id=%s", tc_id)
     return sql_connection.fetch_result_based_on_runid(tc_id)
