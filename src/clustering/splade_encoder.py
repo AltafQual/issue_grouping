@@ -39,6 +39,22 @@ logger = AppLogger().get_logger(__name__)
 __all__ = ["SPLADEEncoder"]
 
 
+def _csr_from_response(data: dict) -> scipy.sparse.csr_matrix:
+    """Reconstruct a CSR matrix from the SPLADE API's sparse response payload.
+
+    The server emits ``{shape, indptr, indices, data}`` — scipy CSR's native
+    triple — so the client never has to materialise a dense intermediate.
+    """
+    return scipy.sparse.csr_matrix(
+        (
+            np.asarray(data["data"], dtype=np.float32),
+            np.asarray(data["indices"], dtype=np.int32),
+            np.asarray(data["indptr"], dtype=np.int32),
+        ),
+        shape=tuple(data["shape"]),
+    )
+
+
 class SPLADEEncoder:
     """Singleton SPLADE sparse encoder.
 
@@ -134,6 +150,12 @@ class SPLADEEncoder:
                     inputs = {k: v.to(self._device) for k, v in inputs.items()}
                     logits = self._model(**inputs).logits  # (batch, seq_len, vocab_size)
                     sparse_vecs = torch.log(1 + torch.relu(logits)).max(dim=1).values.cpu()  # (batch, vocab_size)
+                    del logits, inputs
+                if self._device == "cuda":
+                    try:
+                        torch.cuda.empty_cache()
+                    except Exception:
+                        pass
                 return scipy.sparse.csr_matrix(sparse_vecs.numpy())
         except Exception as exc:
             logger.error(f"[SPLADE] Encoding failed: {exc}")
@@ -151,8 +173,7 @@ class SPLADEEncoder:
             if data.get("status") != 200:
                 logger.warning(f"[SPLADE] Remote API error: {data.get('error')}")
                 return None
-            embeddings = np.array(data["embeddings"], dtype=np.float32)
-            return scipy.sparse.csr_matrix(embeddings)
+            return _csr_from_response(data)
         except Exception as exc:
             logger.warning(f"[SPLADE] Remote encode failed ({self._remote_url}): {exc}")
             return None
@@ -194,8 +215,7 @@ class SPLADEEncoder:
             if data.get("status") != 200:
                 logger.warning(f"[SPLADE] Remote API error: {data.get('error')}")
                 return None
-            embeddings = np.array(data["embeddings"], dtype=np.float32)
-            return scipy.sparse.csr_matrix(embeddings)
+            return _csr_from_response(data)
         except Exception as exc:
             logger.warning(f"[SPLADE] Async remote encode failed ({self._remote_url}): {exc}")
             return None

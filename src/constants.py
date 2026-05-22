@@ -63,6 +63,7 @@ class SPLADEConfigurations:
     pregroup_threshold: float = 0.80
     low_cohesion_threshold: float = 0.35
     core_member_percentile: float = 0.50
+    max_inference_chunk: int = 256  # server-side chunk size; large requests are split internally
 
 
 @dataclass

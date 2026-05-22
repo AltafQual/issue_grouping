@@ -11,9 +11,11 @@ Running
     # development
     uvicorn splade_api:app --reload --port 8002
 
-    # production (multi-worker)
-    gunicorn -w 2 -k uvicorn.workers.UvicornWorker \\
-        -b 0.0.0.0:8002 "splade_api:app" --graceful-timeout 30
+    # production (single worker — model holds GPU; recycle to bound RSS)
+    gunicorn -w 1 -k uvicorn.workers.UvicornWorker \\
+        --max-requests 500 --max-requests-jitter 50 \\
+        -b 0.0.0.0:8002 "splade_api:app" \\
+        --graceful-timeout 30 --timeout 120
 
 Environment variables
 ---------------------
@@ -25,11 +27,13 @@ import asyncio
 from contextlib import asynccontextmanager
 from typing import Dict
 
+import scipy.sparse
 from fastapi import FastAPI
 from fastapi.responses import ORJSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
 from src.clustering.splade_encoder import SPLADEEncoder
+from src.constants import SPLADEConfigurations
 from src.logger import AppLogger
 
 logger = AppLogger().get_logger(__name__)
@@ -79,11 +83,6 @@ async def health() -> Dict:
 
 @app.post("/api/splade/encode/", status_code=200)
 async def splade_encode(request: SpladeEncodeRequest) -> Dict:
-    """Encode a list of texts using the SPLADE sparse encoder.
-
-    Returns dense float vectors (one per input text) along with model metadata.
-    Uses GPU for inference when a CUDA device is available.
-    """
     if not request.texts:
         return ORJSONResponse(status_code=400, content={"status": 400, "error": "texts list cannot be empty"})
 
@@ -92,7 +91,20 @@ async def splade_encode(request: SpladeEncodeRequest) -> Dict:
         return ORJSONResponse(status_code=503, content={"status": 503, "error": "SPLADE model is not available"})
 
     loop = asyncio.get_event_loop()
-    vecs = await loop.run_in_executor(None, enc.encode, request.texts)
+    chunk_size = max(1, SPLADEConfigurations.max_inference_chunk)
+    texts = request.texts
+
+    if len(texts) <= chunk_size:
+        vecs = await loop.run_in_executor(None, enc.encode, texts)
+    else:
+        chunks = [texts[i : i + chunk_size] for i in range(0, len(texts), chunk_size)]
+        parts = []
+        for chunk in chunks:
+            part = await loop.run_in_executor(None, enc.encode, chunk)
+            if part is None:
+                return ORJSONResponse(status_code=500, content={"status": 500, "error": "Encoding failed"})
+            parts.append(part)
+        vecs = scipy.sparse.vstack(parts, format="csr")
 
     if vecs is None:
         return ORJSONResponse(status_code=500, content={"status": 500, "error": "Encoding failed"})
@@ -100,8 +112,10 @@ async def splade_encode(request: SpladeEncodeRequest) -> Dict:
     return {
         "status": 200,
         "model": enc._model_name,
-        "device": enc.device,
-        "vocab_size": vecs.shape[1],
-        "count": vecs.shape[0],
-        "embeddings": vecs.toarray().tolist(),
+        "vocab_size": int(vecs.shape[1]),
+        "count": int(vecs.shape[0]),
+        "shape": [int(vecs.shape[0]), int(vecs.shape[1])],
+        "indptr": vecs.indptr.tolist(),
+        "indices": vecs.indices.tolist(),
+        "data": vecs.data.tolist(),
     }
