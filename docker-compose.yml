@@ -1,3 +1,21 @@
+# YAML anchor: shared NFS access setup for both fastapi and streamlit.
+# The Qualcomm /prj filers are exported with root_squash, so a container
+# running as root gets mapped to nobody and can't read altaf-owned files.
+# Running as altaf's uid:gid + adding the supplementary groups (especially
+# aisw-team and the access.aisw.qipl.filer.* groups) makes NFS permission
+# checks succeed exactly the way they would in the host shell.
+x-host-user: &host-user
+  # Defaults are altaf on this host; on a different host, export UID/GID
+  # before `make up` to override (e.g. `export UID=$(id -u) GID=$(id -g)`).
+  user: "${UID:-4741839}:${GID:-200}"
+  group_add:
+    - "100965"  # mlg
+    - "106477"  # aisw-team
+    - "108971"  # access.aisw.qipl.filers
+    - "109029"  # access.aisw.qipl.filer.int.ro
+    - "109031"  # access.aisw.qipl.filer.ext.ro
+    - "109919"  # access.aisw.dev
+
 # YAML anchor: the env vars that BOTH the FastAPI service and the Streamlit
 # service need (Streamlit pages import src/data/mysql_client and src/failure_
 # analyzer directly, so they touch MySQL, QGenie, SPLADE, etc. just like the
@@ -30,12 +48,18 @@ x-app-env: &app-env
   # the config into the container. If unreachable the previous-testplan
   # lookup is silently skipped (fastapi still returns clustering data).
   - QA2_CONFIG_FILE_PATH
+  # Disable .pyc writing: when the container runs as a non-root user (see
+  # x-host-user), it can't write __pycache__/ next to root-owned source
+  # files. Setting this env var skips the writes silently — there's no
+  # runtime cost (existing .pyc baked into the image are still used).
+  - PYTHONDONTWRITEBYTECODE=1
   # Explicit value with fallback (boolean toggle):
   - SEND_EMAIL=${SEND_EMAIL:-false}
 
 services:
   streamlit:
     container_name: streamlit
+    <<: *host-user
     build:
       context: .
       dockerfile: Dockerfile.streamlit
@@ -47,6 +71,21 @@ services:
     # STREAMLIT_SERVER_HEADLESS=true and STREAMLIT_SERVER_PORT=8501 are baked
     # into Dockerfile.streamlit, so we only list app-level env here.
     environment: *app-env
+    volumes:
+      # Same NFS mount as fastapi — streamlit pages import the same loaders
+      # (failure_analyzer, mysql_client, regression_report) and need read
+      # access to /prj/qct/webtech_hyd*/... and /prj/qct/webtech_scratch*/...
+      - type: bind
+        source: /prj/qct
+        target: /prj/qct
+        read_only: true
+        bind:
+          # rslave: when the host's autofs triggers a new NFS mount under
+          # /prj/qct, the mount event propagates into the container.
+          # Without this, paths under autofs trigger points (e.g.
+          # /prj/qct/webtech_scratch3/...) appear missing inside the
+          # container even though they resolve on the host.
+          propagation: rslave
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8501/_stcore/health', timeout=2).status == 200 else 1)\""]
       interval: 15s
@@ -58,6 +97,7 @@ services:
 
   fastapi:
     container_name: fastapi
+    <<: *host-user
     build:
       context: .
       dockerfile: Dockerfile.fastapi
@@ -71,6 +111,21 @@ services:
       # Vector DB lives on the host — excluded from the image (.dockerignore)
       # so builds stay small. The worker writes new centroids here at runtime.
       - ./issue_grouping_db:/app/issue_grouping_db
+      # Read-only NFS root. Covers every host path the code references at
+      # runtime: webtech_hyd7 (QA2 YAML), webtech_hyd11 (gerrit tag info),
+      # webtech_hyd19 (consolidated reports), webtech_scratch3 (DAG API
+      # xlsx reports). Without this, the container only sees /app and any
+      # explicit mount, so loaders fall back to MySQL or fail.
+      # `:ro` keeps the container from writing to the shared NFS tree.
+      - type: bind
+        source: /prj/qct
+        target: /prj/qct
+        read_only: true
+        bind:
+          # rslave: see streamlit volumes above. /prj/qct/webtech_scratch3
+          # and similar are autofs trigger points; without rslave the
+          # container can't see new automounts after `docker compose up`.
+          propagation: rslave
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8010/api', timeout=3).status in (200,307,308) else 1)\""]
       interval: 15s
