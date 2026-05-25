@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wc -l /prj/qct/webtech_scratch29/altaf/issue_grouping/issue_grouping/src/*.py)",
+      "Read(//prj/qct/webtech_scratch29/altaf/issue_grouping/**)",
+      "Bash(python3 -c \":*)",
+      "Bash(python3 merge_duplicate_clusters.py --dry-run)",
+      "Bash(python3:*)",
+      "Bash(wc -l grep -n \"can this be merged\\\\|merge to\\\\|merged to\\\\|merged with\\\\|merge with\\\\|merge into\\\\|merged into\" cluster_names_all_folders.txt)",
+      "Bash(find /prj/qct/webtech_scratch29/altaf/issue_grouping/issue_grouping/issue_grouping_db_copy -name \"*.bak\" -delete)",
+      "Bash(find /prj/qct/webtech_scratch29/altaf/issue_grouping/issue_grouping/issue_grouping_db_copy -name \"*.cls_bak\" -delete)",
+      "Bash(python:*)",
+      "Bash(source .venv/bin/activate)",
+      "Bash(ls -lh /prj/qct/webtech_hyd19/CONSOLIDATED_REPORTS/qaisw-v2.46.0.260312041218_nightly/regression_htmls/QNN-v2.46.0.260312041218_llm-llm_nightly_QNN-v2.45.0.260311041706_llm-llm_nightly/*.html)"
+    ]
+  }
+}
