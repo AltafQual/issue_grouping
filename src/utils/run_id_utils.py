@@ -515,14 +515,21 @@ def iterate_db_get_testplan(testplan_id):
 
     Returns:
         Tuple ``(p_n_df, p_r_df, previous_testplan_id, previous_release_testplan_id)``.
+        On any failure (missing config, DB unreachable, etc.) returns the
+        zero-init tuple ``(empty_df, empty_df, None, None)`` and logs a warning.
+        Library code MUST NOT call ``sys.exit`` — this function is invoked
+        from the FastAPI executor and a SystemExit there bubbles up as a
+        non-Exception BaseException that callers' ``except Exception`` and
+        ``isinstance(..., Exception)`` guards silently miss.
     """
     yaml_file = CONSOLIDATED_REPORTS.qa2_config_file_path
     p_n_df, p_r_df, previous_testplan_id, previous_release_testplan_id = (pd.DataFrame(), pd.DataFrame(), None, None)
 
     if not yaml_file:
-        logger.info("Error: QA2_CONFIG_FILE_PATH environment variable not set.")
-        sys.exit(1)
+        logger.warning("QA2 config file path is not configured; skipping previous-testplan lookup.")
+        return p_n_df, p_r_df, previous_testplan_id, previous_release_testplan_id
 
+    session = None
     try:
         yaml_info = read_yaml(yaml_file)
         mysql_info = yaml_info["Database"]
@@ -551,11 +558,16 @@ def iterate_db_get_testplan(testplan_id):
                     _, p_r_df = get_testplan_execution_status_df(session, valid)
 
     except Exception as e:
-        logger.info(f"Error: {e}")
-        sys.exit(1)
+        logger.warning(f"iterate_db_get_testplan failed for {testplan_id}: {e!r}")
+        # Return whatever we have so far — partial results are useful, and
+        # the caller's existing `if p_n_df.empty` / `if previous_testplan_id`
+        # guards handle missing data gracefully.
     finally:
-        if "session" in locals():
-            session.close()
+        if session is not None:
+            try:
+                session.close()
+            except Exception:
+                pass
 
     return p_n_df, p_r_df, previous_testplan_id, previous_release_testplan_id
 

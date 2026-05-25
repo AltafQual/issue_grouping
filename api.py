@@ -452,20 +452,32 @@ async def get_run_id_cluster_info(cluster_info_object: OneClusterInfo) -> Dict:
 
         clustered_response, prev_run_data = await asyncio.gather(clustering_task, prev_run_task, return_exceptions=True)
 
-        # Extract failed tc_uuids from previous run
+        # Extract failed tc_uuids from previous run.
+        # NOTE: asyncio.gather(return_exceptions=True) captures BaseException, not just
+        # Exception — that includes SystemExit / KeyboardInterrupt. Old code checked
+        # isinstance(..., Exception) which silently let a SystemExit through and tripped
+        # `prev_run_data[0]` with "SystemExit object is not subscriptable".
         prev_failed_uuids = set()
-        if not isinstance(prev_run_data, Exception) and prev_run_data is not None:
+        if not isinstance(prev_run_data, BaseException) and prev_run_data is not None:
             p_n_df = prev_run_data[0]
             if p_n_df is not None and not p_n_df.empty and "result" in p_n_df.columns:
                 prev_failed_uuids = set(p_n_df[p_n_df["result"] != "PASS"]["tc_uuid"].tolist())
                 logger.info(
                     f"{cluster_info_object.run_id}: Found {len(prev_failed_uuids)} failed tc_uuids in previous run"
                 )
-        elif isinstance(prev_run_data, Exception):
-            logger.warning(f"{cluster_info_object.run_id}: Could not fetch previous run data: {prev_run_data}")
+        elif isinstance(prev_run_data, BaseException):
+            logger.warning(f"{cluster_info_object.run_id}: Could not fetch previous run data: {prev_run_data!r}")
 
-        if isinstance(clustered_response, Exception):
-            raise clustered_response
+        if isinstance(clustered_response, BaseException):
+            # If a sub-task raised a non-Exception BaseException (e.g. a library
+            # calling sys.exit), wrap it so the outer `except Exception` below
+            # catches it and we return a clean 500 instead of letting it
+            # propagate up to ASGI.
+            if isinstance(clustered_response, Exception):
+                raise clustered_response
+            raise RuntimeError(
+                f"Clustering sub-task raised non-Exception BaseException: {clustered_response!r}"
+            ) from clustered_response
 
         for test_type, df in clustered_response.items():
             df = df[df.columns.intersection(cols_to_keep)].copy()

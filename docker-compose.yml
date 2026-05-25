@@ -24,6 +24,12 @@ x-app-env: &app-env
   - DAG_API_BEARER_TOKEN
   - TEAMS_WEBHOOK_URL
   - SPLADE_API_URL
+  # Path to the QA2 web config YAML. Default in src/constants.py points at
+  # /prj/qct/webtech_hyd7/... which only exists on Qualcomm-internal hosts;
+  # set this on hosts where it lives elsewhere, or where you've bind-mounted
+  # the config into the container. If unreachable the previous-testplan
+  # lookup is silently skipped (fastapi still returns clustering data).
+  - QA2_CONFIG_FILE_PATH
   # Explicit value with fallback (boolean toggle):
   - SEND_EMAIL=${SEND_EMAIL:-false}
 

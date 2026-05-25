@@ -112,7 +112,14 @@ class CONSOLIDATED_REPORTS:
     prev_release_rc_number: str = "RC4"
 
     prev_run_id_generation_script_path = "/prj/mlgqipl/Satyam/Scripts/get_previous_testplan_id.py"
-    qa2_config_file_path = "/prj/qct/webtech_hyd7/qa2_web/config/config-prod.yaml"
+    # Default points at the host NFS path on Qualcomm-internal hosts. Inside
+    # the container the path doesn't exist, so override via the
+    # QA2_CONFIG_FILE_PATH env var (or bind-mount /prj/qct/webtech_hyd7 into
+    # the container at the same path). When unreachable,
+    # iterate_db_get_testplan returns an empty result instead of raising.
+    qa2_config_file_path = os.getenv(
+        "QA2_CONFIG_FILE_PATH", "/prj/qct/webtech_hyd7/qa2_web/config/config-prod.yaml"
+    )
     PROCESSING_JSON = "./consolidate_report_assests/processing_ids.json"
 
 
