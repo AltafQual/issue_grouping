@@ -9,23 +9,27 @@ Running
 ::
 
     # development
-    uvicorn splade_api:app --reload --port 8002
+    uvicorn splade_api:app --reload --port 8000
 
     # production (single worker — model holds GPU; recycle to bound RSS)
-    PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \\
-    gunicorn -w 1 -k uvicorn.workers.UvicornWorker \\
-        --max-requests 200 --max-requests-jitter 25 \\
-        -b 0.0.0.0:8002 "splade_api:app" \\
-        --graceful-timeout 30 --timeout 120
+    uvicorn splade_api:app \\
+        --host 0.0.0.0 --port 8000 \\
+        --limit-max-requests 200 --timeout-keep-alive 30
 
 Environment variables
 ---------------------
-Same model / cache settings as the main app — ``SPLADEConfigurations`` in
-``src/constants.py`` controls which model variant is loaded.
+Model / cache settings are controlled by ``SPLADEConfigurations`` in
+``src/constants.py``.
 
-``PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`` is set automatically at
-import time (via ``splade_encoder``) and mitigates allocator fragmentation on
-small/shared GPUs.
+``PYTORCH_CUDA_ALLOC_CONF`` is NOT set by this module. If your driver
+supports it (NVIDIA 525+, no vGPU restrictions), you can opt in to the
+expandable-segments allocator by exporting it on the host shell before
+launching the container:
+
+    export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+    make splade-up
+
+Compose forwards it via list-form pass-through.
 """
 
 import asyncio
@@ -33,9 +37,13 @@ import os
 from contextlib import asynccontextmanager
 from typing import Dict
 
-# Belt-and-braces: also set here in case this module is imported before splade_encoder.
-# Must precede any direct or transitive ``import torch``.
-os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+# Note: PYTORCH_CUDA_ALLOC_CONF is intentionally NOT set here. The
+# `expandable_segments` allocator relies on cuMemMap virtual-memory ops that
+# fail with `cudaErrorNotSupported` on some drivers / vGPU profiles, and the
+# failure surfaces only when CUDA is initialised under uvicorn (the bare-import
+# diagnostic doesn't reproduce it). If you need the allocator on a host that
+# supports it, export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True before
+# `make splade-up` — compose forwards env vars in list-form.
 
 import scipy.sparse
 from fastapi import FastAPI

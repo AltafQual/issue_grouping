@@ -24,9 +24,14 @@ import os
 import sys
 from typing import Optional
 
-# Must be set before `import torch`. Mitigates allocator fragmentation on small/shared GPUs
-# (the OOM message itself recommends this). `setdefault` so operators can still override.
-os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+# Note: PYTORCH_CUDA_ALLOC_CONF is intentionally NOT set here. The
+# `expandable_segments` allocator relies on cuMemMap virtual-memory ops that
+# return `cudaErrorNotSupported` on some drivers / vGPU profiles (notably
+# GRID A100D-* partitions), and the failure only manifests once torch is
+# imported under uvicorn — the standalone diagnostic, which doesn't import
+# this module, can't reproduce it. Set the env var on the host shell before
+# `make splade-up` if you want the expandable allocator and your driver
+# supports it.
 
 import httpx
 import numpy as np

@@ -1,7 +1,3 @@
-# =============================================================================
-# Makefile — one-stop shop for all docker workflows for this project
-# =============================================================================
-#
 # Quick start:
 #   make help              # list every target with a one-line description
 #   make build             # build all images
