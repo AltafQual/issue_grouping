@@ -12,8 +12,9 @@ Running
     uvicorn splade_api:app --reload --port 8002
 
     # production (single worker — model holds GPU; recycle to bound RSS)
+    PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \\
     gunicorn -w 1 -k uvicorn.workers.UvicornWorker \\
-        --max-requests 500 --max-requests-jitter 50 \\
+        --max-requests 200 --max-requests-jitter 25 \\
         -b 0.0.0.0:8002 "splade_api:app" \\
         --graceful-timeout 30 --timeout 120
 
@@ -21,11 +22,20 @@ Environment variables
 ---------------------
 Same model / cache settings as the main app — ``SPLADEConfigurations`` in
 ``src/constants.py`` controls which model variant is loaded.
+
+``PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`` is set automatically at
+import time (via ``splade_encoder``) and mitigates allocator fragmentation on
+small/shared GPUs.
 """
 
 import asyncio
+import os
 from contextlib import asynccontextmanager
 from typing import Dict
+
+# Belt-and-braces: also set here in case this module is imported before splade_encoder.
+# Must precede any direct or transitive ``import torch``.
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 import scipy.sparse
 from fastapi import FastAPI
@@ -37,6 +47,23 @@ from src.constants import SPLADEConfigurations
 from src.logger import AppLogger
 
 logger = AppLogger().get_logger(__name__)
+
+# Single-flight gate around the GPU. With a 10 GB vGPU and one process, two
+# concurrent encode requests will OOM the second one. Even with -w 1, uvicorn
+# can dispatch multiple coroutines here, so we serialise at the application
+# layer and run the actual GPU work inside the executor.
+_GPU_SEM = asyncio.Semaphore(1)
+
+
+def _empty_cuda_cache() -> None:
+    """Best-effort cache eviction. Safe on CPU-only hosts and when torch is missing."""
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        pass
 
 
 @asynccontextmanager
@@ -94,17 +121,29 @@ async def splade_encode(request: SpladeEncodeRequest) -> Dict:
     chunk_size = max(1, SPLADEConfigurations.max_inference_chunk)
     texts = request.texts
 
-    if len(texts) <= chunk_size:
-        vecs = await loop.run_in_executor(None, enc.encode, texts)
-    else:
-        chunks = [texts[i : i + chunk_size] for i in range(0, len(texts), chunk_size)]
-        parts = []
-        for chunk in chunks:
-            part = await loop.run_in_executor(None, enc.encode, chunk)
-            if part is None:
-                return ORJSONResponse(status_code=500, content={"status": 500, "error": "Encoding failed"})
-            parts.append(part)
-        vecs = scipy.sparse.vstack(parts, format="csr")
+    async with _GPU_SEM:
+        if len(texts) <= chunk_size:
+            vecs = await loop.run_in_executor(None, enc.encode, texts)
+        else:
+            parts = []
+            i = 0
+            cs = chunk_size
+            while i < len(texts):
+                chunk = texts[i : i + cs]
+                part = await loop.run_in_executor(None, enc.encode, chunk)
+                if part is None:
+                    if cs > 1:
+                        cs = max(1, cs // 2)
+                        await loop.run_in_executor(None, _empty_cuda_cache)
+                        logger.warning(f"[SPLADE API] chunk failed — retrying with chunk_size={cs}")
+                        continue
+                    return ORJSONResponse(status_code=500, content={"status": 500, "error": "Encoding failed"})
+                parts.append(part)
+                i += len(chunk)
+                # Drop reserved GPU memory between chunks so fragmentation cannot snowball
+                # over the lifetime of the worker.
+                await loop.run_in_executor(None, _empty_cuda_cache)
+            vecs = scipy.sparse.vstack(parts, format="csr")
 
     if vecs is None:
         return ORJSONResponse(status_code=500, content={"status": 500, "error": "Encoding failed"})

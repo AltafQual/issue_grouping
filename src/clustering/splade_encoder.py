@@ -24,6 +24,10 @@ import os
 import sys
 from typing import Optional
 
+# Must be set before `import torch`. Mitigates allocator fragmentation on small/shared GPUs
+# (the OOM message itself recommends this). `setdefault` so operators can still override.
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+
 import httpx
 import numpy as np
 import scipy.sparse
@@ -134,32 +138,83 @@ class SPLADEEncoder:
             return None
         if self._remote_url:
             return self._encode_remote(texts)
-        try:
-            if self._is_sparse_encoder:
-                vecs = self._model.encode(texts, show_progress_bar=False)
-                if isinstance(vecs, list):
-                    dense = np.vstack([v.to_dense().cpu().numpy() for v in vecs])
-                elif hasattr(vecs, "to_dense"):
-                    dense = vecs.to_dense().cpu().numpy()
-                else:
-                    dense = np.array(vecs.cpu() if hasattr(vecs, "cpu") else vecs)
-                return scipy.sparse.csr_matrix(dense)
-            else:
-                with torch.no_grad():
-                    inputs = self._tokenizer(texts, padding=True, truncation=True, max_length=512, return_tensors="pt")
-                    inputs = {k: v.to(self._device) for k, v in inputs.items()}
-                    logits = self._model(**inputs).logits  # (batch, seq_len, vocab_size)
-                    sparse_vecs = torch.log(1 + torch.relu(logits)).max(dim=1).values.cpu()  # (batch, vocab_size)
-                    del logits, inputs
+
+        bs = max(1, SPLADEConfigurations.splade_batch_size)
+        max_len = SPLADEConfigurations.splade_max_seq_length
+
+        # Two attempts: full batch, then half on OOM. SpladePooling.chunk_size is set on load
+        # (see _load_quantized_model) so peak GPU memory is already bounded — this retry only
+        # protects against fragmentation pile-up across long-running workers.
+        for attempt in range(2):
+            try:
+                with torch.inference_mode():
+                    if self._is_sparse_encoder:
+                        vecs = self._model.encode(
+                            texts,
+                            batch_size=bs,
+                            show_progress_bar=False,
+                        )
+                        csr = self._sparse_to_csr(vecs)
+                    else:
+                        inputs = self._tokenizer(
+                            texts,
+                            padding=True,
+                            truncation=True,
+                            max_length=max_len,
+                            return_tensors="pt",
+                        )
+                        inputs = {k: v.to(self._device) for k, v in inputs.items()}
+                        logits = self._model(**inputs).logits  # (batch, seq_len, vocab_size)
+                        sparse_vecs = torch.log1p(torch.relu(logits)).max(dim=1).values.cpu()
+                        del logits, inputs
+                        csr = scipy.sparse.csr_matrix(sparse_vecs.numpy())
                 if self._device == "cuda":
                     try:
                         torch.cuda.empty_cache()
                     except Exception:
                         pass
-                return scipy.sparse.csr_matrix(sparse_vecs.numpy())
-        except Exception as exc:
-            logger.error(f"[SPLADE] Encoding failed: {exc}")
-            return None
+                return csr
+            except (torch.cuda.OutOfMemoryError, RuntimeError) as exc:
+                msg = str(exc).lower()
+                if "out of memory" not in msg or attempt == 1 or bs == 1:
+                    logger.error(f"[SPLADE] Encoding failed: {exc}")
+                    return None
+                try:
+                    torch.cuda.empty_cache()
+                except Exception:
+                    pass
+                gc.collect()
+                bs = max(1, bs // 2)
+                logger.warning(f"[SPLADE] OOM caught — retrying with batch_size={bs}")
+        return None
+
+    @staticmethod
+    def _sparse_to_csr(vecs) -> scipy.sparse.csr_matrix:
+        """Convert SparseEncoder.encode() output to a scipy CSR.
+
+        Handles the three return shapes observed across sentence-transformers versions:
+        a single torch sparse tensor, a list of torch sparse tensors, or a dense tensor.
+        Avoids GPU dense materialisation when a sparse representation is already available.
+        """
+        # Single tensor (most common path on recent sentence-transformers).
+        if isinstance(vecs, torch.Tensor):
+            t = vecs.cpu()
+            if t.is_sparse or t.layout in (torch.sparse_coo, torch.sparse_csr):
+                t = t.to_dense() if not hasattr(t, "to_sparse_csr") else t
+            if t.is_sparse:
+                t = t.to_dense()
+            return scipy.sparse.csr_matrix(t.numpy())
+        # List of per-text sparse tensors.
+        if isinstance(vecs, list):
+            rows = []
+            for v in vecs:
+                vt = v.cpu() if hasattr(v, "cpu") else v
+                if hasattr(vt, "is_sparse") and vt.is_sparse:
+                    vt = vt.to_dense()
+                rows.append(np.asarray(vt))
+            return scipy.sparse.csr_matrix(np.vstack(rows))
+        # Numpy or anything array-like.
+        return scipy.sparse.csr_matrix(np.asarray(vecs))
 
     def _encode_remote(self, texts: list[str]) -> Optional[scipy.sparse.csr_matrix]:
         """Call the remote SPLADE API and reconstruct a CSR matrix from the response."""
@@ -292,10 +347,30 @@ class SPLADEEncoder:
             self._is_sparse_encoder = True
             self._available = True
             self._model_name = model_id
+            self._configure_sparse_encoder_memory()
             logger.info(f"[SPLADE] Quantized model loaded: {model_id}")
         except Exception as exc:
             logger.warning(f"[SPLADE] Quantized model unavailable ({exc}); falling back to pure cosine.")
             self._available = False
+
+    def _configure_sparse_encoder_memory(self) -> None:
+        """Bound peak GPU memory by setting SpladePooling.chunk_size and max_seq_length.
+
+        Without this the pooling layer holds the full ``(batch, seq_len, vocab)`` logit
+        tensor at once during max-pool, which OOMs on small/shared GPUs (the library
+        itself logs "Consider setting or decreasing the 'chunk_size' parameter").
+        """
+        try:
+            self._model.max_seq_length = SPLADEConfigurations.splade_max_seq_length
+        except Exception as exc:
+            logger.warning(f"[SPLADE] Could not set max_seq_length: {exc}")
+        try:
+            for module in self._model:
+                if module.__class__.__name__ == "SpladePooling":
+                    module.chunk_size = SPLADEConfigurations.splade_pooling_chunk_size
+                    break
+        except Exception as exc:
+            logger.warning(f"[SPLADE] Could not set SpladePooling chunk_size: {exc}")
 
     def _load_full_model(self) -> None:
         """Load ``naver/splade-cocondenser-ensembledistil`` via transformers (~440 MB)."""

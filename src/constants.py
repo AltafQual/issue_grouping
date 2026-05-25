@@ -63,7 +63,10 @@ class SPLADEConfigurations:
     pregroup_threshold: float = 0.80
     low_cohesion_threshold: float = 0.35
     core_member_percentile: float = 0.50
-    max_inference_chunk: int = 256  # server-side chunk size; large requests are split internally
+    max_inference_chunk: int = 64  # server-side outer chunk; large requests are split internally
+    splade_batch_size: int = 16  # inner SparseEncoder batch_size; bounds (batch * seq_len * vocab) tensor on GPU
+    splade_pooling_chunk_size: int = 32  # SpladePooling chunk along seq-len; caps peak GPU tensor in max-pool
+    splade_max_seq_length: int = 256  # truncation length applied to both encoder paths
 
 
 @dataclass
