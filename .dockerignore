@@ -1,10 +1,94 @@
-.venv
+# =============================================================================
+# .dockerignore — excludes from build context to keep images small & builds fast
+# =============================================================================
+# Build context is everything sent to the docker daemon when you run
+# `docker build`. Files listed here are NEVER copied, even if a Dockerfile says
+# `COPY . .`. Without this file, ~30 GB of caches/data get streamed on every
+# build, slowing it to a crawl.
+#
+# Note: paths are relative to the build context root (the project root).
+
+# --- Version control --------------------------------------------------------
+.git
+.gitignore
+.gitattributes
+
+# --- Python bytecode / build artefacts --------------------------------------
+__pycache__
 *.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info
+UNKNOWN.egg-info
+build/
+dist/
+.pytest_cache
+.mypy_cache
+.ruff_cache
+
+# --- Virtual environments (rebuilt inside container by `uv sync`) -----------
+.venv
+venv
+env
+ENV
+
+# --- uv / pip caches --------------------------------------------------------
+.uvcache
 .uv-cache
+.uv_cache
+
+# --- IDE / editor / Claude --------------------------------------------------
+.vscode
+.idea
+.claude
+.cursor
+*.swp
+*.swo
+*~
+.DS_Store
+.ipynb_checkpoints
+
+# --- Notebooks (large, not needed at runtime) -------------------------------
+*.ipynb
+
+# --- Local data / experiments / artefacts -----------------------------------
 test_data
 experiments
 models
-__pycache__
-issue_grouping_hosting/
 *.parquet
-.gitignore
+*.csv
+*.xlsx
+*.xls
+*.pkl
+*.pickle
+*.joblib
+*.feather
+
+# --- Stateful runtime data (mount as volumes, don't bake into image) --------
+issue_grouping_db
+issue_grouping_db_older
+issue_grouping_hosting
+stability_assets
+consolidate_report_assests
+
+# --- Logs / temp ------------------------------------------------------------
+*.log
+logs
+tmp
+.tmp
+
+# --- Docker / compose (the daemon reads Dockerfiles separately, not via COPY)
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# --- Docs / project meta (optional — comment back in if you want them inside)
+CLAUDE.md
+docs
+README.md
+
+# --- Env files (NEVER ship secrets in an image) -----------------------------
+.env
+.env.*
+!.env.example

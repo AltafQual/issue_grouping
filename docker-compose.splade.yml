@@ -1,0 +1,48 @@
+# SPLADE encoder — deploy on the GPU host.
+#
+# Prerequisites on the GPU host:
+#   - NVIDIA driver installed
+#   - nvidia-container-toolkit installed (`sudo apt install nvidia-container-toolkit`)
+#   - Docker daemon configured for the nvidia runtime (`sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker`)
+#
+# Run:
+#   docker compose -f docker-compose.splade.yml up -d --build
+#
+# Verify:
+#   curl http://localhost:8000/api/health/
+#
+# On the app host, set:
+#   export SPLADE_API_URL=http://<gpu-host>:8000/
+
+services:
+  splade:
+    container_name: splade
+    build:
+      context: .
+      dockerfile: Dockerfile.splade
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
+      HF_HOME: /app/.hf_cache
+    volumes:
+      # Persist HuggingFace model cache across container rebuilds (~17 MB
+      # quantized model, ~440 MB full model).
+      - splade_hf_cache:/app/.hf_cache
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/health/', timeout=3).status == 200 else 1)\""]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+      start_period: 90s
+
+volumes:
+  splade_hf_cache:

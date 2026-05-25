@@ -1,0 +1,26 @@
+FROM python:3.10-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    UV_SYSTEM_PYTHON=1 \
+    PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+    HF_HOME=/app/.hf_cache
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+WORKDIR /app
+
+COPY pyproject.toml uv.lock* ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen
+
+COPY . .
+
+ENV PATH="/app/.venv/bin:${PATH}"
+EXPOSE 8000
+
+# Production-style: single worker (model holds GPU), recycle to bound RSS
+CMD ["gunicorn", "-w", "1", "-k", "uvicorn.workers.UvicornWorker", \
+     "--max-requests", "200", "--max-requests-jitter", "25", \
+     "-b", "0.0.0.0:8000", "splade_api:app", \
+     "--graceful-timeout", "30", "--timeout", "120"]

@@ -1,0 +1,35 @@
+# Development overlay — bind-mounts the source so code changes hot-reload
+# without rebuilding the image.
+#
+# Run:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+#
+# How it works:
+#   - `./:/app` makes host code visible inside the container
+#   - the anonymous volume `/app/.venv` shadows the bind mount at that path,
+#     so the container keeps using the .venv created during `docker build`
+#     instead of the (likely incompatible) one on your host
+#   - `uvicorn --reload` / streamlit's runner watch for file changes and
+#     restart the process in <1s
+#
+# Caveats:
+#   - new dependencies (pyproject changes) still need a rebuild:
+#       docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+#   - healthchecks may flap during reloads — that's fine; nginx will reconnect
+
+services:
+  fastapi:
+    command: ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8010", "--reload"]
+    volumes:
+      - ./:/app
+      - /app/.venv
+      - /app/__pycache__
+      - /app/.uvcache
+
+  streamlit:
+    command: ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0", "--server.runOnSave=true", "--server.fileWatcherType=auto"]
+    volumes:
+      - ./:/app
+      - /app/.venv
+      - /app/__pycache__
+      - /app/.uvcache

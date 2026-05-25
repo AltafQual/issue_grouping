@@ -1,4 +1,31 @@
-version: '3.10'
+# YAML anchor: the env vars that BOTH the FastAPI service and the Streamlit
+# service need (Streamlit pages import src/data/mysql_client and src/failure_
+# analyzer directly, so they touch MySQL, QGenie, SPLADE, etc. just like the
+# API).
+#
+# List-form pass-through (`- VAR` with no `=`) means "if VAR is set on the
+# host shell, forward it; otherwise leave it UNSET in the container". That
+# matters because the alternative — `VAR: ${VAR:-}` in map form — sets
+# VAR="" in the container, which DEFEATS Python's
+# `os.environ.get("VAR", default)` because empty-but-set != unset.
+x-app-env: &app-env
+  # Required (code raises if missing):
+  - QGENIE_API_KEY
+  - MYSQL_PASSWORD
+  # Optional, with code-level defaults in src/data/mysql_client.py and
+  # src/reports/regression_report.py — leave unset to use those defaults:
+  - MYSQL_USER
+  - MYSQL_HOST
+  - MYSQL_DB
+  - ISSUE_GROUPING_API_URL
+  # Optional feature toggles / credentials:
+  - GERRIT_USER_NAME
+  - GERRIT_HTTP_PASSWORD
+  - DAG_API_BEARER_TOKEN
+  - TEAMS_WEBHOOK_URL
+  - SPLADE_API_URL
+  # Explicit value with fallback (boolean toggle):
+  - SEND_EMAIL=${SEND_EMAIL:-false}
 
 services:
   streamlit:
@@ -6,10 +33,20 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.streamlit
+    restart: unless-stopped
     expose:
       - "8501"
     ports:
       - "8501:8501"
+    # STREAMLIT_SERVER_HEADLESS=true and STREAMLIT_SERVER_PORT=8501 are baked
+    # into Dockerfile.streamlit, so we only list app-level env here.
+    environment: *app-env
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8501/_stcore/health', timeout=2).status == 200 else 1)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
     networks:
       - appnet
 
@@ -18,26 +55,41 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.fastapi
+    restart: unless-stopped
     expose:
-      - "8000"
+      - "8010"
     ports:
-      - "8000:8000"
+      - "8010:8010"
+    environment: *app-env
+    volumes:
+      # Vector DB lives on the host — excluded from the image (.dockerignore)
+      # so builds stay small. The worker writes new centroids here at runtime.
+      - ./issue_grouping_db:/app/issue_grouping_db
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8010/api', timeout=3).status in (200,307,308) else 1)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
     networks:
       - appnet
 
   nginx:
-    restart: always
-    image: nginx:latest
     container_name: nginx
+    image: nginx:latest
+    restart: unless-stopped
     volumes:
-      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
     ports:
-      - "8010:8010"
+      - "8080:8080"
     depends_on:
-      - streamlit
-      - fastapi
+      streamlit:
+        condition: service_healthy
+      fastapi:
+        condition: service_healthy
     networks:
       - appnet
 
 networks:
   appnet:
+    driver: bridge
