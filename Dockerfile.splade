@@ -3,8 +3,13 @@ FROM python:3.10-slim
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     UV_SYSTEM_PYTHON=1 \
-    PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
     HF_HOME=/app/.hf_cache
+
+# Note: PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True is NOT set here —
+# the underlying cuMemMap ops require driver >= 525 and on older drivers the
+# allocator's first call returns `cudaErrorNotSupported`. If you have a recent
+# driver and want the expandable-segments allocator, set the env var on the
+# host before `make splade-up` (compose forwards it).
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 

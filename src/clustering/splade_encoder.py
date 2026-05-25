@@ -98,7 +98,13 @@ class SPLADEEncoder:
         self._tokenizer = None
         self._available = False
         self._is_sparse_encoder = False  # True when using sentence-transformers SparseEncoder
-        self._model_name = model_name
+        # Resolve the model that will actually be attempted up front, so /api/health/
+        # reports the correct name even if the load fails. Without this, a failed
+        # quantized load would leave _model_name pointing at the full-model default.
+        if SPLADEConfigurations.use_quantized:
+            self._model_name = SPLADEConfigurations.quantized_model_name
+        else:
+            self._model_name = model_name
         self._cache_dir = cache_dir
 
         remote_url = os.getenv("SPLADE_API_URL", "").strip().rstrip("/")
@@ -111,6 +117,11 @@ class SPLADEEncoder:
             self._remote_url = None
             self._device = "cuda" if torch.cuda.is_available() else "cpu"
             self._load_model()
+            # If the load failed, the model isn't actually on any device. Health
+            # was reporting "device: cuda" while no model existed, which was
+            # misleading — fix it here.
+            if not self._available:
+                self._device = "unavailable"
 
         self._initialized = True
 

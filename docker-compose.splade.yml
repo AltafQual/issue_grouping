@@ -24,8 +24,12 @@ services:
     ports:
       - "8000:8000"
     environment:
-      PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
-      HF_HOME: /app/.hf_cache
+      # Pass through PYTORCH_CUDA_ALLOC_CONF only if set on host. Setting
+      # expandable_segments:True unconditionally breaks older drivers (the
+      # cuMemMap ops it relies on need driver >= 525). Default allocator
+      # works on every driver that supports the installed torch CUDA toolkit.
+      - PYTORCH_CUDA_ALLOC_CONF
+      - HF_HOME=/app/.hf_cache
     volumes:
       # Persist HuggingFace model cache across container rebuilds (~17 MB
       # quantized model, ~440 MB full model).
