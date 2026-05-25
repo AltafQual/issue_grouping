@@ -24,8 +24,14 @@ COPY . .
 ENV PATH="/app/.venv/bin:${PATH}"
 EXPOSE 8000
 
-# Production-style: single worker (model holds GPU), recycle to bound RSS
-CMD ["gunicorn", "-w", "1", "-k", "uvicorn.workers.UvicornWorker", \
-     "--max-requests", "200", "--max-requests-jitter", "25", \
-     "-b", "0.0.0.0:8000", "splade_api:app", \
-     "--graceful-timeout", "30", "--timeout", "120"]
+# Run uvicorn directly — NOT under gunicorn. Gunicorn's master forks the
+# worker, and CUDA contexts / virtual-memory allocations don't always survive
+# fork() on every driver/profile (notably vGPU partitions like GRID A100D-*),
+# manifesting as `cudaErrorNotSupported` on the first GPU op inside the
+# worker. Uvicorn's `--limit-max-requests` gives equivalent RSS-bounding;
+# combined with `restart: unless-stopped` in compose, the container recycles
+# on its own.
+CMD ["uvicorn", "splade_api:app", \
+     "--host", "0.0.0.0", "--port", "8000", \
+     "--limit-max-requests", "200", \
+     "--timeout-keep-alive", "30"]
