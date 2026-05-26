@@ -237,5 +237,19 @@ class ClusteringPipeline:
         df = FailureAnalyzer().load_data(tc_id=run_id)
         pipeline = ClusteringPipeline(update_vector_store=True)
         results = await pipeline.run(df, mode=mode, run_id=run_id)
+
+        # Mark run_id as processed so subsequent scheduler ticks skip it.
+        # Failed FAISS saves are removed from this list later by
+        # requeue_failed_run_ids() in src/pipeline/workers.py.
+        if run_id not in processed_run_ids:
+            processed_run_ids.append(run_id)
+        if len(processed_run_ids) > 500:
+            processed_run_ids = processed_run_ids[100:]
+        try:
+            with open(processed_run_ids_path, "w") as f:
+                json.dump(processed_run_ids, f, indent=2)
+        except OSError:
+            logger.exception("Failed to persist processed_runids.json at %s", processed_run_ids_path)
+
         gc.collect()
         return results
