@@ -78,7 +78,7 @@ class GerritClientAsync:
         base_url: str = GERRIT_API_CONFIG.host,
         username: Optional[str] = GERRIT_API_CONFIG.user_name,
         password: Optional[str] = GERRIT_API_CONFIG.http_password,
-        verify_ssl: bool = True,
+        verify_ssl: bool = False,
         default_headers: Optional[Dict[str, str]] = None,
         default_params: Optional[Dict[str, Any]] = None,
     ) -> None:
