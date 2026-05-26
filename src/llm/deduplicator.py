@@ -266,7 +266,7 @@ class Deduplicator:
                 ("human", prompts.NEAR_DUPLICATE_CLUSTER_LOG_MESSAGE),
             ]
         )
-        chain = prompt_template | QgenieModels.azure_gpt_5_2 | _near_dup_parser
+        chain = prompt_template | QgenieModels.claude_4_5_haiku | _near_dup_parser
 
         rename_map: dict[str, str] = {}
 
