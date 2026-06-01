@@ -243,7 +243,7 @@ class ClusteringPipeline:
         # requeue_failed_run_ids() in src/pipeline/workers.py.
         if run_id not in processed_run_ids:
             processed_run_ids.append(run_id)
-        if len(processed_run_ids) > 500:
+        if len(processed_run_ids) > 8000:
             processed_run_ids = processed_run_ids[100:]
         try:
             with open(processed_run_ids_path, "w") as f:
