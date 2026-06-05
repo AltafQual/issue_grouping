@@ -33,5 +33,5 @@ EXPOSE 8000
 # on its own.
 CMD ["uvicorn", "splade_api:app", \
      "--host", "0.0.0.0", "--port", "8000", \
-     "--limit-max-requests", "200", \
+     "--limit-max-requests", "500", \
      "--timeout-keep-alive", "30"]

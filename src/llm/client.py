@@ -196,6 +196,9 @@ class QgenieModels:
     gemini_3_flash: CustomQGenieChat = CustomQGenieChat(
         model="vertexai::gemini-3-flash-preview", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=5000
     )
+    gemini_3_5_flash: CustomQGenieChat = CustomQGenieChat(
+        model="vertexai::gemini-3.5-flash", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=5000
+    )
     azure_gpt_5_2: CustomQGenieChat = CustomQGenieChat(
         model="azure::gpt-5.2", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=5000
     )
@@ -345,7 +348,7 @@ def cummilative_summary_generation(errors_list: list[str], short_final_summary: 
                 pt = ChatPromptTemplate.from_messages(
                     [("system", prompts.SUMMARY_GENERATION_PROMPT), ("human", prompts.ERROR_LOGS_LIST)]
                 )
-                chain = pt | QgenieModels.azure_gpt_5_4 | StrOutputParser()
+                chain = pt | QgenieModels.gemini_3_5_flash | StrOutputParser()
                 logs_str = "\n\n".join(f"Error Logs {i}:\n{e}" for i, e in enumerate(error_window, start=1))
                 summary = await chain.ainvoke({"logs": logs_str})
                 return index, summary
