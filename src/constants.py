@@ -2,7 +2,7 @@ import os
 from dataclasses import dataclass
 from typing import ClassVar, Dict, Tuple
 
-QGENEIE_API_KEY = os.getenv("QGENIE_API_KEY")
+QGENIE_API_KEY = os.getenv("QGENIE_API_KEY")
 regex_based_filteration_patterns = {
     "Verifier Failed": r"verifier failed",
     "DLC Handle": r"failed to create dlc handle with code",

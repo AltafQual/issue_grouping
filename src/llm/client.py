@@ -29,7 +29,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field, ValidationError
 from qgenie.integrations.langchain import QGenieChat
 
-from src.constants import QGENEIE_API_KEY
+from src.constants import QGENIE_API_KEY
 from src.core.exceptions import LLMError
 from src.logger import AppLogger
 from src.utils.timer import execution_timer
@@ -188,40 +188,40 @@ class QgenieModels:
     """
 
     gemini_2_5_pro: CustomQGenieChat = CustomQGenieChat(
-        model="vertexai::gemini-2.5-pro", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=5000
+        model="vertexai::gemini-2.5-pro", api_key=QGENIE_API_KEY, temperature=0.2, max_retries=5, timeout=5000
     )
     gemini_2_5_flash: CustomQGenieChat = CustomQGenieChat(
-        model="vertexai::gemini-2.5-flash", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=5000
+        model="vertexai::gemini-2.5-flash", api_key=QGENIE_API_KEY, temperature=0.2, max_retries=5, timeout=5000
     )
     gemini_3_flash: CustomQGenieChat = CustomQGenieChat(
-        model="vertexai::gemini-3-flash-preview", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=5000
+        model="vertexai::gemini-3-flash-preview", api_key=QGENIE_API_KEY, temperature=0.2, max_retries=5, timeout=5000
     )
     gemini_3_5_flash: CustomQGenieChat = CustomQGenieChat(
-        model="vertexai::gemini-3.5-flash", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=5000
+        model="vertexai::gemini-3.5-flash", api_key=QGENIE_API_KEY, temperature=0.2, max_retries=5, timeout=5000
     )
     azure_gpt_5_2: CustomQGenieChat = CustomQGenieChat(
-        model="azure::gpt-5.2", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=5000
+        model="azure::gpt-5.2", api_key=QGENIE_API_KEY, temperature=0.2, max_retries=5, timeout=5000
     )
     azure_o3_mini: CustomQGenieChat = CustomQGenieChat(
-        model="azure::o3-mini", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=5000
+        model="azure::o3-mini", api_key=QGENIE_API_KEY, temperature=0.2, max_retries=5, timeout=5000
     )
     azure_o3: CustomQGenieChat = CustomQGenieChat(
-        model="azure::o3", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=5000
+        model="azure::o3", api_key=QGENIE_API_KEY, temperature=0.2, max_retries=5, timeout=5000
     )
     azure_gpt_5_4_mini: CustomQGenieChat = CustomQGenieChat(
-        model="azure::gpt-5.4-mini", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=5000
+        model="azure::gpt-5.4-mini", api_key=QGENIE_API_KEY, temperature=0.2, max_retries=5, timeout=5000
     )
     azure_gpt_5_4: CustomQGenieChat = CustomQGenieChat(
-        model="azure::gpt-5.4", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=5000
+        model="azure::gpt-5.4", api_key=QGENIE_API_KEY, temperature=0.2, max_retries=5, timeout=5000
     )
     claude_4_5_haiku: CustomQGenieChat = CustomQGenieChat(
-        model="anthropic::claude-4-5-haiku", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=5000
+        model="anthropic::claude-4-5-haiku", api_key=QGENIE_API_KEY, temperature=0.2, max_retries=5, timeout=5000
     )
     claude_4_5_sonnet: CustomQGenieChat = CustomQGenieChat(
-        model="anthropic::claude-4-5-sonnet", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=5000
+        model="anthropic::claude-4-5-sonnet", api_key=QGENIE_API_KEY, temperature=0.2, max_retries=5, timeout=5000
     )
     claude_4_5_opus: CustomQGenieChat = CustomQGenieChat(
-        model="anthropic::claude-4-6-opus:1M", api_key=QGENEIE_API_KEY, temperature=0.2, max_retries=5, timeout=5000
+        model="anthropic::claude-4-6-opus:1M", api_key=QGENIE_API_KEY, temperature=0.2, max_retries=5, timeout=5000
     )
 
 
@@ -341,6 +341,9 @@ def cummilative_summary_generation(errors_list: list[str], short_final_summary: 
 
     async def _process_windows_concurrently(windows: list) -> list[str]:
         semaphore = asyncio.Semaphore(5)
+        _model = CustomQGenieChat(
+            model="vertexai::gemini-3.5-flash", api_key=QGENIE_API_KEY, temperature=0.2, max_retries=5, timeout=5000
+        )
 
         async def _process_window(index: int, error_window: list) -> tuple[int, str]:
             async with semaphore:
@@ -348,7 +351,7 @@ def cummilative_summary_generation(errors_list: list[str], short_final_summary: 
                 pt = ChatPromptTemplate.from_messages(
                     [("system", prompts.SUMMARY_GENERATION_PROMPT), ("human", prompts.ERROR_LOGS_LIST)]
                 )
-                chain = pt | QgenieModels.gemini_3_5_flash | StrOutputParser()
+                chain = pt | _model | StrOutputParser()
                 logs_str = "\n\n".join(f"Error Logs {i}:\n{e}" for i, e in enumerate(error_window, start=1))
                 summary = await chain.ainvoke({"logs": logs_str})
                 return index, summary

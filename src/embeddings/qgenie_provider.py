@@ -27,7 +27,7 @@ import time
 from langchain.embeddings.base import Embeddings
 from qgenie.integrations.langchain import QGenieEmbeddings
 
-from src.constants import QGENEIE_API_KEY, EmbeddingConfigurations
+from src.constants import QGENIE_API_KEY, EmbeddingConfigurations
 from src.embeddings.base import EmbeddingProvider
 from src.logger import AppLogger
 from src.utils.timer import execution_timer
@@ -48,7 +48,7 @@ class QGenieBGEM3Embedding(Embeddings):
 
     Args:
         api_key: QGenie API key.  Defaults to the value of the
-            ``QGENEIE_API_KEY`` constant.
+            ``QGENIE_API_KEY`` constant.
 
     Example::
 
@@ -58,7 +58,7 @@ class QGenieBGEM3Embedding(Embeddings):
 
     name = "qgenie_embedd"
 
-    def __init__(self, api_key: str = QGENEIE_API_KEY) -> None:
+    def __init__(self, api_key: str = QGENIE_API_KEY) -> None:
         self.model = QGenieEmbeddings(model=self.name, api_key=api_key)
         super().__init__()
 
