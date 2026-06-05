@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import time
 import traceback
+import concurrent.futures
 from typing import Any, Optional
 
 from langchain_core.callbacks import AsyncCallbackManagerForLLMRun, CallbackManagerForLLMRun
@@ -339,40 +340,20 @@ def cummilative_summary_generation(errors_list: list[str], short_final_summary: 
         for i in range(0, len(iterable), size):
             yield iterable[i : i + size]
 
-    async def _process_windows_concurrently(windows: list) -> list[str]:
-        semaphore = asyncio.Semaphore(5)
-        _model = CustomQGenieChat(
-            model="vertexai::gemini-3.5-flash", api_key=QGENIE_API_KEY, temperature=0.2, max_retries=5, timeout=5000
+    def _process_window(index_and_window: tuple) -> tuple[int, str]:
+        index, error_window = index_and_window
+        logger.info(f"Processing window {index} with length {len(error_window)}")
+        pt = ChatPromptTemplate.from_messages(
+            [("system", prompts.SUMMARY_GENERATION_PROMPT), ("human", prompts.ERROR_LOGS_LIST)]
         )
-
-        async def _process_window(index: int, error_window: list) -> tuple[int, str]:
-            async with semaphore:
-                logger.info(f"Processing window {index} with length {len(error_window)}")
-                pt = ChatPromptTemplate.from_messages(
-                    [("system", prompts.SUMMARY_GENERATION_PROMPT), ("human", prompts.ERROR_LOGS_LIST)]
-                )
-                chain = pt | _model | StrOutputParser()
-                logs_str = "\n\n".join(f"Error Logs {i}:\n{e}" for i, e in enumerate(error_window, start=1))
-                summary = await chain.ainvoke({"logs": logs_str})
-                return index, summary
-
-        tasks = [_process_window(i, window) for i, window in enumerate(windows, start=1)]
-        results = await asyncio.gather(*tasks)
-        return [summary for _, summary in sorted(results, key=lambda x: x[0])]
+        chain = pt | QgenieModels.gemini_3_5_flash | StrOutputParser()
+        logs_str = "\n\n".join(f"Error Logs {i}:\n{e}" for i, e in enumerate(error_window, start=1))
+        return index, chain.invoke({"logs": logs_str})
 
     error_windows = list(_chunk(errors_list, 10))
-    try:
-        _loop = asyncio.get_running_loop()
-    except RuntimeError:
-        _loop = None
-
-    if _loop and _loop.is_running():
-        import concurrent.futures
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as _ex:
-            summaries_list = _ex.submit(asyncio.run, _process_windows_concurrently(error_windows)).result()
-    else:
-        summaries_list = asyncio.run(_process_windows_concurrently(error_windows))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as ex:
+        raw = list(ex.map(_process_window, enumerate(error_windows, start=1)))
+    summaries_list = [s for _, s in sorted(raw, key=lambda x: x[0])]
 
     logger.info(f"Total summaries generated: {len(summaries_list)}. Generating final summary.")
     final_sys = (
