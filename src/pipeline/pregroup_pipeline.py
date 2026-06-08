@@ -178,7 +178,6 @@ async def fuzzy_cluster_grouping(
 async def check_if_issue_alread_grouped(
     df: pd.DataFrame,
     precomputed_embeddings: Optional[np.ndarray] = None,
-    precomputed_splade_vecs=None,
 ) -> pd.DataFrame:
     # Identify rows that are not yet grouped
     mask = df[DataFrameKeys.cluster_name].isin([ClusterSpecificKeys.non_grouped_key, np.nan])
@@ -187,28 +186,18 @@ async def check_if_issue_alread_grouped(
     if not ungrouped_df.empty:
         # Subset pre-computed vectors to only the ungrouped rows
         subset_embeddings = None
-        subset_splade = None
         if precomputed_embeddings is not None:
-            ungrouped_positions = df.index[mask].tolist()
-            # Map mask positions to the embedding array positions
             if "_embed_pos" in df.columns:
                 positions = df.loc[mask, "_embed_pos"].tolist()
                 subset_embeddings = precomputed_embeddings[positions]
             else:
                 subset_embeddings = precomputed_embeddings[: len(ungrouped_df)]
-        if precomputed_splade_vecs is not None:
-            if "_embed_pos" in df.columns:
-                positions = df.loc[mask, "_embed_pos"].tolist()
-                subset_splade = precomputed_splade_vecs[positions]
-            else:
-                subset_splade = precomputed_splade_vecs[: len(ungrouped_df)]
 
-        # Get cluster names using FAISS — use unmasked embedding text for better similarity
+        # Get cluster names using cosine similarity — use unmasked embedding text for better similarity
         new_cluster_names, class_names, embeddings = await CustomEmbeddingCluster().batch_search(
             type_=ungrouped_df.iloc[0]["type"],  # assuming same type for batch
             queries=ungrouped_df[DataFrameKeys.preprocessed_text_key].tolist(),
             precomputed_embeddings=subset_embeddings,
-            precomputed_splade_vecs=subset_splade,
         )
         # Update the original DataFrame
         if df[DataFrameKeys.cluster_name].dtype != object:

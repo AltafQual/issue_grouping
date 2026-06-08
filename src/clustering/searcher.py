@@ -1,13 +1,10 @@
 """Cluster similarity search — pure logic, no disk I/O.
 
-:class:`ClusterSearcher` performs cosine-similarity (+ optional hybrid SPLADE)
-search over loaded centroids.  It has **no dependency on disk** — it receives
-a :class:`~src.clustering.vector_store.VectorStore` and
+:class:`ClusterSearcher` performs cosine-similarity search over loaded
+centroids.  It has **no dependency on disk** — it receives a
+:class:`~src.clustering.vector_store.VectorStore` and
 :class:`~src.clustering.metadata_store.MetadataStore` via constructor
 injection and loads index data on each call.
-
-This eliminates the inline ``_get_hybrid_matcher()`` import workaround that
-previously existed inside :class:`~src.custom_clustering.CustomEmbeddingCluster`.
 
 Layering
 --------
@@ -169,17 +166,14 @@ class ClusterSearcher(IClusterSearcher):
         queries: List[str],
         embeddings: np.ndarray,
         similarity_threshold: float = _DEFAULT_THRESHOLD,
-        precomputed_query_splade: Optional["scipy.sparse.csr_matrix"] = None,
     ) -> Tuple[List[str | int], List[str | float], List[float], np.ndarray]:
         """Batch search for multiple queries against *cluster_type*.
 
         Args:
             cluster_type: Test-type identifier.
-            queries: List of original query texts (for SPLADE scoring).
+            queries: List of original query texts.
             embeddings: Pre-normalised embeddings, shape ``[N, dim]``.
             similarity_threshold: Minimum score to count as a match.
-            precomputed_query_splade: Optional pre-computed SPLADE vectors.
-                Skips re-encoding queries if provided.
 
         Returns:
             4-tuple:
@@ -200,7 +194,7 @@ class ClusterSearcher(IClusterSearcher):
 
         cluster_names = list(metadata.keys())
 
-        # Hybrid batch scoring
+        # Cosine batch scoring
         try:
             best_indices, best_scores = self._matcher.batch_search(
                 type_=cluster_type,
@@ -209,10 +203,9 @@ class ClusterSearcher(IClusterSearcher):
                 centroids=centroids,
                 cluster_names=cluster_names,
                 threshold=similarity_threshold,
-                precomputed_query_splade=precomputed_query_splade,
             )
         except Exception as exc:
-            logger.warning(f"[Searcher] Hybrid batch search failed ({exc}); falling back to cosine")
+            logger.warning(f"[Searcher] Batch search failed ({exc}); falling back to cosine")
             best_indices, best_scores = self._cosine_batch(embeddings, centroids, similarity_threshold)
 
         result_names, result_classes = [], []

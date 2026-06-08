@@ -126,7 +126,6 @@ class FailureAnalyzer:
         failure_df = await check_if_issue_alread_grouped(
             failure_df,
             precomputed_embeddings=all_embeddings,
-            precomputed_splade_vecs=all_splade_vecs,
         )
         faiss_grouped = failure_df[
             (failure_df[DataFrameKeys.grouped_from_faiss] == True)

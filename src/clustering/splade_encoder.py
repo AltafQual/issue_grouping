@@ -24,15 +24,6 @@ import os
 import sys
 from typing import Optional
 
-# Note: PYTORCH_CUDA_ALLOC_CONF is intentionally NOT set here. The
-# `expandable_segments` allocator relies on cuMemMap virtual-memory ops that
-# return `cudaErrorNotSupported` on some drivers / vGPU profiles (notably
-# GRID A100D-* partitions), and the failure only manifests once torch is
-# imported under uvicorn — the standalone diagnostic, which doesn't import
-# this module, can't reproduce it. Set the env var on the host shell before
-# `make splade-up` if you want the expandable allocator and your driver
-# supports it.
-
 import httpx
 import numpy as np
 import scipy.sparse
@@ -42,6 +33,17 @@ from transformers import AutoModelForMaskedLM, AutoTokenizer
 
 from src.constants import SPLADEConfigurations
 from src.logger import AppLogger
+
+# Note: PYTORCH_CUDA_ALLOC_CONF is intentionally NOT set here. The
+# `expandable_segments` allocator relies on cuMemMap virtual-memory ops that
+# return `cudaErrorNotSupported` on some drivers / vGPU profiles (notably
+# GRID A100D-* partitions), and the failure only manifests once torch is
+# imported under uvicorn — the standalone diagnostic, which doesn't import
+# this module, can't reproduce it. Set the env var on the host shell before
+# `make splade-up` if you want the expandable allocator and your driver
+# supports it.
+
+
 
 logger = AppLogger().get_logger(__name__)
 
@@ -332,10 +334,8 @@ class SPLADEEncoder:
         inst._initialized = False
         cls._instance = None
 
-        # Clear the in-memory cluster vector cache in HybridSPLADEMatcher
-        hm_mod = sys.modules.get("src.clustering.hybrid_matcher")
-        if hm_mod is not None:
-            hm_mod.HybridSPLADEMatcher._cluster_vec_cache.clear()
+        # HybridSPLADEMatcher no longer caches cluster SPLADE vectors —
+        # that path was removed; nothing to clear here.
 
         if had_local_model:
             gc.collect()

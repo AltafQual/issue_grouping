@@ -58,8 +58,6 @@ class SPLADEConfigurations:
     use_quantized: bool = True  # use rasyosef/splade-small (~17 MB) instead of the 440 MB model
     model_name: str = "naver/splade-cocondenser-ensembledistil"
     quantized_model_name: str = "rasyosef/splade-small"
-    hybrid_alpha: float = 0.55  # dense cosine weight
-    hybrid_beta: float = 0.45  # SPLADE sparse weight
     pregroup_threshold: float = 0.80
     low_cohesion_threshold: float = 0.35
     core_member_percentile: float = 0.50
@@ -117,9 +115,7 @@ class CONSOLIDATED_REPORTS:
     # QA2_CONFIG_FILE_PATH env var (or bind-mount /prj/qct/webtech_hyd7 into
     # the container at the same path). When unreachable,
     # iterate_db_get_testplan returns an empty result instead of raising.
-    qa2_config_file_path = os.getenv(
-        "QA2_CONFIG_FILE_PATH", "/prj/qct/webtech_hyd7/qa2_web/config/config-prod.yaml"
-    )
+    qa2_config_file_path = os.getenv("QA2_CONFIG_FILE_PATH", "/prj/qct/webtech_hyd7/qa2_web/config/config-prod.yaml")
     PROCESSING_JSON = "./consolidate_report_assests/processing_ids.json"
 
 
