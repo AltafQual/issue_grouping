@@ -8,7 +8,7 @@ from src.data.mysql_client import sql_connection
 from src.logger import AppLogger
 from src.nightly_stability_job import run_stability_check
 from src.pipeline.cluster_pipeline import ClusteringPipeline, ExecutionMode
-from src.pipeline.workers import BackgroundWorkerManager
+from src.pipeline.workers import BackgroundWorkerManager, swap_issue_grouping_db_to_prod
 from src.reports.consolidated_report import run_report_generation_for_all_qairt_ids
 from src.utils.run_id_utils import filter_run_ids_within_days
 
@@ -45,6 +45,7 @@ def run_ids_issue_grouping_processing():
                         logger.exception("process_run_id failed for run_id=%s", run_id)
 
         asyncio.run(_process())
+        swap_issue_grouping_db_to_prod()
         logger.info("run_ids_issue_grouping_processing finished")
     except Exception:
         logger.exception("run_ids_issue_grouping_processing failed")
