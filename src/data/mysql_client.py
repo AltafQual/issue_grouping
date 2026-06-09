@@ -174,7 +174,7 @@ class ConnectToMySql(IDataLoader):
         """
         try:
             with self.connection_context() as cnx:
-                logger.info(f"Executing query: {query}")
+                logger.debug("Executing query (truncated): %.120s", str(query))
                 df = pd.read_sql(query, cnx)
         except DatabaseError:
             raise
@@ -182,7 +182,7 @@ class ConnectToMySql(IDataLoader):
             raise DatabaseError(f"Query failed: {exc}", query=query, cause=exc) from exc
 
         if df.empty:
-            logger.warning(f"Query returned no rows: {query}")
+            logger.warning("Query returned no rows")
         return df
 
     def fetch_runids(self, filters: Optional[str] = None, fetch_all: bool = True) -> pd.DataFrame:
@@ -564,7 +564,10 @@ class ConnectToMySql(IDataLoader):
 
     @staticmethod
     def _format_monthly_table(year: int, month: int) -> str:
-        return f"result_{year}_0{month}" if month <= 9 else f"result_{year}_{month}"
+        name = f"result_{year}_0{month}" if month <= 9 else f"result_{year}_{month}"
+        if not re.match(r"^result(_\d{4}_\d{2})?$", name):
+            raise ValueError(f"Derived table name failed safety check: {name!r}")
+        return name
 
     def _tables_for_run_id(self, runid: str) -> list[str]:
         """Return the candidate result tables for a single run_id, ordered by likelihood.

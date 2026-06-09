@@ -16,6 +16,7 @@ import collections
 import json
 import os
 import pickle
+import re
 import shlex
 import subprocess
 import threading
@@ -42,6 +43,7 @@ _STABILITY_REPORT_TEMPLATE_DIR = (
 )
 _STABILITY_OUTPUT_BASE = "/prj/qct/webtech_hyd19/AUTO_SUMMARY_STABILITY"
 _SUBPROCESS_TIMEOUT_SEC = 30 * 60
+
 
 async def _run_dag_query(query) -> dict:
     token = os.environ.get("DAG_API_BEARER_TOKEN", "")
@@ -154,6 +156,7 @@ async def run_stability_check(
         "processed": results_summary,
     }
 
+
 def _load_processed_stability_run_ids() -> list[str]:
     path = Path(StabilityReportConfig.PROCESSED_STABILITY_RUN_IDS_PATH)
     if not path.is_file():
@@ -181,12 +184,16 @@ def generate_stability_nightly_report() -> dict[str, Any]:
     subprocess exit, so failures (timeout / non-zero exit / exception) are retried
     on the next call. Designed as a sync entry point for a Jenkins job.
     """
+
     def _drain(stream, buf, tag):
-                for line in stream:
-                    line = line.rstrip()
-                    buf.append(line)
-                    logger.info(f"[stability:{tag}] {line}")
-                    
+        try:
+            for line in stream:
+                line = line.rstrip()
+                buf.append(line)
+                logger.info(f"[stability:{tag}] {line}")
+        except Exception as exc:
+            logger.exception(f"[stability:{tag}] stream read error: {exc}")
+
     dag_data = asyncio.run(_run_dag_query('status="COMPLETED"'))
     if dag_data.get("status") not in (None, 200):
         logger.error(f"DAG query failed: {dag_data}")
@@ -216,6 +223,10 @@ def generate_stability_nightly_report() -> dict[str, Any]:
 
     for job in new_jobs:
         run_id = job["run_id"]
+        if not re.match(r"^(QNN|SNPE)[A-Za-z0-9_.:\-]+$", run_id):
+            logger.warning(f"[stability] Skipping run_id with unexpected format: {run_id!r}")
+            failed.append({"run_id": run_id, "reason": "invalid_run_id_format"})
+            continue
         output_dir = Path(f"{_STABILITY_OUTPUT_BASE}/{run_id}_qgenie")
 
         # stability_report.py does `shutil.copy(template, output_dir)` then

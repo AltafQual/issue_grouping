@@ -215,7 +215,10 @@ class GerritClientAsync:
     async def _ensure_session(self) -> None:
         """Create the ``aiohttp`` session if it does not exist or was closed."""
         if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession(headers=self.default_headers)
+            self._session = aiohttp.ClientSession(
+                headers=self.default_headers,
+                timeout=aiohttp.ClientTimeout(total=30, connect=10),
+            )
 
     def _full_url(self, endpoint: str) -> str:
         """Build the full URL for *endpoint*, injecting the auth prefix when needed."""

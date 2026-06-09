@@ -151,6 +151,8 @@ class CustomEmbeddingCluster:
                         norm2 = np.linalg.norm(updated)
                         if norm2 > 0:
                             updated = updated / norm2
+                        else:
+                            updated = old_c  # keep old centroid; zero-update would produce NaN in cosine search
                         new_centroids_list[idx] = updated
                         # Merge run_ids into existing metadata
                         if run_id and run_entry:

@@ -310,8 +310,9 @@ class TeamsNotifier(INotifier):
         if _loop and _loop.is_running():
             import concurrent.futures
 
+            # Create the coroutine INSIDE the thread so it belongs to the new event loop.
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as _ex:
-                _ex.submit(asyncio.run, self._send_async(runs)).result()
+                _ex.submit(lambda: asyncio.run(self._send_async(runs))).result()
         else:
             asyncio.run(self._send_async(runs))
 

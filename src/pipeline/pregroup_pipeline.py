@@ -134,7 +134,8 @@ async def fuzzy_cluster_grouping(
 
             for i, group in enumerate(grouped_indices):
                 if precomputed_embeddings is not None and type_ and "_embed_pos" in failures_dataframe.columns:
-                    positions = [int(failures_dataframe.iloc[idx]["_embed_pos"]) for idx in group]
+                    pos_series = failures_dataframe["_embed_pos"]
+                    positions = [int(pos_series.iat[idx]) for idx in group]
                     valid_positions = [p for p in positions if p < len(precomputed_embeddings)]
                     if valid_positions:
                         group_embs = precomputed_embeddings[valid_positions]
@@ -165,8 +166,11 @@ async def fuzzy_cluster_grouping(
             # Only call LLM for groups that didn't match DB
             if groups_needing_llm:
                 tasks = [generate_cluster_name(failures_dataframe.iloc[g]) for g in groups_needing_llm]
-                results = await asyncio.gather(*tasks)
+                results = await asyncio.gather(*tasks, return_exceptions=True)
                 for group, result in zip(groups_needing_llm, results):
+                    if isinstance(result, BaseException):
+                        logger.warning(f"[fuzzy_cluster_grouping] LLM call failed for group: {result}")
+                        continue
                     failures_dataframe.loc[group, DataFrameKeys.cluster_name] = result["cluster_name"]
 
     # regex based common errors mapping

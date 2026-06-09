@@ -27,6 +27,15 @@ __all__ = ["EmailNotifier", "send_email_report"]
 _SMTP_HOST = "smtphost.qualcomm.com"
 
 
+_SMTP_TIMEOUT = 15  # seconds
+
+
+def _validate_email_address(addr: str) -> None:
+    """Reject addresses containing header-injection characters."""
+    if any(c in addr for c in ("\n", "\r", "\0")):
+        raise ValueError(f"Invalid email address (header injection attempt): {addr!r}")
+
+
 def send_email_report(subject: str, sender_email: str, recipient_email: str, report: str) -> None:
     """Send an HTML report via SMTP.
 
@@ -36,13 +45,15 @@ def send_email_report(subject: str, sender_email: str, recipient_email: str, rep
         recipient_email: Recipient address.
         report: Rendered HTML string to send as the email body.
     """
+    _validate_email_address(sender_email)
+    _validate_email_address(recipient_email)
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"] = sender_email
     msg["To"] = recipient_email
     msg.attach(MIMEText(report, "html"))
     try:
-        s = smtplib.SMTP(_SMTP_HOST)
+        s = smtplib.SMTP(_SMTP_HOST, timeout=_SMTP_TIMEOUT)
         s.starttls()
         s.sendmail(sender_email, recipient_email, msg.as_string())
         s.quit()

@@ -128,7 +128,7 @@ class ClusterSearcher(IClusterSearcher):
         query: str,
         embedding: np.ndarray,
         similarity_threshold: float = _DEFAULT_THRESHOLD,
-    ) -> Tuple[str | int, str | float, float]:
+    ) -> Tuple[str, str | float, float]:
         """Search a single query embedding against *cluster_type*.
 
         Args:
@@ -145,7 +145,7 @@ class ClusterSearcher(IClusterSearcher):
         """
         metadata, centroids = self._load_with_retry(cluster_type)
         if metadata is None:
-            return ClusterSpecificKeys.non_grouped_key, float("nan"), 0.0
+            return str(ClusterSpecificKeys.non_grouped_key), float("nan"), 0.0
 
         cluster_names = list(metadata.keys())
         best_idx, best_score = self._score(
@@ -153,7 +153,7 @@ class ClusterSearcher(IClusterSearcher):
         )
         if best_idx < 0:
             logger.debug(f"[Searcher] No match for type={cluster_type} (best={best_score:.3f})")
-            return ClusterSpecificKeys.non_grouped_key, float("nan"), best_score
+            return str(ClusterSpecificKeys.non_grouped_key), float("nan"), best_score
 
         matched_name = cluster_names[best_idx]
         matched_class = metadata[matched_name].get("class", float("nan"))
@@ -166,7 +166,7 @@ class ClusterSearcher(IClusterSearcher):
         queries: List[str],
         embeddings: np.ndarray,
         similarity_threshold: float = _DEFAULT_THRESHOLD,
-    ) -> Tuple[List[str | int], List[str | float], List[float], np.ndarray]:
+    ) -> Tuple[List[str], List[str | float], List[float], np.ndarray]:
         """Batch search for multiple queries against *cluster_type*.
 
         Args:
@@ -186,7 +186,7 @@ class ClusterSearcher(IClusterSearcher):
         metadata, centroids = self._load_with_retry(cluster_type)
         if metadata is None:
             return (
-                [ClusterSpecificKeys.non_grouped_key] * n,
+                [str(ClusterSpecificKeys.non_grouped_key)] * n,
                 [float("nan")] * n,
                 [0.0] * n,
                 embeddings,
@@ -217,7 +217,7 @@ class ClusterSearcher(IClusterSearcher):
                 result_classes.append(metadata[name].get("class", float("nan")))
                 logger.info(f"[Searcher] Batch match: {q_display} → '{name}' (score={score:.3f})")
             else:
-                result_names.append(ClusterSpecificKeys.non_grouped_key)
+                result_names.append(str(ClusterSpecificKeys.non_grouped_key))
                 result_classes.append(float("nan"))
                 logger.debug(f"[Searcher] Batch no match: {q_display} (best={score:.3f})")
 

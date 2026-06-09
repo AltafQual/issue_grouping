@@ -20,7 +20,7 @@ and ``src.logger``.  No imports from ``src.hourly_report``.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 import pandas as pd
@@ -387,8 +387,11 @@ def _elapsed_label(start_time_str: str) -> str:
     Examples: ``'2h 15m'``, ``'1d 3h'``.  Returns ``''`` if unparseable.
     """
     try:
-        s = start_time_str.rstrip("Z").split("+")[0]
-        delta = datetime.now() - datetime.fromisoformat(s)
+        parsed = datetime.fromisoformat(start_time_str.rstrip("Z"))
+        if parsed.tzinfo is None:
+            # Assume UTC for naive timestamps so subtraction is always valid.
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        delta = datetime.now(timezone.utc) - parsed
         total_minutes = max(0, int(delta.total_seconds())) // 60
         hours, minutes = divmod(total_minutes, 60)
         if hours >= 24:

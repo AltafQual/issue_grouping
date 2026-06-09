@@ -22,6 +22,7 @@ import asyncio
 import gc
 import os
 import sys
+import threading
 from typing import Optional
 
 import httpx
@@ -42,7 +43,6 @@ from src.logger import AppLogger
 # this module, can't reproduce it. Set the env var on the host shell before
 # `make splade-up` if you want the expandable allocator and your driver
 # supports it.
-
 
 
 logger = AppLogger().get_logger(__name__)
@@ -83,6 +83,7 @@ class SPLADEEncoder:
     """
 
     _instance: Optional["SPLADEEncoder"] = None
+    _init_lock: threading.Lock = threading.Lock()
 
     def __new__(
         cls,
@@ -90,8 +91,10 @@ class SPLADEEncoder:
         cache_dir: str = "./models",
     ) -> "SPLADEEncoder":
         if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._initialized = False
+            with cls._init_lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._initialized = False
         return cls._instance
 
     def __init__(
@@ -99,38 +102,39 @@ class SPLADEEncoder:
         model_name: str = SPLADEConfigurations.model_name,
         cache_dir: str = "./models",
     ) -> None:
-        if self._initialized:
-            return
-        self._model = None
-        self._tokenizer = None
-        self._available = False
-        self._is_sparse_encoder = False  # True when using sentence-transformers SparseEncoder
-        # Resolve the model that will actually be attempted up front, so /api/health/
-        # reports the correct name even if the load fails. Without this, a failed
-        # quantized load would leave _model_name pointing at the full-model default.
-        if SPLADEConfigurations.use_quantized:
-            self._model_name = SPLADEConfigurations.quantized_model_name
-        else:
-            self._model_name = model_name
-        self._cache_dir = cache_dir
+        with self._init_lock:
+            if self._initialized:
+                return
+            self._model = None
+            self._tokenizer = None
+            self._available = False
+            self._is_sparse_encoder = False  # True when using sentence-transformers SparseEncoder
+            # Resolve the model that will actually be attempted up front, so /api/health/
+            # reports the correct name even if the load fails. Without this, a failed
+            # quantized load would leave _model_name pointing at the full-model default.
+            if SPLADEConfigurations.use_quantized:
+                self._model_name = SPLADEConfigurations.quantized_model_name
+            else:
+                self._model_name = model_name
+            self._cache_dir = cache_dir
 
-        remote_url = os.getenv("SPLADE_API_URL", "").strip().rstrip("/")
-        if remote_url:
-            self._remote_url: Optional[str] = remote_url
-            self._device = "remote"
-            self._available = True
-            logger.info(f"[SPLADE] Remote API mode — requests forwarded to {remote_url}")
-        else:
-            self._remote_url = None
-            self._device = "cuda" if torch.cuda.is_available() else "cpu"
-            self._load_model()
-            # If the load failed, the model isn't actually on any device. Health
-            # was reporting "device: cuda" while no model existed, which was
-            # misleading — fix it here.
-            if not self._available:
-                self._device = "unavailable"
+            remote_url = os.getenv("SPLADE_API_URL", "").strip().rstrip("/")
+            if remote_url:
+                self._remote_url: Optional[str] = remote_url
+                self._device = "remote"
+                self._available = True
+                logger.info(f"[SPLADE] Remote API mode — requests forwarded to {remote_url}")
+            else:
+                self._remote_url = None
+                self._device = "cuda" if torch.cuda.is_available() else "cpu"
+                self._load_model()
+                # If the load failed, the model isn't actually on any device. Health
+                # was reporting "device: cuda" while no model existed, which was
+                # misleading — fix it here.
+                if not self._available:
+                    self._device = "unavailable"
 
-        self._initialized = True
+            self._initialized = True
 
     @property
     def is_available(self) -> bool:

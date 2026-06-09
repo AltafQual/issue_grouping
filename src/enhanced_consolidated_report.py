@@ -163,6 +163,11 @@ def _load_joblib(qairt_id: str):
         "regression_artifacts",
         f"{qairt_id}_regression_analysis_object.joblib",
     )
+    # Guard against path traversal via qairt_id containing ".." or "/"
+    resolved = os.path.realpath(artifact_path)
+    expected_base = os.path.realpath(CONSOLIDATED_REPORTS_PATH)
+    if not resolved.startswith(expected_base + os.sep):
+        raise ValueError(f"Invalid qairt_id — path escapes reports directory: {qairt_id!r}")
     if not os.path.isfile(artifact_path):
         raise FileNotFoundError(f"Joblib artifact not found: {artifact_path}")
 
@@ -796,9 +801,10 @@ def build_html(qairt_id: str, data: dict, llm: dict, obj: dict) -> str:
         for g in gerrits:
             url = g.get("commit_url", "")
             msg = g.get("commit_message", "")[:80]
-            author = (g.get("gerrit_raised_by") or [{}])[0].get("name", "N/A")
-            reviewers = ", ".join(r.get("name", "") for r in g.get("gerrit_reviewed_by", []))
-            approvers = ", ".join(a.get("name", "") for a in g.get("gerrit_approved_by", []))
+            raised_by = g.get("gerrit_raised_by") or []
+            author = raised_by[0].get("name", "N/A") if raised_by and isinstance(raised_by[0], dict) else "N/A"
+            reviewers = ", ".join(r.get("name", "") for r in g.get("gerrit_reviewed_by", []) if isinstance(r, dict))
+            approvers = ", ".join(a.get("name", "") for a in g.get("gerrit_approved_by", []) if isinstance(a, dict))
             link = f'<a href="{escape(url)}" target="_blank">{escape(msg)}</a>' if url else escape(msg)
             html += f'<tr><td style="font-size:.83em">{link}</td><td style="font-size:.83em">{escape(author)}</td><td style="font-size:.8em;color:var(--muted)">{escape(reviewers)}</td><td style="font-size:.8em;color:var(--muted)">{escape(approvers)}</td></tr>'
         html += "</table></div>"

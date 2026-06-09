@@ -17,9 +17,9 @@ or higher-level packages.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import time
 import traceback
-import concurrent.futures
 from typing import Any, Optional
 
 from langchain_core.callbacks import AsyncCallbackManagerForLLMRun, CallbackManagerForLLMRun
@@ -127,7 +127,7 @@ class CustomQGenieChat(QGenieChat):
                 logger.warning(f"LLM retry {attempt}/{_MAX_RETRIES} after {delay}s")
                 time.sleep(delay)
 
-        return self._create_chat_result({})
+        raise LLMError(f"LLM _generate failed after {_MAX_RETRIES} attempts")
 
     async def _agenerate(
         self,
@@ -170,7 +170,7 @@ class CustomQGenieChat(QGenieChat):
                 logger.warning(f"LLM async retry {attempt}/{_MAX_RETRIES} after {delay}s")
                 await asyncio.sleep(delay)
 
-        return self._create_chat_result({})
+        raise LLMError(f"LLM _agenerate failed after {_MAX_RETRIES} attempts")
 
 
 # ---------------------------------------------------------------------------

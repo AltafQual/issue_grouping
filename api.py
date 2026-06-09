@@ -1,5 +1,7 @@
 import asyncio
+import copy
 import json
+import re
 import threading
 import time
 from contextlib import asynccontextmanager
@@ -8,12 +10,12 @@ from typing import Annotated, Any, Dict
 import pandas as pd
 import psutil
 from cachetools import TTLCache
-from fastapi import BackgroundTasks, FastAPI, Query, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
 from fastapi.responses import ORJSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
 from src.clustering.splade_encoder import SPLADEEncoder
-from src.constants import CONSOLIDATED_REPORTS, NIGHTLY_EXECUTION, DataFrameKeys
+from src.constants import CONSOLIDATED_REPORTS, NIGHTLY_EXECUTION, QGENIE_API_KEY, DataFrameKeys
 from src.custom_clustering import CustomEmbeddingCluster
 from src.data.gerrit_client import get_gerrit_info_between_2_runids, get_regression_gerrits_based_of_type
 from src.data.mysql_client import find_regressions_between_two_tests, get_error_group_id, sql_connection
@@ -130,8 +132,19 @@ class OneClusterInfoResponse(BaseModel):
         return self.dict()
 
 
+_SAFE_TYPE_RE = re.compile(r"^[A-Za-z0-9_\-]+$")
+
+
+def _validate_type(type_: str) -> None:
+    """Raise HTTPException 400 if type_ contains path-traversal or unsafe characters."""
+    if not _SAFE_TYPE_RE.match(type_):
+        raise HTTPException(status_code=400, detail=f"Invalid type parameter: {type_!r}")
+
+
 def consolidated_report_worker():
     logger.info("Starting consolidated report analysis job")
+    _consecutive_failures: dict = {}  # run_id -> failure count
+    _MAX_ITEM_FAILURES = 5
 
     while True:
         try:
@@ -152,8 +165,26 @@ def consolidated_report_worker():
             try:
                 analysis = CombinedRegressionAnalysis(ConsolidatedReportAnalysis())
                 analysis.generate_final_summary_report(run_id)
+                _consecutive_failures.pop(run_id, None)
             except Exception as e:
-                logger.info(f"[Worker] Error processing {run_id}: {e}")
+                _consecutive_failures[run_id] = _consecutive_failures.get(run_id, 0) + 1
+                fail_count = _consecutive_failures[run_id]
+                if fail_count >= _MAX_ITEM_FAILURES:
+                    logger.error(
+                        f"[Worker] run_id={run_id} failed {fail_count} times — moving to dead-letter, skipping: {e}"
+                    )
+                    with LOCK:
+                        with open(CONSOLIDATED_REPORTS.PROCESSING_JSON, "r") as f:
+                            data = json.load(f)
+                        if run_id in data:
+                            data.remove(run_id)
+                        with open(CONSOLIDATED_REPORTS.PROCESSING_JSON, "w") as f:
+                            json.dump(data, f, indent=2)
+                    _consecutive_failures.pop(run_id, None)
+                    time.sleep(10)
+                    continue
+                else:
+                    logger.error(f"[Worker] Error processing {run_id} (attempt {fail_count}/{_MAX_ITEM_FAILURES}): {e}")
 
             with LOCK:
 
@@ -167,13 +198,15 @@ def consolidated_report_worker():
                     json.dump(data, f, indent=2)
 
         except Exception as e:
-            logger.info(f"[Worker] Unexpected error: {e}")
+            logger.error(f"[Worker] Unexpected error: {e}")
 
         time.sleep(10)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    if not QGENIE_API_KEY:
+        logger.warning("QGENIE_API_KEY is not set — LLM cluster naming/classification will fail at runtime")
     _worker_manager = BackgroundWorkerManager()
     _worker_manager.start()
     asyncio.create_task(asyncio.to_thread(tc_id_scheduler))
@@ -229,6 +262,7 @@ async def get_error_cluster_name(
     """
     This API provides the cluster name to which the error belongs to.
     """
+    _validate_type(_type)
     # process query
     error = preprocess_error_log(error)
     error = mask_numbers(error)
@@ -292,7 +326,7 @@ async def get_two_run_ids_cluster_info(cluster_info_object: ClusterInfo) -> Dict
         cluster_info_object.run_id_a,
         cluster_info_object.run_id_b,
     ) in TTL_CACHE and cluster_info_object.force != True:
-        result = TTL_CACHE[(cluster_info_object.run_id_a, cluster_info_object.run_id_b)]
+        result = dict(TTL_CACHE[(cluster_info_object.run_id_a, cluster_info_object.run_id_b)])
         result["time_taken"] = round(time.time() - start_time)
         return result
     try:
@@ -326,7 +360,7 @@ async def get_two_run_ids_cluster_info(cluster_info_object: ClusterInfo) -> Dict
                         response.type[test_type][runtime][cluster_name] = cluster_entries
 
                 _name_col = "name" if "name" in df.columns else ("model_name" if "model_name" in df.columns else None)
-                for model_name, model_df in (df.groupby(_name_col) if _name_col else []):
+                for model_name, model_df in df.groupby(_name_col) if _name_col else []:
                     model_cluster_details = model_df.to_dict(orient="records")
                     if model_name not in response.model:
                         response.model[model_name] = []
@@ -408,7 +442,7 @@ async def get_run_id_cluster_info(cluster_info_object: OneClusterInfo) -> Dict:
     response.run_id = cluster_info_object.run_id
 
     if (cluster_info_object.run_id) in TTL_CACHE and cluster_info_object.force != True:
-        result = TTL_CACHE[cluster_info_object.run_id]
+        result = copy.deepcopy(TTL_CACHE[cluster_info_object.run_id])
         result.time_taken = round(time.time() - start_time)
         return result.to_dict()
 
@@ -442,7 +476,7 @@ async def get_run_id_cluster_info(cluster_info_object: OneClusterInfo) -> Dict:
         DataFrameKeys.cluster_name,
         DataFrameKeys.cluster_class,
     ]
-    column_names_to_rename = { "log": "log_path"}
+    column_names_to_rename = {"log": "log_path"}
 
     try:
         # Run clustering and previous run lookup concurrently
@@ -494,7 +528,7 @@ async def get_run_id_cluster_info(cluster_info_object: OneClusterInfo) -> Dict:
                     response.type[test_type][runtime][cluster_name] = cluster_entries
 
             _name_col = "name" if "name" in df.columns else ("model_name" if "model_name" in df.columns else None)
-            for model_name, model_df in (df.groupby(_name_col) if _name_col else []):
+            for model_name, model_df in df.groupby(_name_col) if _name_col else []:
                 model_cluster_details = model_df.to_dict(orient="records")
                 if model_name not in response.model:
                     response.model[model_name] = []

@@ -21,7 +21,6 @@ Imports from ``src.embeddings.base``, ``src.utils.timer``, ``src.constants``,
 from __future__ import annotations
 
 import asyncio
-import threading
 import time
 
 from langchain.embeddings.base import Embeddings
@@ -168,7 +167,6 @@ class FallbackEmbeddings(Embeddings, EmbeddingProvider):
         self.qgenie_embeddings = QGenieBGEM3Embedding()
         self.timeout = timeout
         self._batch_sem: asyncio.Semaphore | None = None
-        self._batch_sem_lock = threading.Lock()
         super().__init__()
 
     def _try_embed_sub_batch(self, sub_batch: list) -> list:
@@ -367,9 +365,8 @@ class FallbackEmbeddings(Embeddings, EmbeddingProvider):
         batches = [data[i : i + batch_size] for i in range(0, len(data), batch_size)]
 
         if self._batch_sem is None:
-            with self._batch_sem_lock:
-                if self._batch_sem is None:
-                    self._batch_sem = asyncio.Semaphore(EmbeddingConfigurations.MAX_CONCURRENT_BATCHES)
+            # Create inside the running coroutine so it belongs to the correct event loop.
+            self._batch_sem = asyncio.Semaphore(EmbeddingConfigurations.MAX_CONCURRENT_BATCHES)
 
         async def process_batch(batch: list, index: int) -> list:
             async with self._batch_sem:
