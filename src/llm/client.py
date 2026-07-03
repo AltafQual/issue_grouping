@@ -312,7 +312,7 @@ def error_summary_generation(errors_list: list[str]) -> str:
     prompt_template = ChatPromptTemplate.from_messages(
         [("system", prompts.ERROR_SUMMARIZATION_PROMPT), ("human", prompts.ERROR_LOGS_LIST)]
     )
-    model_to_use = QgenieModels.azure_o3_mini
+    model_to_use = QgenieModels.azure_gpt_5_4_mini
     if len(errors_list) >= 10:
         model_to_use = QgenieModels.gemini_2_5_pro
     chain = prompt_template | model_to_use | StrOutputParser()

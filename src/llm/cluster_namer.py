@@ -51,7 +51,7 @@ async def generate_cluster_name(grouped_cluster: pd.DataFrame) -> dict:
     else:
         logs = [logs]
     logs = logs[:5] if len(logs) > 5 else logs
-    chain = prompt_template | QgenieModels.azure_o3_mini | _name_parser
+    chain = prompt_template | QgenieModels.azure_gpt_5_4_mini | _name_parser
     return await chain.ainvoke({"logs": logs})
 
 
